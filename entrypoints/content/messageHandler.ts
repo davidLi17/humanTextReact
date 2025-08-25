@@ -1,4 +1,4 @@
-import { MESSAGE_TYPES, TranslationRequest } from "./constants";
+import { MESSAGE_TYPES, TranslationRequest } from "../shared/constants";
 import { PopupManager } from "./popupManager";
 
 export class MessageHandler {
