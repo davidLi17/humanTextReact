@@ -1,3 +1,5 @@
+import { MARKDOWN_STYLES } from "../../shared/styles/markdown";
+
 export const POPUP_STYLES = /*css*/ `
   .translator-popup {
     position: fixed;
@@ -165,224 +167,6 @@ export const POPUP_STYLES = /*css*/ `
     font-size: 14px;
   }
 
-  /* Markdown 样式 */
-  .translator-popup .markdown-paragraph {
-    margin: 0.8em 0;
-    color: #1a1a1a;
-  }
-
-  .translator-popup .markdown-paragraph:first-child {
-    margin-top: 0;
-  }
-
-  .translator-popup .markdown-paragraph:last-child {
-    margin-bottom: 0;
-  }
-
-  .translator-popup h1,
-  .translator-popup h2,
-  .translator-popup h3,
-  .translator-popup h4,
-  .translator-popup h5,
-  .translator-popup h6 {
-    margin: 1.2em 0 0.6em 0;
-    font-weight: 600;
-    line-height: 1.3;
-    color: #1a1a1a;
-  }
-
-  .translator-popup h1 {
-    font-size: 1.5em;
-  }
-  .translator-popup h2 {
-    font-size: 1.3em;
-  }
-  .translator-popup h3 {
-    font-size: 1.2em;
-  }
-  .translator-popup h4 {
-    font-size: 1.1em;
-  }
-  .translator-popup h5 {
-    font-size: 1em;
-  }
-  .translator-popup h6 {
-    font-size: 0.95em;
-  }
-
-  .translator-popup .code-block {
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    margin: 1em 0;
-    overflow: hidden;
-  }
-
-  .translator-popup .code-block code {
-    display: block;
-    padding: 16px;
-    overflow-x: auto;
-    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
-      "Courier New", monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    color: #2d3748;
-    background: transparent;
-  }
-
-  .translator-popup .inline-code {
-    background: rgba(107, 114, 126, 0.1);
-    color: #d63384;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.9em;
-    font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
-      "Courier New", monospace;
-    font-weight: 500;
-  }
-
-  .translator-popup .markdown-list {
-    margin: 1em 0;
-    padding-left: 0;
-  }
-
-  .translator-popup .list-item {
-    margin: 0.4em 0;
-    padding-left: 1.5em;
-    position: relative;
-  }
-
-  .translator-popup ul.markdown-list .list-item::before {
-    content: "•";
-    position: absolute;
-    left: 0.5em;
-    color: #64748b;
-    font-weight: bold;
-  }
-
-  .translator-popup ol.markdown-list {
-    counter-reset: list-counter;
-  }
-
-  .translator-popup ol.markdown-list .list-item {
-    counter-increment: list-counter;
-  }
-
-  .translator-popup ol.markdown-list .list-item::before {
-    content: counter(list-counter) ".";
-    position: absolute;
-    left: 0;
-    color: #64748b;
-    font-weight: 600;
-    min-width: 1.2em;
-  }
-
-  .translator-popup .list-item.level-1 {
-    padding-left: 2.5em;
-  }
-  .translator-popup .list-item.level-2 {
-    padding-left: 3.5em;
-  }
-  .translator-popup .list-item.level-3 {
-    padding-left: 4.5em;
-  }
-
-  .translator-popup .markdown-quote {
-    margin: 1em 0;
-    padding: 12px 16px;
-    background: linear-gradient(135deg, #fef7cd 0%, #fef3c7 100%);
-    border-left: 4px solid #f59e0b;
-    border-radius: 0 8px 8px 0;
-    font-style: italic;
-    color: #92400e;
-  }
-
-  .translator-popup .markdown-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1em 0;
-    border-radius: 8px;
-    overflow: hidden;
-    border: 1px solid #e2e8f0;
-  }
-
-  .translator-popup .markdown-table th {
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-    padding: 12px;
-    text-align: left;
-    font-weight: 600;
-    color: #1a1a1a;
-    border-bottom: 2px solid #e2e8f0;
-  }
-
-  .translator-popup .markdown-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid #f1f5f9;
-  }
-
-  .translator-popup .markdown-table tr:last-child td {
-    border-bottom: none;
-  }
-
-  .translator-popup .markdown-table tr:nth-child(even) {
-    background: rgba(248, 250, 252, 0.5);
-  }
-
-  .translator-popup .markdown-link {
-    color: #3b82f6;
-    text-decoration: none;
-    border-bottom: 1px solid transparent;
-    transition: all 0.2s ease;
-  }
-
-  .translator-popup .markdown-link:hover {
-    color: #1d4ed8;
-    border-bottom-color: #3b82f6;
-  }
-
-  .translator-popup .markdown-image {
-    max-width: 100%;
-    height: auto;
-    border-radius: 8px;
-    margin: 1em 0;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  }
-
-  .translator-popup .bold {
-    font-weight: 600;
-    color: #1a1a1a;
-  }
-
-  .translator-popup .italic {
-    font-style: italic;
-  }
-
-  .translator-popup .strikethrough {
-    text-decoration: line-through;
-    color: #6b7280;
-  }
-
-  .translator-popup .highlight {
-    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-    padding: 2px 4px;
-    border-radius: 4px;
-    color: #92400e;
-  }
-
-  .translator-popup .markdown-divider {
-    border: none;
-    border-top: 2px solid #e2e8f0;
-    margin: 2em 0;
-    opacity: 0.8;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      #e2e8f0 50%,
-      transparent 100%
-    );
-    height: 1px;
-  }
-
   .translator-popup .translator-loading {
     display: inline-block;
     margin-left: 8px;
@@ -443,6 +227,9 @@ export const POPUP_STYLES = /*css*/ `
     background: rgba(0, 0, 0, 0.3);
   }
 
+  /* 集成共享 Markdown 样式，添加 .translator-popup 前缀 */
+  ${MARKDOWN_STYLES.replace(/(\.[a-zA-Z])/g, ".translator-popup $1")}
+
   /* 暗黑模式支持 */
   @media (prefers-color-scheme: dark) {
     .translator-popup {
@@ -469,43 +256,6 @@ export const POPUP_STYLES = /*css*/ `
       background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
       color: #b0b0b0;
       border-left-color: #666;
-    }
-
-    .translator-popup .code-block {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-      border-color: #444;
-    }
-
-    .translator-popup .code-block code {
-      color: #e5e5e5;
-    }
-
-    .translator-popup .inline-code {
-      background: rgba(255, 255, 255, 0.1);
-      color: #ff6b9d;
-    }
-
-    .translator-popup .markdown-quote {
-      background: linear-gradient(135deg, #2d1b0a 0%, #3d2a0f 100%);
-      color: #d97706;
-    }
-
-    .translator-popup .markdown-table th {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-      color: #e5e5e5;
-      border-bottom-color: #444;
-    }
-
-    .translator-popup .markdown-table {
-      border-color: #444;
-    }
-
-    .translator-popup .markdown-table td {
-      border-bottom-color: #333;
-    }
-
-    .translator-popup .markdown-table tr:nth-child(even) {
-      background: rgba(255, 255, 255, 0.05);
     }
   }
 

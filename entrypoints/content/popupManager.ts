@@ -5,7 +5,7 @@ import {
   TranslationRequest,  // 翻译请求类型
 } from "../shared/constants";  // 从共享常量文件中导入
 import { PopupEventHandler } from "./popupEventHandler";  // 弹窗事件处理器
-import { parseMarkdown } from "./markdown";  // Markdown解析工具
+import { parseMarkdown } from "../../shared/utils/markdown";  // Markdown解析工具
 
 // 弹窗管理类，负责创建、显示、更新和删除翻译弹窗
 export class PopupManager {

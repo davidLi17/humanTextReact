@@ -1,7 +1,6 @@
 import React, { useRef } from "react";
 import { HistoryPanelProps } from "../types";
 import { formatDateTime } from "../utils/helpers";
-import { parseMarkdown } from "../utils/markdown";
 
 const HistoryPanel: React.FC<HistoryPanelProps> = ({
   history,

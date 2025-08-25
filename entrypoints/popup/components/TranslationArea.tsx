@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { TranslationAreaProps } from "../types";
-import { parseMarkdown } from "../utils/markdown";
+import { parseMarkdown } from "../../../shared/utils/markdown";
+import { injectMarkdownStyles } from "../../../shared/styles/markdown";
 
 const TranslationArea: React.FC<TranslationAreaProps> = ({
   translationState,
@@ -14,6 +15,11 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
 }) => {
   const [copyButtonText, setCopyButtonText] = useState("复制");
   const [copyInputButtonText, setCopyInputButtonText] = useState("复制输入");
+
+  // 注入 Markdown 样式
+  useEffect(() => {
+    injectMarkdownStyles("popup-markdown-styles");
+  }, []);
 
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -100,7 +106,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
                 <div className="result-section result-section-reasoning">
                   <div className="result-label">思维链</div>
                   <div
-                    className="result-content"
+                    className="result-content markdown-content"
                     dangerouslySetInnerHTML={{
                       __html: parseMarkdown(translationState.reasoningText),
                     }}
@@ -111,7 +117,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
             <div className="result-section">
               <div className="result-label">译文</div>
               <div
-                className="result-content"
+                className="result-content markdown-content"
                 dangerouslySetInnerHTML={{
                   __html: parseMarkdown(translationState.translatedText),
                 }}

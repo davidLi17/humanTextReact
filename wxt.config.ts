@@ -5,7 +5,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "人话翻译器",
-    version: "1.1.3",
+    version: "1.1.5",
     description: "借助 AI 的力量将专业术语翻译成通俗易懂的人话",
     permissions: ["contextMenus", "storage", "activeTab", "tabs"],
     commands: {

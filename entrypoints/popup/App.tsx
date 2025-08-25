@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import "./App.css";
+import "./App.less";
 import TranslationArea from "./components/TranslationArea";
 import HistoryPanel from "./components/HistoryPanel";
 import { TranslationState, HistoryItem, MessageRequest } from "./types";
