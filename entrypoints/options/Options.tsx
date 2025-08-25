@@ -1,5 +1,8 @@
+import "./Options.less";
 import { useState, useEffect } from "react";
-import "./Options.css";
+import { DEFAULT_SETTINGS } from "../background";
+import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
+import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
 
 interface Settings {
   apiKey: string;
@@ -10,19 +13,17 @@ interface Settings {
 }
 
 function Options() {
-  const [settings, setSettings] = useState<Settings>({
-    apiKey: "",
-    baseUrl: "https://api.deepseek.com/v1/chat/completions",
-    model: "deepseek-reasoner",
-    temperature: 0.7,
-    promptTemplate: "用通俗易懂的中文解释以下内容：\n\n{text}",
-  });
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+
+  const [showApiKey, setShowApiKey] = useState(true);
 
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [shortcut, setShortcut] = useState("");
-  const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [testStatus, setTestStatus] = useState<
+    "idle" | "testing" | "success" | "error"
+  >("idle");
   const [testMessage, setTestMessage] = useState("");
 
   // 加载设置
@@ -112,8 +113,9 @@ function Options() {
       const response = await browser.runtime.sendMessage({
         action: "testApiConnection",
         apiKey: settings.apiKey,
-        baseUrl: settings.baseUrl || "https://api.deepseek.com/v1/chat/completions",
-        model: settings.model || "deepseek-reasoner"
+        baseUrl:
+          settings.baseUrl || "https://api.deepseek.com/v1/chat/completions",
+        model: settings.model || "deepseek-reasoner",
       });
 
       if (response.success) {
@@ -131,13 +133,7 @@ function Options() {
 
   const handleReset = () => {
     if (confirm("确定要重置所有设置为默认值吗？")) {
-      setSettings({
-        apiKey: "",
-        baseUrl: "https://api.deepseek.com/v1/chat/completions",
-        model: "deepseek-reasoner",
-        temperature: 0.7,
-        promptTemplate: "用通俗易懂的中文解释以下内容：\n\n{text}",
-      });
+      setSettings(DEFAULT_SETTINGS);
     }
   };
 
@@ -156,12 +152,35 @@ function Options() {
             <label htmlFor="apiKey">API Key *</label>
             <div className="api-key-input-group">
               <input
-                type="password"
+                type={showApiKey ? "text" : "password"}
                 id="apiKey"
                 value={settings.apiKey}
                 onChange={(e) => handleInputChange("apiKey", e.target.value)}
                 placeholder="请输入你的 API Key"
               />
+              <button
+                type="button"
+                className="toggle-api-key-btn"
+                onClick={() => setShowApiKey(!showApiKey)}
+              >
+                {showApiKey ? (
+                  <PreviewClose
+                    theme="outline"
+                    size="20"
+                    fill="#06A17E"
+                    strokeLinejoin="bevel"
+                    strokeLinecap="square"
+                  />
+                ) : (
+                  <PreviewCloseOne
+                    theme="outline"
+                    size="20"
+                    fill="#06A17E"
+                    strokeLinejoin="bevel"
+                    strokeLinecap="square"
+                  />
+                )}
+              </button>
               <button
                 className="test-api-btn"
                 onClick={testApiKey}
@@ -172,18 +191,22 @@ function Options() {
             </div>
             <div className="setting-hint">
               获取API Key:{" "}
-              <a
-                href="https://platform.deepseek.com/api_keys"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                DeepSeek平台
-              </a>
+              {API_PLATFORM_HINTS.map((platform, index) => (
+                <span key={platform.name}>
+                  <a
+                    className="api-platform-hint"
+                    href={platform.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {platform.name}
+                  </a>
+                  {index < API_PLATFORM_HINTS.length - 1 && ", "}
+                </span>
+              ))}
             </div>
             {testStatus !== "idle" && (
-              <div className={`test-status ${testStatus}`}>
-                {testMessage}
-              </div>
+              <div className={`test-status ${testStatus}`}>{testMessage}</div>
             )}
           </div>
 
@@ -197,13 +220,18 @@ function Options() {
               placeholder="https://api.deepseek.com/v1/chat/completions"
             />
             <div className="setting-hint">
-              支持的API服务: 
-              <span className="api-hint" onClick={() => handleInputChange("baseUrl", "https://api.deepseek.com/v1/chat/completions")}>
-DeepSeek</span>, 
-              <span className="api-hint" onClick={() => handleInputChange("baseUrl", "https://api.openai.com/v1/chat/completions")}>
-OpenAI</span>, 
-              <span className="api-hint" onClick={() => handleInputChange("baseUrl", "")}>
-自定义地址</span>
+              支持的API服务:
+              {API_HINTS.map((api, index) => (
+                <span key={api.name}>
+                  <span
+                    className="api-hint"
+                    onClick={() => handleInputChange("baseUrl", api.url)}
+                  >
+                    {api.name}
+                  </span>
+                  {index < API_HINTS.length - 1 && ", "}
+                </span>
+              ))}
             </div>
           </div>
 
@@ -217,11 +245,21 @@ OpenAI</span>,
               placeholder="请输入模型ID，如：deepseek-reasoner"
             />
             <div className="setting-hint">
-              常用模型ID: 
-              <span className="model-hint" onClick={() => handleInputChange("model", "deepseek-reasoner")}>
-deepseek-reasoner</span>, 
-              <span className="model-hint" onClick={() => handleInputChange("model", "deepseek-chat")}>
-deepseek-chat</span>
+              常用模型ID:
+              <div className="model-hint-container">
+                {MODEL_HINTS.map((hint, index) => (
+                  <span key={hint}>
+                    <span
+                      key={hint}
+                      className="model-hint"
+                      onClick={() => handleInputChange("model", hint)}
+                    >
+                      {hint}
+                    </span>
+                    {index < MODEL_HINTS.length - 1 && ", "}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 

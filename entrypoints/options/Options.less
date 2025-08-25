@@ -1,0 +1,423 @@
+// --- Variables ---
+@primary-color: #4caf50;
+@primary-color-dark: #45a049;
+@secondary-color: #2196f3;
+@secondary-color-dark: #1976d2;
+
+@text-color: #333;
+@text-color-light: #666;
+@border-color: #e0e0e0;
+@border-color-focus: @primary-color;
+@background-color: #f5f7fa;
+@white: #fff;
+@light-gray: #f8f9fa;
+@card-background: #ffffff;
+@section-background: #ffffff;
+
+@error-color: #f44336;
+@warning-color: #ff9800;
+@success-color: @primary-color;
+
+@font-family-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+  Roboto, sans-serif;
+@font-family-mono: monospace;
+
+@border-radius: 8px;
+@border-radius-sm: 6px;
+@transition-speed: 0.3s;
+
+// --- Mixins ---
+.transition(@property: all, @duration: @transition-speed, @ease: ease) {
+  transition: @property @duration @ease;
+}
+
+.box-shadow(@shadow) {
+  box-shadow: @shadow;
+}
+
+// --- Base Styles ---
+body {
+  margin: 0;
+  padding: 0;
+  font-family: @font-family-sans;
+  background-color: @background-color;
+  color: @text-color;
+  width: 800px;
+  height: 90vh;
+}
+
+// --- Layout ---
+.options-container {
+  max-width: 1200px;
+  padding: 0;
+  margin: 0 auto;
+  background: @background-color;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.options-header {
+  background: @card-background;
+  color: @text-color;
+  padding: 30px 20px;
+  text-align: center;
+  margin: 20px;
+  border-radius: @border-radius;
+  .box-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+  border: 1px solid @border-color;
+
+  h1 {
+    margin: 0 0 10px;
+    font-size: 28px;
+    font-weight: 600;
+    color: @primary-color;
+  }
+
+  p {
+    margin: 0;
+    color: @text-color-light;
+    font-size: 16px;
+  }
+}
+
+.options-content {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 20px 20px;
+}
+
+.options-footer {
+  padding: 20px;
+  background: @card-background;
+  margin: 0 20px 20px;
+  border-radius: @border-radius;
+  .box-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+  border: 1px solid @border-color;
+}
+
+// --- Sections ---
+.settings-section {
+  margin-bottom: 20px;
+  padding: 25px;
+  background: @section-background;
+  border-radius: @border-radius;
+  .box-shadow(0 2px 8px rgba(0, 0, 0, 0.1));
+  border: 1px solid @border-color;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  h2 {
+    margin: 0 0 25px;
+    font-size: 20px;
+    font-weight: 600;
+    color: @text-color;
+    display: flex;
+    align-items: center;
+
+    &::before {
+      content: "";
+      display: inline-block;
+      width: 4px;
+      height: 20px;
+      background: @primary-color;
+      margin-right: 12px;
+      border-radius: 2px;
+    }
+  }
+}
+
+// --- Form Elements ---
+.setting-item {
+  margin-bottom: 30px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: @text-color;
+  }
+
+  input[type="text"],
+  input[type="password"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid @border-color;
+    border-radius: @border-radius;
+    font-size: 14px;
+    .transition(border-color);
+    box-sizing: border-box;
+    font-family: inherit;
+    background: @white;
+
+    &:focus {
+      outline: none;
+      border-color: @border-color-focus;
+      .box-shadow(0 0 0 3px rgba(red(@primary-color), green(@primary-color), blue(@primary-color), 0.1));
+    }
+  }
+
+  input[type="range"] {
+    width: 100%;
+    margin: 10px 0;
+    appearance: none;
+    height: 6px;
+    background: @border-color;
+    border-radius: 3px;
+    outline: none;
+
+    &::-webkit-slider-thumb {
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      background: @primary-color;
+      border-radius: 50%;
+      cursor: pointer;
+      .box-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    }
+
+    &::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      background: @primary-color;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      .box-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    }
+  }
+
+  .setting-hint {
+    margin-top: 8px;
+    font-size: 13px;
+    color: @text-color-light;
+    line-height: 1.4;
+    .model-hint-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    a {
+      color: @primary-color;
+      text-decoration: none;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+}
+
+// --- Specific Components ---
+.api-key-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  input {
+    flex-grow: 1;
+  }
+}
+
+.shortcut-display {
+  display: inline-block;
+  background: @white;
+  border: 2px solid @border-color;
+  border-radius: @border-radius;
+  padding: 12px 16px;
+  font-family: @font-family-mono;
+  font-size: 14px;
+  margin-right: 16px;
+  min-width: 120px;
+  text-align: center;
+  .box-shadow(0 1px 3px rgba(0, 0, 0, 0.1));
+}
+
+.model-hint,
+.api-hint {
+  color: @secondary-color;
+  cursor: pointer;
+  text-decoration: underline;
+  margin: 0 4px;
+
+  &:hover {
+    color: @secondary-color-dark;
+  }
+}
+
+// --- Buttons ---
+.button-group {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.shortcut-btn,
+.test-api-btn,
+.reset-btn,
+.save-btn,
+.toggle-api-key-btn {
+  border: none;
+  border-radius: @border-radius;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  .transition();
+}
+
+.shortcut-btn {
+  background: @secondary-color;
+  color: @white;
+  padding: 12px 20px;
+  &:hover {
+    background: @secondary-color-dark;
+  }
+}
+
+.test-api-btn {
+  background: @secondary-color;
+  color: @white;
+  padding: 6px 8px;
+  white-space: nowrap;
+  &:hover:not(:disabled) {
+    background: @secondary-color-dark;
+  }
+  &:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+}
+
+.reset-btn {
+  background: #666;
+  color: @white;
+  padding: 12px 24px;
+  &:hover {
+    background: #555;
+  }
+}
+
+.save-btn {
+  background: @primary-color;
+  color: @white;
+  padding: 12px 32px;
+  min-width: 120px;
+
+  &:hover {
+    background: @primary-color-dark;
+    transform: translateY(-2px);
+    .box-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+  }
+
+  &:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    transform: none;
+    .box-shadow(none);
+  }
+
+  &.saving {
+    background: @warning-color;
+  }
+  &.saved {
+    background: @success-color;
+  }
+  &.error {
+    background: @error-color;
+  }
+}
+
+.toggle-api-key-btn {
+  display: flex;
+  justify-content: center;
+  padding: 5px;
+  padding-top: 12px;
+  border: 1px solid #d1d5db;
+  background-color: @white;
+  color: #374151;
+  border-radius: @border-radius-sm;
+  .box-shadow(0 1px 2px 0 rgba(0, 0, 0, 0.05));
+
+  &:hover {
+    background-color: #f9fafb;
+    border-color: #b0b5bb;
+    .box-shadow(0 1px 3px 0 rgba(0, 0, 0, 0.1));
+  }
+
+  &:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+    .box-shadow(0 0 0 2px rgba(96, 165, 250, 0.5));
+  }
+}
+
+// --- Status Messages ---
+.save-success,
+.save-error,
+.test-status {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.save-success {
+  color: @success-color;
+  text-align: right;
+}
+
+.save-error {
+  color: @error-color;
+  text-align: right;
+}
+
+.test-status {
+  margin-top: 8px;
+  &.testing {
+    color: @warning-color;
+  }
+  &.success {
+    color: @success-color;
+  }
+  &.error {
+    color: @error-color;
+  }
+}
+
+// --- Responsive Design ---
+@media (max-width: 768px) {
+  .options-header {
+    padding: 20px;
+    h1 {
+      font-size: 24px;
+    }
+  }
+
+  .options-content,
+  .options-footer {
+    padding: 20px;
+  }
+
+  .button-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reset-btn,
+  .save-btn {
+    width: 100%;
+    margin-bottom: 8px;
+  }
+
+  .save-success,
+  .save-error {
+    text-align: center;
+  }
+}
