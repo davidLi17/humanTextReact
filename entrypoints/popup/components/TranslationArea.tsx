@@ -63,79 +63,86 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   };
 
   return (
-    <>
-      <h1>人话翻译器</h1>
-
-      <div className="input-area">
-        <textarea
-          value={translationState.sourceText}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          placeholder="请输入要翻译的文本... Enter发送，Shift+Enter换行"
-          rows={5}
-        />
-        <button
-          className="icon-btn input-copy-btn"
-          onClick={handleCopyInput}
-          title="复制输入文本"
-        >
-          {copyInputButtonText}
-        </button>
+    <div className="translation-area">
+      <div className="header-section">
+        <h1>人话翻译器</h1>
+        <div className="header-buttons">
+          <button className="text-btn" onClick={onShowHistory}>
+            历史记录
+          </button>
+          <button className="text-btn" onClick={onOpenSettings}>
+            设置
+          </button>
+        </div>
       </div>
 
-      <button
-        className="primary-btn"
-        onClick={onTranslate}
-        disabled={translationState.isTranslating}
-      >
-        {translationState.isTranslating ? "翻译中..." : "翻译"}
-      </button>
-
-      {translationState.showResult && (
-        <div className="result-area" ref={resultAreaRef} onScroll={onScroll}>
-          <div className="result-header">
-            <span>翻译结果</span>
-            <button className="icon-btn" onClick={handleCopyTranslation}>
-              {copyButtonText}
+      <div className="translation-content">
+        <div className="input-section">
+          <div className="input-area">
+            <textarea
+              value={translationState.sourceText}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              placeholder="请输入要翻译的文本... Enter发送，Shift+Enter换行"
+              rows={5}
+            />
+            <button
+              className="icon-btn input-copy-btn"
+              onClick={handleCopyInput}
+              title="复制输入文本"
+            >
+              {copyInputButtonText}
             </button>
           </div>
 
-          <div className="result-wrapper">
-            {translationState.hasReasoning &&
-              translationState.reasoningText && (
-                <div className="result-section result-section-reasoning">
-                  <div className="result-label">思维链</div>
+          <button
+            className="primary-btn"
+            onClick={onTranslate}
+            disabled={translationState.isTranslating}
+          >
+            {translationState.isTranslating ? "翻译中..." : "翻译"}
+          </button>
+        </div>
+
+        {translationState.showResult && (
+          <div className="result-section-wrapper">
+            <div className="result-area" ref={resultAreaRef}>
+              <div className="result-header">
+                <span>翻译结果</span>
+                <button className="icon-btn" onClick={handleCopyTranslation}>
+                  {copyButtonText}
+                </button>
+              </div>
+
+              <div className="result-wrapper">
+                {translationState.hasReasoning &&
+                  translationState.reasoningText && (
+                    <div className="result-section result-section-reasoning">
+                      <div className="result-label">思维链</div>
+                      <div
+                        className="result-content markdown-content"
+                        dangerouslySetInnerHTML={{
+                          __html: parseMarkdown(translationState.reasoningText),
+                        }}
+                      />
+                    </div>
+                  )}
+
+                <div className="result-section">
+                  <div className="result-label">译文</div>
                   <div
                     className="result-content markdown-content"
                     dangerouslySetInnerHTML={{
-                      __html: parseMarkdown(translationState.reasoningText),
+                      __html: parseMarkdown(translationState.translatedText),
                     }}
                   />
                 </div>
-              )}
-
-            <div className="result-section">
-              <div className="result-label">译文</div>
-              <div
-                className="result-content markdown-content"
-                dangerouslySetInnerHTML={{
-                  __html: parseMarkdown(translationState.translatedText),
-                }}
-              />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      <div className="footer">
-        <button className="text-btn" onClick={onShowHistory}>
-          历史记录
-        </button>
-        <button className="text-btn" onClick={onOpenSettings}>
-          设置
-        </button>
+        )}
       </div>
-    </>
+    </div>
   );
 };
 

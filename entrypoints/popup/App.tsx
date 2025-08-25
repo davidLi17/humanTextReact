@@ -19,6 +19,7 @@ function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const userHasScrolled = useRef(false);
   const resultAreaRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 监听来自background script的消息
   useEffect(() => {
@@ -45,9 +46,8 @@ function App() {
           }));
 
           // 自动滚动到底部（如果用户没有手动滚动）
-          if (!userHasScrolled.current && resultAreaRef.current) {
-            resultAreaRef.current.scrollTop =
-              resultAreaRef.current.scrollHeight;
+          if (!userHasScrolled.current && containerRef.current) {
+            containerRef.current.scrollTop = containerRef.current.scrollHeight;
           }
         }
 
@@ -67,8 +67,8 @@ function App() {
 
   // 处理滚动事件
   const handleScroll = () => {
-    if (resultAreaRef.current) {
-      const { scrollHeight, scrollTop, clientHeight } = resultAreaRef.current;
+    if (containerRef.current) {
+      const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
       const isAtBottom = scrollHeight - scrollTop <= clientHeight + 1;
       userHasScrolled.current = !isAtBottom;
     }
@@ -286,7 +286,7 @@ function App() {
   }, []);
 
   return (
-    <div className="container">
+    <div className="container" ref={containerRef} onScroll={handleScroll}>
       {!showHistory ? (
         <TranslationArea
           translationState={translationState}
@@ -295,7 +295,7 @@ function App() {
           onCopy={copyToClipboard}
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
-          onScroll={handleScroll}
+          onScroll={() => {}}
           resultAreaRef={resultAreaRef}
         />
       ) : (

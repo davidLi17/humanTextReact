@@ -1,5 +1,5 @@
 #root {
-  width: 92%;
+  width: 90%;
 }
 body {
   width: 100%;
@@ -7,20 +7,39 @@ body {
   padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-  min-height: 620px;
+  height: 620px;
 }
 
 .container {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  height: 620px;
   padding: 24px;
   background: #ffffff;
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
-  min-height: 620px;
   min-width: 100%;
   position: relative;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.container::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.container::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 3px;
+}
+
+.container::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
 }
 
 .container::before {
@@ -36,14 +55,50 @@ body {
 
 h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-align: center;
   letter-spacing: -0.5px;
+}
+
+/* 翻译区域布局 */
+.translation-area {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 20px;
+}
+
+.header-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.header-buttons {
+  display: flex;
+  gap: 12px;
+}
+
+.translation-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-height: 0;
+}
+
+.input-section {
+  flex-shrink: 0;
+}
+
+.result-section-wrapper {
+  flex: 1;
+  min-height: 0;
 }
 
 .input-area {
@@ -118,9 +173,11 @@ h1 {
 
 .primary-btn {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  width: 100%;
   color: white;
   border: none;
   padding: 16px 24px;
+  margin-top: 12px;
   border-radius: 12px;
   cursor: pointer;
   font-size: 16px;
@@ -177,29 +234,8 @@ h1 {
   background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
   border-radius: 12px;
   padding: 20px;
-  max-height: 320px;
-  overflow-y: auto;
-  scroll-behavior: smooth;
   border: 1px solid #e2e8f0;
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.result-area::-webkit-scrollbar {
-  width: 6px;
-}
-
-.result-area::-webkit-scrollbar-track {
-  background: transparent;
-  border-radius: 3px;
-}
-
-.result-area::-webkit-scrollbar-thumb {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 3px;
-}
-
-.result-area::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
 }
 
 .result-header {
@@ -351,22 +387,13 @@ h1 {
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.05);
 }
 
-.footer {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 20px;
-  margin-top: 8px;
-}
-
 .text-btn {
   background: rgba(102, 126, 234, 0.05);
   border: 1px solid rgba(102, 126, 234, 0.1);
   color: #667eea;
   cursor: pointer;
-  padding: 10px 16px;
-  font-size: 13px;
+  padding: 8px 12px;
+  font-size: 12px;
   font-weight: 600;
   border-radius: 8px;
   transition: all 0.2s ease;
@@ -502,7 +529,8 @@ h1 {
 .history-panel-content {
   padding: 12px 12px 64px;
   overflow-y: auto;
-  flex-grow: 1;
+  flex: 1;
+  min-height: 0;
 }
 
 .history-panel-content::-webkit-scrollbar {
