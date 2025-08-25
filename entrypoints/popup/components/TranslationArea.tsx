@@ -29,10 +29,12 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
 
   // 处理键盘事件
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      // Ctrl+Enter (Windows) 或 Cmd+Enter (Mac) 发送
       e.preventDefault();
       onTranslate();
     }
+    // Enter 键保持换行功能
   };
 
   // 复制翻译结果
@@ -83,7 +85,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
               value={translationState.sourceText}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="请输入要翻译的文本... Enter发送，Shift+Enter换行"
+              placeholder="请输入要翻译的文本... Ctrl+Enter (Windows) / Cmd+Enter (Mac) 发送，Enter换行"
               rows={5}
             />
             <button
