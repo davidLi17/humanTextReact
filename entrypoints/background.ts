@@ -80,7 +80,8 @@ export default defineBackground(() => {
     baseUrl: "https://api.deepseek.com/v1/chat/completions",
     model: "deepseek-reasoner",
     temperature: 0.7,
-    promptTemplate: "用通俗易懂的中文解释以下内容：\n\n{text}",
+    promptTemplate:
+      "请用通俗易懂的中文解释用户提供的内容。如果是英文，请翻译成中文并解释；如果是中文，请用更简单的语言重新表达。",
     apiKey: "",
   };
 
@@ -141,10 +142,10 @@ export default defineBackground(() => {
     }
   }
 
-  // 翻译文本函数
+  // 翻译文本函数 - 支持流式响应
   async function translateText(text: string, tabId?: number) {
     // 如果存在旧的请求，则中止它
-    if (tabId && activeRequests.has(tabId)) {
+    if (activeRequests.has(tabId)) {
       const oldController = activeRequests.get(tabId);
       oldController.abort();
       activeRequests.delete(tabId);
@@ -152,9 +153,7 @@ export default defineBackground(() => {
 
     // 创建新的 AbortController
     const controller = new AbortController();
-    if (tabId) {
-      activeRequests.set(tabId, controller);
-    }
+    activeRequests.set(tabId, controller);
 
     // 获取设置，优先从云端获取，失败时从本地获取
     const config = await getSettings();
@@ -166,7 +165,6 @@ export default defineBackground(() => {
     // 使用提示词模板
     const promptTemplate =
       config.promptTemplate || defaultSettings.promptTemplate;
-    const prompt = promptTemplate.replace("{text}", text);
 
     try {
       const response = await fetch(config.baseUrl || defaultSettings.baseUrl, {
@@ -178,20 +176,20 @@ export default defineBackground(() => {
         body: JSON.stringify({
           model: config.model || defaultSettings.model,
           messages: [
+            { role: "system", content: promptTemplate },
             {
               role: "user",
-              content: prompt,
+              content: text, // 直接使用原文本
             },
           ],
           temperature: config.temperature || defaultSettings.temperature,
-          stream: false,
+          stream: true,
         }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API 请求失败: ${response.status} ${errorText}`);
+        throw new Error(`API 请求失败: ${response.status}`);
       }
 
       const reader = response.body!.getReader();
@@ -219,32 +217,74 @@ export default defineBackground(() => {
 
             try {
               const parsed = JSON.parse(data);
-              const delta = parsed.choices?.[0]?.delta;
 
-              if (delta?.content) {
-                currentChunk += delta.content;
-                result += delta.content;
-              }
+              // 增强调试，记录实际响应格式
 
-              if (delta?.reasoning) {
-                currentReasoningChunk += delta.reasoning;
-                reasoningContent += delta.reasoning;
+              // 检查delta内容是否存在
+              if (
+                parsed.choices &&
+                parsed.choices.length > 0 &&
+                parsed.choices[0].delta &&
+                parsed.choices[0].delta.content !== undefined
+              ) {
+                const content = parsed.choices[0].delta.content;
+
+                // 处理空内容和表情符号
+                if (content !== null && content !== undefined) {
+                  currentChunk += content;
+                }
+
+                // 添加解析的思维链内容（如果有）
+                const hasReasoning =
+                  parsed.choices[0].delta.reasoning_content !== undefined;
+                if (hasReasoning) {
+                  const reasoning = parsed.choices[0].delta.reasoning_content;
+                  if (reasoning !== null && reasoning !== undefined) {
+                    currentReasoningChunk += reasoning;
+                  }
+                }
               }
             } catch (e) {
-              console.warn("解析SSE数据失败:", e);
+              console.error("解析错误:", e, "原始数据:", line);
             }
           }
         }
 
         if (currentChunk || currentReasoningChunk) {
+          result += currentChunk;
+          reasoningContent += currentReasoningChunk;
           if (tabId) {
+            // 右键菜单翻译使用 safeSendMessage
             await safeSendMessage(tabId, {
               action: MESSAGE_TYPES.UPDATE_TRANSLATION,
               content: result,
+              hasReasoning: reasoningContent.length > 0,
               reasoningContent: reasoningContent,
-              hasReasoning: Boolean(reasoningContent),
               done: false,
             });
+          } else {
+            // popup 翻译直接使用 runtime.sendMessage
+            let popupClosed = false;
+            browser.runtime.sendMessage(
+              {
+                action: MESSAGE_TYPES.UPDATE_TRANSLATION,
+                content: result,
+                hasReasoning: reasoningContent.length > 0,
+                reasoningContent: reasoningContent,
+                done: false,
+              },
+              () => {
+                if (browser.runtime.lastError) {
+                  popupClosed = true;
+                }
+              }
+            );
+
+            // 如果 popup 已关闭，中止翻译
+            if (popupClosed) {
+              controller.abort();
+              return;
+            }
           }
         }
       }
@@ -254,30 +294,48 @@ export default defineBackground(() => {
         await safeSendMessage(tabId, {
           action: MESSAGE_TYPES.UPDATE_TRANSLATION,
           content: result,
+          hasReasoning: reasoningContent.length > 0,
           reasoningContent: reasoningContent,
-          hasReasoning: Boolean(reasoningContent),
           done: true,
         });
+      } else {
+        // popup 翻译的完成信号
+        browser.runtime.sendMessage(
+          {
+            action: MESSAGE_TYPES.UPDATE_TRANSLATION,
+            content: result,
+            hasReasoning: reasoningContent.length > 0,
+            reasoningContent: reasoningContent,
+            done: true,
+          },
+          () => {
+            if (browser.runtime.lastError) {
+              console.log("popup 已关闭");
+            }
+          }
+        );
       }
 
       // 在成功翻译完成后，保存翻译历史
       if (result) {
-        await saveTranslationHistory(text, result, reasoningContent);
+        try {
+          await saveTranslationHistory(text, result, reasoningContent);
+        } catch (error) {
+          console.error("保存翻译历史失败:", error);
+        }
       }
 
       // 清理已完成的请求
-      if (tabId) {
-        activeRequests.delete(tabId);
-      }
+      activeRequests.delete(tabId);
       return result;
     } catch (error: any) {
       // 区分错误类型
       if (error.name === "AbortError") {
-        console.log("翻译请求被中止");
+        console.log("翻译请求已中止");
         return;
       }
       if (error.message.includes("Receiving end does not exist")) {
-        console.log("popup 已关闭，忽略此错误");
+        console.log("连接已断开，可能是页面已关闭");
         return;
       }
       // 只有真正需要用户知道的错误才抛出
@@ -354,6 +412,12 @@ export default defineBackground(() => {
       try {
         const selectedText = info.selectionText;
         if (selectedText) {
+          // 先显示弹框
+          await safeSendMessage(tab.id, {
+            action: MESSAGE_TYPES.SHOW_TRANSLATION_POPUP,
+            text: selectedText,
+          });
+          // 然后开始翻译
           await translateText(selectedText, tab.id);
         }
       } catch (error: any) {
@@ -397,6 +461,12 @@ export default defineBackground(() => {
           sendResponse({ success: false, error: error.message });
         });
       return true;
+    }
+
+    if (request.action === MESSAGE_TYPES.SHOW_TRANSLATION_POPUP) {
+      // 这个消息类型现在主要用于右键菜单
+      sendResponse({ success: true });
+      return false;
     }
 
     if (request.action === MESSAGE_TYPES.CLEANUP) {
@@ -520,7 +590,11 @@ export default defineBackground(() => {
   }
 
   // API连接测试函数
-  async function testApiConnection(apiKey: string, baseUrl: string, model: string): Promise<boolean> {
+  async function testApiConnection(
+    apiKey: string,
+    baseUrl: string,
+    model: string
+  ): Promise<boolean> {
     if (!apiKey) {
       throw new Error("API Key不能为空");
     }
@@ -531,19 +605,19 @@ export default defineBackground(() => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
+          Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
           model: model,
           messages: [
             {
               role: "user",
-              content: "test"
-            }
+              content: "test",
+            },
           ],
           temperature: 0.1,
-          max_tokens: 5
-        })
+          max_tokens: 5,
+        }),
       });
 
       if (!response.ok) {
@@ -597,6 +671,7 @@ export default defineBackground(() => {
   // 快捷键翻译功能执行函数
   async function executeTranslation() {
     try {
+      console.log("快捷键翻译被触发");
       const tabs = await browser.tabs.query({
         active: true,
         currentWindow: true,
@@ -604,6 +679,7 @@ export default defineBackground(() => {
       const tab = tabs[0];
 
       if (tab?.id) {
+        console.log("向content script发送获取选中文本的消息");
         // 向content script发送获取选中文本的消息
         await browser.tabs.sendMessage(tab.id, { action: "getSelectedText" });
       }
