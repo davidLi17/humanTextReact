@@ -23,7 +23,6 @@ export interface TranslationAreaProps {
   onShowHistory: () => void;
   onOpenSettings: () => void;
   onScroll: () => void;
-  resultAreaRef: React.RefObject<HTMLDivElement | null>;
 }
 
 export interface HistoryPanelProps {

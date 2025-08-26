@@ -1,54 +1,18 @@
+import debounce from "lodash-es/debounce";
+import throttle from "lodash-es/throttle";
+import dayjs from "dayjs";
+
 /**
  * 格式化日期时间
  * @param timestamp - 时间戳或日期对象
  * @returns 格式化后的日期字符串
  */
 export function formatDateTime(timestamp: number | Date): string {
-  const date = new Date(timestamp);
-  return `${date.getFullYear()}-${(date.getMonth() + 1)
-    .toString()
-    .padStart(2, "0")}-${date.getDate().toString().padStart(2, "0")} ${date
-    .getHours()
-    .toString()
-    .padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+  return dayjs(timestamp).format("YYYY-MM-DD HH:mm");
 }
 
-/**
- * 防抖函数
- * @param func - 要执行的函数
- * @param wait - 等待时间(ms)
- * @returns 防抖后的函数
- */
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout;
-  return function (this: any, ...args: Parameters<T>) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
-}
-
-/**
- * 节流函数
- * @param func - 要执行的函数
- * @param wait - 等待时间(ms)
- * @returns 节流后的函数
- */
-export function throttle<T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let inThrottle: boolean;
-  return function (this: any, ...args: Parameters<T>) {
-    if (!inThrottle) {
-      func.apply(this, args);
-      inThrottle = true;
-      setTimeout(() => (inThrottle = false), wait);
-    }
-  };
-}
+// 导出 lodash-es 的 debounce 和 throttle 函数
+export { debounce, throttle };
 
 /**
  * 复制文本到剪贴板
