@@ -15,7 +15,7 @@ interface Settings {
 function Options() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 
-  const [showApiKey, setShowApiKey] = useState(true);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
 import "./App.less";
+import { useState, useEffect } from "react";
 import TranslationArea from "./components/TranslationArea";
 import HistoryPanel from "./components/HistoryPanel";
 import { TranslationState, HistoryItem, MessageRequest } from "./types";
@@ -17,9 +17,6 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const userHasScrolled = useRef(false);
-  const resultAreaRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // 监听来自background script的消息
   useEffect(() => {
@@ -44,11 +41,6 @@ function App() {
             showResult: true,
             isTranslating: !request.done,
           }));
-
-          // 自动滚动到底部（如果用户没有手动滚动）
-          if (!userHasScrolled.current && containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-          }
         }
 
         sendResponse({ success: true });
@@ -65,14 +57,8 @@ function App() {
     }
   }, []);
 
-  // 处理滚动事件
-  const handleScroll = () => {
-    if (containerRef.current) {
-      const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
-      const isAtBottom = scrollHeight - scrollTop <= clientHeight + 1;
-      userHasScrolled.current = !isAtBottom;
-    }
-  };
+  // 处理滚动事件（空函数，现在滚动在TranslationArea内部处理）
+  const handleScroll = () => {};
 
   // 发送翻译请求
   const handleTranslate = async () => {
@@ -92,7 +78,7 @@ function App() {
       hasReasoning: false,
     }));
 
-    userHasScrolled.current = false;
+    // 不再需要用户滚动状态的跟踪
 
     try {
       // 先发送清理请求
@@ -286,7 +272,7 @@ function App() {
   }, []);
 
   return (
-    <div className="container" ref={containerRef} onScroll={handleScroll}>
+    <div className="container" onScroll={handleScroll}>
       {!showHistory ? (
         <TranslationArea
           translationState={translationState}
@@ -296,7 +282,6 @@ function App() {
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
           onScroll={() => {}}
-          resultAreaRef={resultAreaRef}
         />
       ) : (
         <HistoryPanel
