@@ -77,6 +77,8 @@ function Options() {
   };
 
   const handleSave = async () => {
+    if (saveStatus === "saving") return; // 防止重复提交
+
     setSaveStatus("saving");
 
     try {
@@ -105,6 +107,8 @@ function Options() {
 
   // 测试API密钥连接
   const testApiKey = async () => {
+    if (testStatus === "testing") return; // 防止重复提交
+
     setTestStatus("testing");
     setTestMessage("正在测试API连接...");
 
@@ -129,6 +133,12 @@ function Options() {
       setTestStatus("error");
       setTestMessage(`❌ 测试失败: ${error.message || "未知错误"}`);
     }
+
+    // 3秒后自动重置状态
+    setTimeout(() => {
+      setTestStatus("idle");
+      setTestMessage("");
+    }, 3000);
   };
 
   const handleReset = () => {
@@ -184,9 +194,9 @@ function Options() {
               <button
                 className="test-api-btn"
                 onClick={testApiKey}
-                disabled={!settings.apiKey.trim()}
+                disabled={!settings.apiKey.trim() || testStatus === "testing"}
               >
-                测试连接
+                {testStatus === "testing" ? "测试中..." : "测试连接"}
               </button>
             </div>
             <div className="setting-hint">

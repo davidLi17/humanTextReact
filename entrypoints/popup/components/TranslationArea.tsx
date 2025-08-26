@@ -105,7 +105,10 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       // Ctrl+Enter (Windows) 或 Cmd+Enter (Mac) 发送
       e.preventDefault();
-      onTranslate();
+      // 防止在翻译进行中重复触发
+      if (!translationState.isTranslating) {
+        onTranslate();
+      }
     }
     // Enter 键保持换行功能
   };

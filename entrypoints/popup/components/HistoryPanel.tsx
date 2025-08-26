@@ -1,6 +1,6 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import { HistoryPanelProps } from "../types";
-import { formatDateTime } from "../utils/helpers";
+import { formatDateTime, debounce } from "../utils/helpers";
 
 const HistoryPanel: React.FC<HistoryPanelProps> = ({
   history,
@@ -14,6 +14,42 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
   onImport,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isClearing, setIsClearing] = useState(false);
+
+  // 防抖搜索
+  const debouncedSearch = useCallback(
+    debounce((value: string) => {
+      onSearchChange(value);
+    }, 300),
+    [onSearchChange]
+  );
+
+  const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    debouncedSearch(e.target.value);
+  };
+
+  // 确认清除所有历史记录
+  const handleClearConfirm = async () => {
+    if (isClearing) return;
+
+    if (confirm("确定要清除所有历史记录吗？此操作不可撤销。")) {
+      setIsClearing(true);
+      try {
+        await onClear();
+      } finally {
+        setIsClearing(false);
+      }
+    }
+  };
+
+  // 确认删除单个历史记录
+  const handleDeleteConfirm = async (original: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // 防止触发父元素的点击事件
+
+    if (confirm("确定要删除这条历史记录吗？")) {
+      await onDelete(original);
+    }
+  };
 
   // 过滤历史记录
   const filteredHistory =
@@ -68,10 +104,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
             </button>
             <button
               className="history-action-btn history-delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(item.original);
-              }}
+              onClick={(e) => handleDeleteConfirm(item.original, e)}
             >
               删除
             </button>
@@ -129,8 +162,8 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
             type="text"
             className="history-search"
             placeholder="搜索历史记录..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
+            defaultValue={searchTerm}
+            onChange={handleSearchInput}
           />
         </div>
       </div>
@@ -149,7 +182,11 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
       </div>
 
       <div className="history-panel-footer">
-        <button className="footer-btn" onClick={onClear}>
+        <button
+          className="footer-btn"
+          onClick={handleClearConfirm}
+          disabled={isClearing}
+        >
           <div className="footer-btn-icon">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -166,7 +203,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
           </div>
-          <span>清空</span>
+          <span>{isClearing ? "清空中..." : "清空"}</span>
         </button>
 
         <button className="footer-btn" onClick={onExport}>

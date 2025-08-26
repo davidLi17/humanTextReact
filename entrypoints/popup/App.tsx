@@ -69,6 +69,11 @@ function App() {
       return;
     }
 
+    // 防止在翻译进行中重复触发
+    if (translationState.isTranslating) {
+      return;
+    }
+
     setTranslationState((prev: TranslationState) => ({
       ...prev,
       isTranslating: true,
