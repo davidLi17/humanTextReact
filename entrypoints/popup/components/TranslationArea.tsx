@@ -4,6 +4,7 @@ import { TranslationAreaProps } from "../types";
 import { parseMarkdown } from "../../../shared/utils/markdown";
 import { injectMarkdownStyles } from "../../../shared/styles/markdown";
 import CopyFooter from "./CopyFooter";
+import SmartInput from "./SmartInput";
 
 const TranslationArea: React.FC<TranslationAreaProps> = ({
   translationState,
@@ -12,6 +13,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onCopy,
   onShowHistory,
   onOpenSettings,
+  history, // 添加 history 属性
 }) => {
   const userHasScrolledRef = useRef(false);
   const resultSectionWrapperRef = useRef<HTMLDivElement>(null);
@@ -94,12 +96,6 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
     };
   }, []);
 
-  // 处理输入变化
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    setTranslationState((prev) => ({ ...prev, sourceText: text }));
-  };
-
   // 处理键盘事件
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -146,12 +142,16 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
       <div className="translation-content">
         <div className="input-section">
           <div className="input-area">
-            <textarea
+            <SmartInput
               value={translationState.sourceText}
-              onChange={handleInputChange}
+              onChange={(text) =>
+                setTranslationState((prev) => ({ ...prev, sourceText: text }))
+              }
               onKeyDown={handleKeyDown}
               placeholder="请输入要翻译的文本... Ctrl+Enter (Windows) / Cmd+Enter (Mac) 发送，Enter换行"
-              rows={5}
+              rows={3}
+              history={history}
+              disabled={translationState.isTranslating}
             />
           </div>
 

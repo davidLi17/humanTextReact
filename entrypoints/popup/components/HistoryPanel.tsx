@@ -1,6 +1,7 @@
 import React, { useRef, useState, useCallback } from "react";
 import { HistoryPanelProps } from "../types";
 import { formatDateTime, debounce } from "../utils/helpers";
+import { useHistorySearch } from "../hooks/useFuseSearch";
 
 const HistoryPanel: React.FC<HistoryPanelProps> = ({
   history,
@@ -16,12 +17,18 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isClearing, setIsClearing] = useState(false);
 
+  // 使用 fuse.js 进行智能搜索
+  const { search, results } = useHistorySearch(history);
+
   // 防抖搜索
   const debouncedSearch = useCallback(
     debounce((value: string) => {
       onSearchChange(value);
+      if (value.trim()) {
+        search(value);
+      }
     }, 300),
-    [onSearchChange]
+    [onSearchChange, search]
   );
 
   const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -51,15 +58,9 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
     }
   };
 
-  // 过滤历史记录
+  // 过滤历史记录 - 使用 fuse.js 的搜索结果
   const filteredHistory =
-    searchTerm.trim() === ""
-      ? history
-      : history.filter(
-          (item) =>
-            item.original.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.translated.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+    searchTerm.trim() === "" ? history : results.map((result) => result.item);
 
   // 处理文件导入
   const handleImportClick = () => {

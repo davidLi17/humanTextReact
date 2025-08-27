@@ -57,6 +57,11 @@ function App() {
     }
   }, []);
 
+  // 组件初始化时加载历史记录，用于智能补全
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
   // 处理滚动事件（空函数，现在滚动在TranslationArea内部处理）
   const handleScroll = () => {};
 
@@ -287,6 +292,7 @@ function App() {
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
           onScroll={() => {}}
+          history={history}
         />
       ) : (
         <HistoryPanel
