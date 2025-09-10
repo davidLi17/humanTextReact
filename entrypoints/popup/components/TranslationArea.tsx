@@ -5,6 +5,7 @@ import { parseMarkdown } from "../../../shared/utils/markdown";
 import { injectMarkdownStyles } from "../../../shared/styles/markdown";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
+import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 
 const TranslationArea: React.FC<TranslationAreaProps> = ({
   translationState,
@@ -180,15 +181,10 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
               <div className="result-wrapper">
                 {translationState.hasReasoning &&
                   translationState.reasoningText && (
-                    <div className="result-section result-section-reasoning">
-                      <div className="result-label">思维链</div>
-                      <div
-                        className="result-content markdown-content"
-                        dangerouslySetInnerHTML={{
-                          __html: parseMarkdown(translationState.reasoningText),
-                        }}
-                      />
-                    </div>
+                    <CollapsibleThinkingChain
+                      reasoningText={translationState.reasoningText}
+                      isTranslating={translationState.isTranslating}
+                    />
                   )}
 
                 <div className="result-section">
