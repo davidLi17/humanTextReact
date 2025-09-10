@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback, useState } from "react";
 import throttle from "lodash-es/throttle";
 import { TranslationAreaProps } from "../types";
 import { parseMarkdown } from "../../../shared/utils/markdown";
@@ -6,6 +6,7 @@ import { injectMarkdownStyles } from "../../../shared/styles/markdown";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
 import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
+import { ImageUtils } from "../utils/imageUtils";
 
 const TranslationArea: React.FC<TranslationAreaProps> = ({
   translationState,
@@ -126,11 +127,87 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
     return success;
   };
 
+  // 处理思考模式切换
+  const handleThinkingToggle = () => {
+    setTranslationState((prev) => ({
+      ...prev,
+      thinkingEnabled: !prev.thinkingEnabled,
+    }));
+    // 保存到本地存储
+    localStorage.setItem(
+      "thinkingEnabled",
+      (!translationState.thinkingEnabled).toString()
+    );
+  };
+
+  // 初始化思考模式设置
+  useEffect(() => {
+    const savedThinking = localStorage.getItem("thinkingEnabled");
+    if (savedThinking !== null) {
+      setTranslationState((prev) => ({
+        ...prev,
+        thinkingEnabled: savedThinking === "true",
+      }));
+    }
+  }, [setTranslationState]);
+
+  // 处理剪贴板粘贴
+  const handlePaste = async (e: ClipboardEvent) => {
+    try {
+      const imageContent = await ImageUtils.getImageFromClipboard();
+      if (imageContent) {
+        setTranslationState((prev) => ({
+          ...prev,
+          images: [...prev.images, imageContent],
+        }));
+      }
+    } catch (error) {
+      console.error("粘贴图片失败:", error);
+      alert("粘贴图片失败: " + (error as Error).message);
+    }
+  };
+
+  // 删除图片
+  const handleRemoveImage = (index: number) => {
+    setTranslationState((prev) => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index),
+    }));
+  };
+
+  // 监听粘贴事件
+  useEffect(() => {
+    const handleDocumentPaste = (e: ClipboardEvent) => {
+      // 只在焦点在翻译区域时处理
+      if (document.activeElement?.closest(".translation-area")) {
+        handlePaste(e);
+      }
+    };
+
+    document.addEventListener("paste", handleDocumentPaste);
+    return () => {
+      document.removeEventListener("paste", handleDocumentPaste);
+    };
+  }, []);
+
   return (
     <div className="translation-area">
       <div className="header-section">
         <h1>人话翻译器</h1>
         <div className="header-buttons">
+          <button
+            className={`thinking-toggle-btn ${
+              translationState.thinkingEnabled ? "enabled" : "disabled"
+            }`}
+            onClick={handleThinkingToggle}
+            title={
+              translationState.thinkingEnabled
+                ? "点击关闭深度思考"
+                : "点击开启深度思考"
+            }
+          >
+            🧠 {translationState.thinkingEnabled ? "深度思考" : "快速回复"}
+          </button>
           <button className="text-btn" onClick={onShowHistory}>
             历史记录
           </button>
@@ -139,6 +216,30 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 图片预览区域 */}
+      {translationState.images.length > 0 && (
+        <div className="image-preview-section">
+          <div className="image-preview-header">
+            <span>已选择的图片 ({translationState.images.length})</span>
+            <span className="image-hint">💡 支持 Ctrl+V 粘贴剪贴板图片</span>
+          </div>
+          <div className="image-preview-list">
+            {translationState.images.map((image, index) => (
+              <div key={index} className="image-preview-item">
+                <img src={image.data} alt={`预览图 ${index + 1}`} />
+                <button
+                  className="remove-image-btn"
+                  onClick={() => handleRemoveImage(index)}
+                  title="删除图片"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="translation-content">
         <div className="input-section">
@@ -149,7 +250,11 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
                 setTranslationState((prev) => ({ ...prev, sourceText: text }))
               }
               onKeyDown={handleKeyDown}
-              placeholder="请输入要翻译的文本... Ctrl+Enter (Windows) / Cmd+Enter (Mac) 发送，Enter换行"
+              placeholder={`请输入要翻译的文本... ${
+                translationState.images.length > 0
+                  ? "(已选择" + translationState.images.length + "张图片) "
+                  : ""
+              }Ctrl+V可粘贴图片，Ctrl+Enter发送`}
               rows={3}
               history={history}
               disabled={translationState.isTranslating}

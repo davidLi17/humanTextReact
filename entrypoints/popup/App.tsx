@@ -12,6 +12,8 @@ function App() {
     isTranslating: false,
     hasReasoning: false,
     showResult: false,
+    thinkingEnabled: true, // 默认启用思考模式
+    images: [], // 初始化图片数组
   });
 
   const [showHistory, setShowHistory] = useState(false);
@@ -99,6 +101,8 @@ function App() {
         await browser.runtime.sendMessage({
           action: "translate",
           text,
+          images: translationState.images,
+          thinkingEnabled: translationState.thinkingEnabled,
           source: "popup",
         });
       }
@@ -149,14 +153,15 @@ function App() {
 
   // 恢复历史记录项
   const restoreHistoryItem = (item: HistoryItem) => {
-    setTranslationState({
+    setTranslationState((prev) => ({
+      ...prev,
       sourceText: item.original,
       translatedText: item.translated,
       reasoningText: item.reasoning || "",
       hasReasoning: item.hasReasoning || false,
       isTranslating: false,
       showResult: true,
-    });
+    }));
     hideHistoryPanel();
   };
 

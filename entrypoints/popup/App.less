@@ -307,6 +307,15 @@ h1 {
   border: 1px solid @border-color;
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.06);
   min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
 }
 .result-header {
   display: flex;
@@ -381,14 +390,15 @@ h1 {
   li { margin: 0.3em 0; }
 }
 .result-section {
-  margin-bottom: 20px;
+  margin: 0;
   padding: 16px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: @blur-effect;
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  &:last-child { margin-bottom: 0; }
+  order: 2; // 确保译文区域在思维链之后显示
+  flex: 1;
 }
 .result-label {
   font-size: 12px;
@@ -823,7 +833,9 @@ h1 {
 // Collapsible Thinking Chain Styles
 .collapsible-thinking-chain {
   position: relative;
-  margin-bottom: 20px;
+  margin: 0;
+  order: 1; // 确保思维链在译文之前显示
+  flex-shrink: 0;
 }
 
 .thinking-chain-container {
@@ -831,22 +843,9 @@ h1 {
   overflow: hidden;
   
   &.collapsed {
-    max-height: 150px;
+    max-height: 100px;
     cursor: pointer;
     position: relative;
-    
-    // 渐变遮罩效果
-    &::after {
-      content: "";
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 40px;
-      background: linear-gradient(transparent, rgba(255, 255, 255, 0.9));
-      pointer-events: none;
-      transition: opacity 0.3s ease;
-    }
     
     &:hover::after {
       opacity: 0.8;
@@ -865,13 +864,14 @@ h1 {
 
 .thinking-chain-content {
   padding: 16px;
-  background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+  background: linear-gradient(135deg, #fff8e7 0%, #fef3d9 100%);
   border-radius: @radius-small;
-  border-left: 4px solid @primary-color-start;
+  border-left: 4px solid #f59e0b;
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.05);
   line-height: 1.6;
   font-size: 14px;
-  color: #4a5568;
+  color: #92400e;
+  margin-bottom: 8px;
 }
 
 .expand-indicator {
@@ -931,5 +931,110 @@ h1 {
   40% { 
     transform: scale(1);
     opacity: 1;
+  }
+}
+
+// 思考模式切换按钮
+.thinking-toggle-btn {
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border: 1px solid #d1d5db;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: @radius-small;
+  transition: all 0.2s ease;
+  
+  &.enabled {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border-color: #f59e0b;
+    color: #92400e;
+    
+    &:hover {
+      background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+    }
+  }
+  
+  &.disabled {
+    &:hover {
+      background: linear-gradient(135deg, #e5e7eb 0%, #d1d5db 100%);
+      border-color: #9ca3af;
+      color: #4b5563;
+    }
+  }
+}
+
+// 图片预览区域
+.image-preview-section {
+  padding: 4px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-radius: @radius-medium;
+  border: 1px solid #bae6fd;
+}
+
+.image-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  
+  span:first-child {
+    font-size: 14px;
+    font-weight: 600;
+    color: #0284c7;
+  }
+  
+  .image-hint {
+    font-size: 12px;
+    color: #64748b;
+  }
+}
+
+.image-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.image-preview-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: @radius-small;
+  overflow: hidden;
+  border: 2px solid #bae6fd;
+  background: white;
+  
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  .remove-image-btn {
+    position: absolute;
+    top: 0px;
+    right: 0%;
+    width: 10px;
+    height: 10px;
+    border-radius: 10%;
+    background: #ef4444;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    
+    &:hover {
+      background: #dc2626;
+      transform: scale(1.2);
+    }
   }
 }

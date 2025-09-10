@@ -38,7 +38,19 @@ export class MessageHandler {
 
     if (request.action === MESSAGE_TYPES.TRANSLATE) {
       const tabId = sender.tab?.id;
-      TranslationService.translateText(request.text, tabId)
+
+      // 构建翻译参数，支持新的多模态格式
+      const translationParams = {
+        text: request.text,
+        images: request.images || [],
+        thinkingEnabled:
+          request.thinkingEnabled !== undefined
+            ? request.thinkingEnabled
+            : true,
+        tabId,
+      };
+
+      TranslationService.translateText(translationParams)
         .then((result) => {
           sendResponse({ success: true, result });
         })

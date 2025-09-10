@@ -62,6 +62,8 @@ const SmartInput: React.FC<SmartInputProps> = ({
 
   // 更新建议列表
   const updateSuggestions = useCallback(() => {
+    if (!textareaRef.current) return;
+
     const { word } = getCurrentWord();
 
     if (word.length >= 2) {
@@ -79,7 +81,7 @@ const SmartInput: React.FC<SmartInputProps> = ({
       setShowSuggestions(false);
       setSuggestions([]);
     }
-  }, [getAutoComplete, getSuggestions, getCurrentWord]);
+  }, []); // 移除所有依赖，在内部直接调用函数
 
   // 应用建议
   const applySuggestion = useCallback(
@@ -160,11 +162,27 @@ const SmartInput: React.FC<SmartInputProps> = ({
   // 监听输入变化，更新建议
   useEffect(() => {
     if (value) {
-      updateSuggestions();
+      const { word } = getCurrentWord();
+
+      if (word.length >= 2) {
+        const autoComplete = getAutoComplete(word);
+        const searchSuggestions = getSuggestions(word, 3);
+
+        // 合并并去重建议
+        const allSuggestions = Array.from(
+          new Set([...autoComplete, ...searchSuggestions])
+        );
+        setSuggestions(allSuggestions.slice(0, 8));
+        setShowSuggestions(allSuggestions.length > 0);
+        setSelectedSuggestionIndex(-1);
+      } else {
+        setShowSuggestions(false);
+        setSuggestions([]);
+      }
     } else {
       setShowSuggestions(false);
     }
-  }, [value, updateSuggestions]);
+  }, [value]); // 只依赖 value
 
   // 点击外部关闭建议
   useEffect(() => {

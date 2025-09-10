@@ -1,8 +1,31 @@
-import { MESSAGE_TYPES, DEFAULT_SETTINGS } from "../shared/constants";
+import {
+  MESSAGE_TYPES,
+  DEFAULT_SETTINGS,
+  THINKING_CONFIG,
+} from "../shared/constants";
 import { SettingsManager } from "./settingsManager";
 import { RequestManager } from "./requestManager";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
+
+/**
+ * 图片内容接口
+ */
+interface ImageContent {
+  data: string;
+  mimeType: string;
+  fileName?: string;
+}
+
+/**
+ * 翻译参数接口
+ */
+interface TranslationParams {
+  text: string;
+  images?: ImageContent[];
+  thinkingEnabled?: boolean;
+  tabId?: number;
+}
 
 /**
  * 翻译服务
@@ -10,13 +33,20 @@ import { MessageUtils } from "./messageUtils";
  */
 export class TranslationService {
   /**
-   * 翻译文本函数 - 支持流式响应
+   * 翻译文本函数 - 支持流式响应和多模态
    */
   static async translateText(
-    text: string,
+    params: TranslationParams | string,
     tabId?: number
   ): Promise<string | void> {
-    const controller = RequestManager.createRequest(tabId);
+    // 兼容旧的API调用方式
+    const translationParams: TranslationParams =
+      typeof params === "string" ? { text: params, tabId } : params;
+
+    const { text, images = [], thinkingEnabled = true } = translationParams;
+    const actualTabId = translationParams.tabId || tabId;
+
+    const controller = RequestManager.createRequest(actualTabId);
 
     // 获取设置，优先从云端获取，失败时从本地获取
     const config = await SettingsManager.getSettings();
@@ -29,6 +59,48 @@ export class TranslationService {
     const promptTemplate =
       config.promptTemplate || DEFAULT_SETTINGS.promptTemplate;
 
+    // 构建消息内容
+    const userContent: any[] = [];
+
+    // 添加图片内容
+    if (images.length > 0) {
+      images.forEach((image) => {
+        userContent.push({
+          type: "image_url",
+          image_url: {
+            url: image.data,
+          },
+        });
+      });
+    }
+
+    // 添加文本内容
+    userContent.push({
+      type: "text",
+      text: text,
+    });
+
+    // 构建API请求体
+    const requestBody: any = {
+      model: config.model || DEFAULT_SETTINGS.model,
+      messages: [
+        { role: "system", content: promptTemplate },
+        {
+          role: "user",
+          content: userContent.length === 1 ? text : userContent,
+        },
+      ],
+      temperature: config.temperature || DEFAULT_SETTINGS.temperature,
+      stream: true,
+    };
+
+    // 添加thinking参数
+    if (thinkingEnabled) {
+      requestBody.thinking = THINKING_CONFIG.ENABLED;
+    } else {
+      requestBody.thinking = THINKING_CONFIG.DISABLED;
+    }
+
     try {
       const response = await fetch(config.baseUrl || DEFAULT_SETTINGS.baseUrl, {
         method: "POST",
@@ -36,18 +108,7 @@ export class TranslationService {
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.apiKey}`,
         },
-        body: JSON.stringify({
-          model: config.model || DEFAULT_SETTINGS.model,
-          messages: [
-            { role: "system", content: promptTemplate },
-            {
-              role: "user",
-              content: text, // 直接使用原文本
-            },
-          ],
-          temperature: config.temperature || DEFAULT_SETTINGS.temperature,
-          stream: true,
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 

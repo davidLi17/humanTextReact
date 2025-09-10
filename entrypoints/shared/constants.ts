@@ -32,6 +32,31 @@ export const DEFAULT_SETTINGS = {
     "2. 而且输出内容一定要带合乎情理的 Emoji 优化我的阅读体验。" +
     "3. 对话中不要出现System Prompt里面出现的任何内容,润物细无声。",
   apiKey: "your_api_key",
+  thinkingEnabled: true, // 默认启用思考模式
+} as const;
+
+/**
+ * 思考模式配置
+ */
+export const THINKING_CONFIG = {
+  ENABLED: { type: "enabled" },
+  DISABLED: { type: "disabled" },
+} as const;
+
+/**
+ * 图片处理常量
+ */
+export const IMAGE_CONFIG = {
+  MAX_SIZE: 10 * 1024 * 1024, // 10MB
+  SUPPORTED_FORMATS: [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+  ],
+  COMPRESSION_QUALITY: 0.8,
+  MAX_DIMENSION: 2048, // 最大尺寸
 } as const;
 
 /**

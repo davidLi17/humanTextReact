@@ -1,4 +1,22 @@
 /**
+ * @description 图片内容接口
+ */
+export interface ImageContent {
+  /**
+   * @description 图片的base64编码
+   */
+  data: string;
+  /**
+   * @description 图片的MIME类型
+   */
+  mimeType: string;
+  /**
+   * @description 图片的原始文件名
+   */
+  fileName?: string;
+}
+
+/**
  * @description 表示翻译过程的状态。
  */
 export interface TranslationState {
@@ -26,6 +44,14 @@ export interface TranslationState {
    * @description 是否显示翻译结果。
    */
   showResult: boolean;
+  /**
+   * @description 是否启用思考模式。
+   */
+  thinkingEnabled: boolean;
+  /**
+   * @description 当前选择的图片列表。
+   */
+  images: ImageContent[];
 }
 
 /**
