@@ -1,0 +1,209 @@
+import debugLib from "debug";
+import { LOG_LEVELS, LogLevel } from "@/entrypoints/shared/constants";
+
+/**
+ * 专业的日志管理系统
+ * 基于 debug 包，支持命名空间和条件日志输出
+ */
+export class Logger {
+  private debugger: debugLib.Debugger;
+  private emoji: string;
+  private namespace: string;
+
+  constructor(namespace: string, emoji: string = "🔧") {
+    this.namespace = namespace;
+    this.debugger = debugLib(`human-text:${namespace}`);
+    this.emoji = emoji;
+  }
+
+  /**
+   * 普通日志 (debug 级别)
+   */
+  log(...args: any[]) {
+    if (shouldLog("log")) {
+      this.debugger(`${this.emoji}`, ...args);
+    }
+  }
+
+  /**
+   * 信息日志 (info 级别)
+   */
+  info(...args: any[]) {
+    if (shouldLog("info")) {
+      this.debugger(`${this.emoji} ℹ️`, ...args);
+    }
+  }
+
+  /**
+   * 警告日志 (warn 级别)
+   */
+  warn(...args: any[]) {
+    if (shouldLog("warn")) {
+      this.debugger(`${this.emoji} ⚠️`, ...args);
+    }
+  }
+
+  /**
+   * 错误日志 (error 级别)
+   */
+  error(...args: any[]) {
+    if (shouldLog("error")) {
+      this.debugger(`${this.emoji} ❌`, ...args);
+    }
+  }
+
+  /**
+   * 成功日志 (info 级别)
+   */
+  success(...args: any[]) {
+    if (shouldLog("success")) {
+      this.debugger(`${this.emoji} ✅`, ...args);
+    }
+  }
+
+  /**
+   * 调试日志 (debug 级别)
+   */
+  trace(...args: any[]) {
+    if (shouldLog("trace")) {
+      this.debugger(`${this.emoji} 🐛`, ...args);
+    }
+  }
+
+  /**
+   * 获取命名空间
+   */
+  getNamespace(): string {
+    return this.namespace;
+  }
+
+  /**
+   * 获取完整的调试器命名空间
+   */
+  getFullNamespace(): string {
+    return `human-text:${this.namespace}`;
+  }
+}
+
+/**
+ * 创建新的日志器实例
+ */
+export function createLogger(namespace: string, emoji?: string): Logger {
+  return new Logger(namespace, emoji);
+}
+
+/**
+ * 检测 localStorage 是否可用
+ * 在 Content Script 环境中 localStorage 可能未定义
+ */
+function isLocalStorageAvailable(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage !== null;
+  } catch (error) {
+    return false;
+  }
+}
+
+/**
+ * 初始化日志系统
+ * 根据设置开启或关闭日志输出
+ */
+export async function initializeLogger() {
+  try {
+    // 从存储中获取日志级别设置
+    const result = await browser.storage.sync.get(["logLevel"]);
+    const logLevel: LogLevel = result.logLevel || LOG_LEVELS.OFF;
+
+    // 设置当前日志级别
+    setCurrentLogLevel(logLevel);
+
+    // 根据日志级别设置 debug 包的启用状态
+    if (logLevel === LOG_LEVELS.OFF) {
+      debugLib.enabled = () => false;
+      // 只在 localStorage 可用时操作
+      if (isLocalStorageAvailable()) {
+        localStorage.removeItem("debug");
+      }
+    } else {
+      const patterns = getDebugPatterns(logLevel);
+      debugLib.enabled = () => true;
+      // 只在 localStorage 可用时操作
+      if (isLocalStorageAvailable()) {
+        localStorage.setItem("debug", patterns);
+      }
+    }
+  } catch (error) {
+    console.error("初始化日志系统失败:", error);
+  }
+}
+/**
+ * 根据日志级别获取 debug 模式的启用模式
+ */
+function getDebugPatterns(logLevel: LogLevel): string {
+  switch (logLevel) {
+    case LOG_LEVELS.ERROR:
+      return "human-text:*"; // debug 包不支持 emoji 过滤，使用程序逻辑控制
+    case LOG_LEVELS.WARN:
+      return "human-text:*";
+    case LOG_LEVELS.INFO:
+      return "human-text:*";
+    case LOG_LEVELS.DEBUG:
+      return "human-text:*"; // 显示所有日志
+    default:
+      return "";
+  }
+}
+
+/**
+ * 检查当前日志级别是否应该显示特定类型的日志
+ */
+export function shouldLog(
+  logType: "log" | "info" | "warn" | "error" | "success" | "trace"
+): boolean {
+  const currentLevel = getCurrentLogLevel();
+
+  if (currentLevel === LOG_LEVELS.OFF) return false;
+
+  switch (currentLevel) {
+    case LOG_LEVELS.ERROR:
+      return logType === "error";
+    case LOG_LEVELS.WARN:
+      return logType === "error" || logType === "warn";
+    case LOG_LEVELS.INFO:
+      return (
+        logType === "error" ||
+        logType === "warn" ||
+        logType === "info" ||
+        logType === "success"
+      );
+    case LOG_LEVELS.DEBUG:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * 获取当前日志级别
+ */
+let currentLogLevel: LogLevel = LOG_LEVELS.OFF;
+
+function getCurrentLogLevel(): LogLevel {
+  return currentLogLevel;
+}
+
+/**
+ * 设置当前日志级别
+ */
+function setCurrentLogLevel(level: LogLevel): void {
+  currentLogLevel = level;
+}
+
+// 预定义的日志器实例
+export const backgroundLogger = createLogger("background", "🔙");
+export const contentLogger = createLogger("content", "📄");
+export const popupLogger = createLogger("popup", "🔽");
+export const optionsLogger = createLogger("options", "⚙️");
+export const translationLogger = createLogger("translation", "🌐");
+export const messageLogger = createLogger("message", "📨");
+export const settingsLogger = createLogger("settings", "⚙️");

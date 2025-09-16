@@ -1,5 +1,7 @@
-import { MAX_HISTORY_COUNT } from "../shared/constants";
+import { MAX_HISTORY_COUNT } from "@/entrypoints/shared/constants";
+import { createLogger } from "@/entrypoints/shared/logger";
 
+const logger = createLogger("history-manager", "📜");
 /**
  * 历史记录项的类型定义
  */
@@ -49,7 +51,8 @@ export class HistoryManager {
       // 保存到存储
       await browser.storage.local.set({ translationHistory: history });
     } catch (error) {
-      console.error("保存翻译历史失败:", error);
+      logger.error("保存翻译历史失败:", error);
+
       throw error;
     }
   }
@@ -62,7 +65,7 @@ export class HistoryManager {
       const result = await browser.storage.local.get(["translationHistory"]);
       return result.translationHistory || [];
     } catch (error) {
-      console.error("获取翻译历史失败:", error);
+      logger.error("获取翻译历史失败:", error);
       return [];
     }
   }
@@ -80,7 +83,7 @@ export class HistoryManager {
       await browser.storage.local.set({ translationHistory: history });
       return true;
     } catch (error) {
-      console.error("删除历史记录项失败:", error);
+      logger.error("删除历史记录项失败:", error);
       throw error;
     }
   }
@@ -93,7 +96,7 @@ export class HistoryManager {
       await browser.storage.local.set({ translationHistory: [] });
       return true;
     } catch (error) {
-      console.error("清空历史记录失败:", error);
+      logger.error("清空历史记录失败:", error);
       throw error;
     }
   }
@@ -132,7 +135,7 @@ export class HistoryManager {
       await browser.storage.local.set({ translationHistory: finalHistory });
       return true;
     } catch (error) {
-      console.error("导入历史记录失败:", error);
+      logger.error("导入历史记录失败:", error);
       throw error;
     }
   }

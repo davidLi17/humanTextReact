@@ -2,11 +2,14 @@ import {
   MESSAGE_TYPES,
   DEFAULT_SETTINGS,
   THINKING_CONFIG,
-} from "../shared/constants";
+} from "@/entrypoints/shared/constants";
 import { SettingsManager } from "./settingsManager";
 import { RequestManager } from "./requestManager";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("translation-service", "🌐");
 
 /**
  * 图片内容接口
@@ -39,12 +42,30 @@ export class TranslationService {
     params: TranslationParams | string,
     tabId?: number
   ): Promise<string | void> {
+    logger.log("🚀 [TranslationService] 开始翻译", {
+      paramsType: typeof params,
+      isStringParams: typeof params === "string",
+      tabIdParam: tabId,
+      paramsTabId: typeof params === "object" ? params.tabId : "N/A",
+      timestamp: new Date().toISOString(),
+    });
+
     // 兼容旧的API调用方式
     const translationParams: TranslationParams =
       typeof params === "string" ? { text: params, tabId } : params;
 
-    const { text, images = [], thinkingEnabled = true } = translationParams;
+    const { text, images = [], thinkingEnabled = false } = translationParams;
     const actualTabId = translationParams.tabId || tabId;
+
+    logger.log("📋 [TranslationService] 翻译参数处理", {
+      text: text.substring(0, 50) + "...",
+      textLength: text.length,
+      imagesCount: images.length,
+      thinkingEnabled,
+      actualTabId,
+      paramsTabId: translationParams.tabId,
+      fallbackTabId: tabId,
+    });
 
     const controller = RequestManager.createRequest(actualTabId);
 
@@ -167,7 +188,7 @@ export class TranslationService {
                 }
               }
             } catch (e) {
-              console.error("解析错误:", e, "原始数据:", line);
+              logger.error("解析错误:", e, "原始数据:", line);
             }
           }
         }
@@ -176,8 +197,14 @@ export class TranslationService {
           result += currentChunk;
           reasoningContent += currentReasoningChunk;
 
+          logger.log("📤 [TranslationService] 发送流式更新", {
+            actualTabId,
+            resultLength: result.length,
+            reasoningLength: reasoningContent.length,
+          });
+
           await this.sendTranslationUpdate(
-            tabId,
+            actualTabId,
             result,
             reasoningContent,
             false
@@ -185,8 +212,19 @@ export class TranslationService {
         }
       }
 
+      logger.log("✅ [TranslationService] 翻译完成，发送最终结果", {
+        actualTabId,
+        finalResultLength: result.length,
+        finalReasoningLength: reasoningContent.length,
+      });
+
       // 发送完成信号
-      await this.sendTranslationUpdate(tabId, result, reasoningContent, true);
+      await this.sendTranslationUpdate(
+        actualTabId,
+        result,
+        reasoningContent,
+        true
+      );
 
       // 在成功翻译完成后，保存翻译历史
       if (result) {
@@ -197,21 +235,21 @@ export class TranslationService {
             reasoningContent
           );
         } catch (error) {
-          console.error("保存翻译历史失败:", error);
+          logger.error("保存翻译历史失败:", error);
         }
       }
 
       // 清理已完成的请求
-      RequestManager.completeRequest(tabId);
+      RequestManager.completeRequest(actualTabId);
       return result;
     } catch (error: any) {
       // 区分错误类型
       if (error.name === "AbortError") {
-        console.log("翻译请求已中止");
+        logger.log("翻译请求已中止");
         return;
       }
       if (error.message.includes("Receiving end does not exist")) {
-        console.log("连接已断开，可能是页面已关闭");
+        logger.log("连接已断开，可能是页面已关闭");
         return;
       }
       // 只有真正需要用户知道的错误才抛出
@@ -223,7 +261,7 @@ export class TranslationService {
         throw error;
       }
       // 其他错误只记录不抛出
-      console.error("翻译过程中出现错误:", error);
+      logger.error("翻译过程中出现错误:", error);
     }
   }
 
@@ -236,19 +274,52 @@ export class TranslationService {
     reasoningContent: string,
     done: boolean
   ): Promise<void> {
-    const message = {
-      action: MESSAGE_TYPES.UPDATE_TRANSLATION,
-      content,
+    logger.log("🔄 [TranslationService] 发送翻译更新", {
+      tabId,
+      hasContent: !!content,
+      contentLength: content?.length || 0,
       hasReasoning: reasoningContent.length > 0,
-      reasoningContent,
+      reasoningLength: reasoningContent.length,
       done,
-    };
+      timestamp: new Date().toISOString(),
+    });
 
     if (tabId) {
-      // 右键菜单翻译使用 safeSendMessage
+      // 有tabId：右键菜单或快捷键翻译，发送给content script
+      const message = {
+        action: MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION,
+        content,
+        hasReasoning: reasoningContent.length > 0,
+        reasoningContent,
+        done,
+      };
+      logger.log("📤 [TranslationService] 发送到content script", {
+        tabId,
+        messageType: message.action,
+        messageData: {
+          hasContent: !!message.content,
+          hasReasoning: message.hasReasoning,
+          done: message.done,
+        },
+      });
       await MessageUtils.safeSendMessage(tabId, message);
     } else {
-      // popup 翻译直接使用 runtime.sendMessage
+      // 无tabId：popup翻译，发送给popup页面
+      const message = {
+        action: MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION,
+        content,
+        hasReasoning: reasoningContent.length > 0,
+        reasoningContent,
+        done,
+      };
+      logger.log("📤 [TranslationService] 发送到popup页面", {
+        messageType: message.action,
+        messageData: {
+          hasContent: !!message.content,
+          hasReasoning: message.hasReasoning,
+          done: message.done,
+        },
+      });
       let popupClosed = false;
       MessageUtils.sendRuntimeMessage(message, () => {
         popupClosed = true;
@@ -256,6 +327,7 @@ export class TranslationService {
 
       // 如果 popup 已关闭，中止翻译
       if (popupClosed && !done) {
+        logger.log("⚠️ [TranslationService] popup已关闭，中止翻译");
         RequestManager.cleanupRequest(tabId || 0);
         return;
       }

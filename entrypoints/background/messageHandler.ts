@@ -1,4 +1,4 @@
-import { MESSAGE_TYPES } from "../shared/constants";
+import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationService } from "./translationService";
 import { HistoryManager } from "./historyManager";
 import { RequestManager } from "./requestManager";

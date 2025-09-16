@@ -3,7 +3,7 @@ export {
   MESSAGE_TYPES,
   DEFAULT_SETTINGS,
   MAX_HISTORY_COUNT,
-} from "../shared/constants";
+} from "@/entrypoints/shared/constants";
 export { SettingsManager } from "./settingsManager";
 export { ShortcutManager } from "./shortcutManager";
 export { ContextMenuManager } from "./contextMenuManager";
@@ -21,21 +21,35 @@ import { ContextMenuManager } from "./contextMenuManager";
 import { MessageHandler } from "./messageHandler";
 import { ContextMenuHandler } from "./contextMenuHandler";
 import { RequestManager } from "./requestManager";
+import {
+  initializeLogger,
+  backgroundLogger,
+} from "@/entrypoints/shared/logger";
 
 export default defineBackground(() => {
-  console.log("人话翻译器 background script 启动", { id: browser.runtime.id });
+  // 初始化日志系统
+  initializeLogger();
+
+  backgroundLogger.info("人话翻译器 background script 启动", {
+    id: browser.runtime.id,
+  });
 
   // 创建右键菜单
   browser.runtime.onInstalled.addListener(() => {
+    backgroundLogger.info("扩展安装完成，开始初始化");
+
     // 初始化快捷键信息到存储
     ShortcutManager.saveCurrentShortcut();
 
     // 创建右键菜单
     ContextMenuManager.createContextMenu();
+
+    backgroundLogger.success("扩展初始化完成");
   });
 
   // 监听扩展启动事件，创建右键菜单
   browser.runtime.onStartup.addListener(() => {
+    backgroundLogger.info("扩展启动");
     // 创建右键菜单
     ContextMenuManager.createContextMenu();
   });
@@ -50,15 +64,19 @@ export default defineBackground(() => {
 
   // 监听标签页关闭事件
   browser.tabs.onRemoved.addListener((tabId: number) => {
+    backgroundLogger.info("标签页关闭，清理请求", { tabId });
     RequestManager.cleanupRequest(tabId);
   });
 
   // 监听快捷键命令
   if (browser.commands?.onCommand) {
     browser.commands.onCommand.addListener((command: string) => {
+      backgroundLogger.info("快捷键触发", { command });
       if (command === "translate-selection") {
         ShortcutManager.executeTranslation();
       }
     });
   }
+
+  backgroundLogger.success("背景脚本所有监听器注册完成");
 });

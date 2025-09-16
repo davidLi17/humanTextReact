@@ -1,4 +1,4 @@
-import { PopupState } from "../shared/constants";
+import { PopupState } from "@/entrypoints/shared/constants";
 
 export class PopupEventHandler {
   // 标记是否正在拖拽中
@@ -243,7 +243,7 @@ export class PopupEventHandler {
 
   // 复制文本到剪贴板
   private async copyToClipboard(
-    text: string,        // 要复制的文本
+    text: string, // 要复制的文本
     button: HTMLElement, // 按钮元素
     originalText: string // 按钮原始文本
   ) {
@@ -256,7 +256,7 @@ export class PopupEventHandler {
       setTimeout(() => (button.textContent = originalText), 1500);
     } catch (error) {
       // 复制失败时输出错误信息
-      console.error("复制失败:", error);
+      logger.error("复制失败:", error);
       // 弹出复制失败提示
       alert("复制失败，请重试");
     }

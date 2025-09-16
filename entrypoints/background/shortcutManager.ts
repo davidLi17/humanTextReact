@@ -1,3 +1,9 @@
+import { ContextMenuHandler } from "./contextMenuHandler";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("shortcuts", "⌨️");
+
+2;
 /**
  * 快捷键管理器
  * 负责处理快捷键相关的功能
@@ -19,10 +25,10 @@ export class ShortcutManager {
 
       // 保存到本地存储
       browser.storage.local.set({ saved_shortcut: shortcut }, () => {
-        console.log("快捷键已保存:", shortcut);
+        logger.log("快捷键已保存:", shortcut);
       });
     } catch (error) {
-      console.error("保存快捷键信息失败:", error);
+      logger.error("保存快捷键信息失败:", error);
     }
   }
 
@@ -31,20 +37,52 @@ export class ShortcutManager {
    */
   static async executeTranslation() {
     try {
-      console.log("快捷键翻译被触发");
+      logger.log("⌨️ [ShortcutManager] 快捷键翻译被触发", {
+        timestamp: new Date().toISOString(),
+      });
+
       const tabs = await browser.tabs.query({
         active: true,
         currentWindow: true,
       });
       const tab = tabs[0];
 
+      logger.log("📋 [ShortcutManager] 获取当前标签页", {
+        tabId: tab?.id,
+        tabUrl: tab?.url?.substring(0, 50) + "...",
+        hasTab: !!tab,
+      });
+
       if (tab?.id) {
-        console.log("向content script发送获取选中文本的消息");
-        // 向content script发送获取选中文本的消息
-        await browser.tabs.sendMessage(tab.id, { action: "getSelectedText" });
+        logger.log("🔍 [ShortcutManager] 获取当前页面选中的文本");
+        // 先获取选中文本
+        const response = await browser.tabs.sendMessage(tab.id, {
+          action: "getSelectedText",
+        });
+
+        logger.log("📝 [ShortcutManager] 获取选中文本结果", {
+          hasResponse: !!response,
+          hasSelectedText: !!response?.selectedText,
+          textLength: response?.selectedText?.length || 0,
+          textPreview: response?.selectedText?.substring(0, 50) + "...",
+        });
+
+        if (response?.selectedText) {
+          logger.log("调用contextMenuHandler处理翻译");
+          // 使用标准的翻译流程
+          await ContextMenuHandler.handleContextMenuClick(
+            {
+              menuItemId: "translateSelection",
+              selectionText: response.selectedText,
+            },
+            tab
+          );
+        } else {
+          logger.log("⚠️ [ShortcutManager] 没有选中文本或获取失败");
+        }
       }
     } catch (error) {
-      console.error("执行快捷键翻译失败:", error);
+      logger.error("❌ [ShortcutManager] 执行快捷键翻译失败:", error);
     }
   }
 }

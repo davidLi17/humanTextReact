@@ -7,6 +7,9 @@ import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
 import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import { ImageUtils } from "../utils/imageUtils";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("popup-translation-area", "📝");
 
 const TranslationArea: React.FC<TranslationAreaProps> = ({
   translationState,
@@ -162,7 +165,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
         }));
       }
     } catch (error) {
-      console.error("粘贴图片失败:", error);
+      logger.error("粘贴图片失败:", error);
       alert("粘贴图片失败: " + (error as Error).message);
     }
   };

@@ -3,6 +3,9 @@ import { useState, useEffect } from "react";
 import TranslationArea from "./components/TranslationArea";
 import HistoryPanel from "./components/HistoryPanel";
 import { TranslationState, HistoryItem, MessageRequest } from "./types";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("popup-app", "🔽");
 
 function App() {
   const [translationState, setTranslationState] = useState<TranslationState>({
@@ -12,7 +15,7 @@ function App() {
     isTranslating: false,
     hasReasoning: false,
     showResult: false,
-    thinkingEnabled: true, // 默认启用思考模式
+    thinkingEnabled: false,
     images: [], // 初始化图片数组
   });
 
@@ -27,14 +30,34 @@ function App() {
       sender: any,
       sendResponse: (response?: any) => void
     ) => {
-      if (request.action === "updateTranslation") {
+      logger.log("📨 [Popup App] 收到消息", {
+        action: request.action,
+        hasContent: !!request.content,
+        contentLength: request.content?.length || 0,
+        hasReasoning: !!request.reasoningContent,
+        reasoningLength: request.reasoningContent?.length || 0,
+        done: request.done,
+        error: request.error,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (request.action === "updatePopupTranslation") {
+        logger.log("🔄 [Popup App] 处理popup翻译更新");
+
         if (request.error) {
+          logger.log("❌ [Popup App] 翻译错误:", request.error);
           setTranslationState((prev: TranslationState) => ({
             ...prev,
             isTranslating: false,
             translatedText: `错误: ${request.error}`,
           }));
         } else {
+          logger.log("✅ [Popup App] 更新翻译状态", {
+            hasNewContent: !!request.content,
+            hasNewReasoning: !!request.reasoningContent,
+            hasReasoning: request.hasReasoning,
+            isComplete: request.done,
+          });
           setTranslationState((prev: TranslationState) => ({
             ...prev,
             translatedText: request.content || prev.translatedText,
@@ -46,6 +69,8 @@ function App() {
         }
 
         sendResponse({ success: true });
+      } else {
+        logger.log("❓ [Popup App] 未处理的消息类型:", request.action);
       }
       return false;
     };
@@ -70,7 +95,7 @@ function App() {
   // 发送翻译请求
   const handleTranslate = async () => {
     const text = translationState.sourceText.trim();
-    console.log("LHG:popup/App.tsx text:::", text);
+    logger.log("LHG:popup/App.tsx text:::", text);
     if (!text) {
       alert("请输入要翻译的文本");
       return;
@@ -123,7 +148,7 @@ function App() {
       await navigator.clipboard.writeText(text);
       return true;
     } catch (error) {
-      console.error("复制失败:", error);
+      logger.error("复制失败:", error);
       return false;
     }
   };
@@ -256,7 +281,7 @@ function App() {
         }
       } catch (error) {
         alert("导入失败：文件解析错误");
-        console.error(error);
+        logger.error(error);
       }
     };
     reader.readAsText(file);

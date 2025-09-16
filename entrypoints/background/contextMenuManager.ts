@@ -17,7 +17,7 @@ export class ContextMenuManager {
         });
       });
     } catch (error) {
-      console.error("创建右键菜单时出错:", error);
+      logger.error("创建右键菜单时出错:", error);
 
       // 出错时创建不带快捷键的菜单作为备用
       browser.contextMenus.create({

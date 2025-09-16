@@ -1,5 +1,8 @@
-import { IMAGE_CONFIG } from "../../shared/constants";
+import { IMAGE_CONFIG } from "@/entrypoints/shared/constants";
 import { ImageContent } from "../types";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("popup-image", "🖼️");
 
 /**
  * 图片处理工具类
@@ -90,7 +93,7 @@ export class ImageUtils {
 
       return null;
     } catch (error) {
-      console.error("从剪贴板获取图片失败:", error);
+      logger.error("从剪贴板获取图片失败:", error);
       throw error;
     }
   }

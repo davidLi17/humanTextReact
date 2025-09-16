@@ -1,18 +1,21 @@
 // 导入必要的类型和模块
 import {
-  PopupState,  // 弹窗状态类型
-  MESSAGE_TYPES,  // 消息类型常量
-  TranslationRequest,  // 翻译请求类型
-} from "../shared/constants";  // 从共享常量文件中导入
-import { PopupEventHandler } from "./popupEventHandler";  // 弹窗事件处理器
-import { parseMarkdown } from "../../shared/utils/markdown";  // Markdown解析工具
+  PopupState, // 弹窗状态类型
+  MESSAGE_TYPES, // 消息类型常量
+  TranslationRequest, // 翻译请求类型
+} from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
+import { PopupEventHandler } from "./popupEventHandler";
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
+import { parseMarkdown } from "../../shared/utils/markdown"; // Markdown解析工具
 
 // 弹窗管理类，负责创建、显示、更新和删除翻译弹窗
 export class PopupManager {
   // 存储上一次弹窗的状态（位置和大小）
   private lastPopupState: PopupState = {
-    left: null,  // 弹窗左侧位置
-    top: null,   // 弹窗顶部位置
+    left: null, // 弹窗左侧位置
+    top: null, // 弹窗顶部位置
     width: null, // 弹窗宽度
   };
   // 当前显示的弹窗元素
@@ -24,6 +27,13 @@ export class PopupManager {
 
   // 显示弹窗方法，接收用户选中的文本
   public showPopup(selection: string): HTMLElement {
+    logger.log("显示弹窗", {
+      textLength: selection?.length || 0,
+      textPreview: selection?.substring(0, 50) + "...",
+      hasCurrentPopup: !!this.currentPopup,
+      timestamp: new Date().toISOString(),
+    });
+
     // 清理可能存在的旧弹窗
     this.removeCurrentPopup();
 
@@ -40,14 +50,29 @@ export class PopupManager {
     // 设置滚动检测
     this.setupScrollDetection(popup);
 
+    logger.log("✅ [PopupManager] 弹窗创建完成", {
+      popupElement: popup.className,
+      parentElement: popup.parentElement?.tagName,
+    });
+
     return popup;
   }
 
   // 更新翻译内容方法，接收翻译请求
   public updateTranslation(request: TranslationRequest): boolean {
+    logger.log("🔄 [PopupManager] 更新翻译", {
+      hasPopup: !!this.currentPopup,
+      hasContent: !!request.content,
+      contentLength: request.content?.length || 0,
+      hasReasoning: !!request.reasoningContent,
+      reasoningLength: request.reasoningContent?.length || 0,
+      done: request.done,
+      error: request.error,
+    });
+
     // 检查弹窗是否存在
     if (!this.currentPopup) {
-      console.log("翻译弹窗不存在，可能已关闭");
+      logger.log("❌ [PopupManager] 翻译弹窗不存在，可能已关闭");
       return false;
     }
 
@@ -59,13 +84,20 @@ export class PopupManager {
       !elements.reasoningTextEl ||
       !elements.loadingEl
     ) {
+      logger.log("❌ [PopupManager] 弹窗元素不完整", {
+        hasTranslatedEl: !!elements.translatedTextEl,
+        hasReasoningEl: !!elements.reasoningTextEl,
+        hasLoadingEl: !!elements.loadingEl,
+      });
       return false;
     }
 
     // 处理翻译错误或更新翻译结果
     if (request.error) {
+      logger.log("❌ [PopupManager] 处理翻译错误");
       this.handleTranslationError(request.error, elements.loadingEl);
     } else {
+      logger.log("✅ [PopupManager] 处理翻译更新");
       this.handleTranslationUpdate(request, elements);
     }
 
@@ -92,7 +124,7 @@ export class PopupManager {
   private createPopupElement(selection: string): HTMLElement {
     // 创建div元素作为弹窗容器
     const popup = document.createElement("div");
-    popup.className = "translator-popup";  // 设置CSS类名
+    popup.className = "translator-popup"; // 设置CSS类名
     // 设置弹窗HTML结构
     popup.innerHTML = `
       <div class="translator-header">
@@ -127,25 +159,25 @@ export class PopupManager {
     const viewportHeight = window.innerHeight;
 
     // 默认位置和大小
-    let left = viewportWidth - 420;  // 默认右侧位置
-    let top = 20;  // 默认顶部位置
-    let width = 400;  // 默认宽度
+    let left = viewportWidth - 420; // 默认右侧位置
+    let top = 20; // 默认顶部位置
+    let width = 400; // 默认宽度
 
     // 如果存在上次保存的位置，则使用上次的位置
     if (this.lastPopupState.left !== null && this.lastPopupState.top !== null) {
       left = Math.min(
-        Math.max(0, this.lastPopupState.left),  // 确保不超出屏幕左侧
-        viewportWidth - 300  // 确保不超出屏幕右侧
+        Math.max(0, this.lastPopupState.left), // 确保不超出屏幕左侧
+        viewportWidth - 300 // 确保不超出屏幕右侧
       );
       top = Math.min(
-        Math.max(0, this.lastPopupState.top),  // 确保不超出屏幕顶部
-        viewportHeight - 100  // 确保不超出屏幕底部
+        Math.max(0, this.lastPopupState.top), // 确保不超出屏幕顶部
+        viewportHeight - 100 // 确保不超出屏幕底部
       );
     }
 
     // 如果存在上次保存的宽度，则使用上次的宽度
     if (this.lastPopupState.width !== null) {
-      width = Math.min(Math.max(300, this.lastPopupState.width), 1200);  // 限制宽度范围
+      width = Math.min(Math.max(300, this.lastPopupState.width), 1200); // 限制宽度范围
     }
 
     // 应用计算后的位置和大小
@@ -158,8 +190,8 @@ export class PopupManager {
   private setupEventHandlers(popup: HTMLElement) {
     // 初始化事件处理器
     this.eventHandler = new PopupEventHandler(popup, (state) => {
-      this.lastPopupState = state;  // 保存弹窗状态
-      console.log("保存弹窗状态:", state);
+      this.lastPopupState = state; // 保存弹窗状态
+      logger.log("保存弹窗状态:", state);
     });
 
     // 关闭按钮点击事件
@@ -171,13 +203,46 @@ export class PopupManager {
         // 移除当前弹窗
         this.removeCurrentPopup();
       });
+
+    // 复制原文按钮
+    popup
+      .querySelector(".translator-copy-original-btn")
+      ?.addEventListener("click", async () => {
+        const originalText =
+          popup.querySelector(".translator-text")?.textContent;
+        if (originalText) {
+          try {
+            await navigator.clipboard.writeText(originalText);
+            logger.log("原文已复制");
+          } catch (error) {
+            logger.error("复制原文失败:", error);
+          }
+        }
+      });
+
+    // 复制译文按钮
+    popup
+      .querySelector(".translator-copy-btn")
+      ?.addEventListener("click", async () => {
+        const translatedText = popup.querySelector(
+          ".translator-translated-text"
+        )?.textContent;
+        if (translatedText) {
+          try {
+            await navigator.clipboard.writeText(translatedText);
+            logger.log("译文已复制");
+          } catch (error) {
+            logger.error("复制译文失败:", error);
+          }
+        }
+      });
   }
 
   // 设置滚动检测方法
   private setupScrollDetection(popup: HTMLElement) {
     // 获取内容区域元素
     const contentEl = popup.querySelector(".translator-content") as HTMLElement;
-    this.userHasScrolled = false;  // 重置滚动状态
+    this.userHasScrolled = false; // 重置滚动状态
 
     // 监听滚动事件
     contentEl.addEventListener("scroll", () => {
@@ -200,25 +265,25 @@ export class PopupManager {
     return {
       translatedTextEl: this.currentPopup.querySelector(
         ".translator-translated-text"
-      ) as HTMLElement,  // 译文显示区域
+      ) as HTMLElement, // 译文显示区域
       reasoningSectionEl: this.currentPopup.querySelector(
         ".translator-section-reasoning"
-      ) as HTMLElement,  // 思维链区域
+      ) as HTMLElement, // 思维链区域
       reasoningTextEl: this.currentPopup.querySelector(
         ".translator-reasoning-text"
-      ) as HTMLElement,  // 思维链文本
+      ) as HTMLElement, // 思维链文本
       loadingEl: this.currentPopup.querySelector(
         ".translator-loading"
-      ) as HTMLElement,  // 加载提示
+      ) as HTMLElement, // 加载提示
       contentEl: this.currentPopup.querySelector(
         ".translator-content"
-      ) as HTMLElement,  // 内容容器
+      ) as HTMLElement, // 内容容器
     };
   }
 
   // 处理翻译错误的方法
   private handleTranslationError(error: string, loadingEl: HTMLElement) {
-    console.log("翻译发生错误:", error);
+    logger.log("翻译发生错误:", error);
     // 根据错误类型显示不同的错误信息
     if (
       error.includes("API Key") ||
@@ -233,7 +298,12 @@ export class PopupManager {
 
   // 处理翻译更新的方法
   private handleTranslationUpdate(request: TranslationRequest, elements: any) {
-    console.log("更新翻译结果");
+    logger.log("更新翻译结果", {
+      hasContent: !!request.content,
+      hasReasoning: request.hasReasoning,
+      reasoningContentLength: request.reasoningContent?.length || 0,
+      done: request.done,
+    });
 
     // 更新译文内容
     if (request.content) {
@@ -241,22 +311,27 @@ export class PopupManager {
     }
 
     // 处理思维链内容
-    if (elements.reasoningSectionEl) {
+    if (elements.reasoningSectionEl && elements.reasoningTextEl) {
+      logger.log("处理思维链内容:", {
+        hasReasoning: request.hasReasoning,
+        reasoningContent: request.reasoningContent,
+      });
+
       // 根据是否有思维链内容显示/隐藏区域
-      elements.reasoningSectionEl.style.display = request.hasReasoning
-        ? "block"
-        : "none";
-      // 如果有思维链内容则更新
       if (request.hasReasoning && request.reasoningContent) {
+        elements.reasoningSectionEl.style.display = "block";
         elements.reasoningTextEl.innerHTML = parseMarkdown(
           request.reasoningContent
         );
+        logger.log("思维链已显示");
+      } else if (!request.hasReasoning) {
+        elements.reasoningSectionEl.style.display = "none";
       }
     }
 
     // 翻译完成时隐藏加载提示
     if (request.done) {
-      console.log("翻译完成");
+      logger.log("翻译完成");
       elements.loadingEl.style.display = "none";
     }
 

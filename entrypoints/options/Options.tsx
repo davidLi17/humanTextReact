@@ -1,8 +1,13 @@
 import "./Options.less";
 import { useState, useEffect } from "react";
-import { DEFAULT_SETTINGS } from "../background";
+import {
+  DEFAULT_SETTINGS,
+  LOG_LEVELS,
+  LogLevel,
+} from "@/entrypoints/shared/constants";
 import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
 import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
+import { initializeLogger, optionsLogger } from "@/entrypoints/shared/logger";
 
 interface Settings {
   apiKey: string;
@@ -10,6 +15,8 @@ interface Settings {
   model: string;
   temperature: number;
   promptTemplate: string;
+  thinkingEnabled: boolean;
+  logLevel: LogLevel;
 }
 
 function Options() {
@@ -28,6 +35,10 @@ function Options() {
 
   // 加载设置
   useEffect(() => {
+    // 初始化日志系统
+    initializeLogger();
+    optionsLogger.info("设置页面加载");
+
     loadSettings();
     loadShortcut();
   }, []);
@@ -41,6 +52,8 @@ function Options() {
         "model",
         "temperature",
         "promptTemplate",
+        "thinkingEnabled",
+        "logLevel",
       ]);
 
       // 如果云端没有，从本地获取
@@ -51,6 +64,8 @@ function Options() {
           "model",
           "temperature",
           "promptTemplate",
+          "thinkingEnabled",
+          "logLevel",
         ]);
       }
 
@@ -58,7 +73,7 @@ function Options() {
         setSettings((prev) => ({ ...prev, ...result }));
       }
     } catch (error) {
-      console.error("加载设置失败:", error);
+      optionsLogger.error("加载设置失败:", error);
     }
   };
 
@@ -72,7 +87,7 @@ function Options() {
         setShortcut(translateCommand.shortcut);
       }
     } catch (error) {
-      console.error("加载快捷键失败:", error);
+      optionsLogger.error("加载快捷键失败:", error);
     }
   };
 
@@ -80,6 +95,7 @@ function Options() {
     if (saveStatus === "saving") return; // 防止重复提交
 
     setSaveStatus("saving");
+    optionsLogger.info("开始保存设置", settings);
 
     try {
       // 同时保存到云端和本地
@@ -88,16 +104,24 @@ function Options() {
         browser.storage.local.set(settings),
       ]);
 
+      // 如果开发者模式设置发生了变化，重新初始化日志系统
+      optionsLogger.info("设置保存成功，重新初始化日志系统");
+      await initializeLogger();
+
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
+      optionsLogger.success("设置保存完成");
     } catch (error) {
-      console.error("保存设置失败:", error);
+      optionsLogger.error("保存设置失败:", error);
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 2000);
     }
   };
 
-  const handleInputChange = (field: keyof Settings, value: string | number) => {
+  const handleInputChange = (
+    field: keyof Settings,
+    value: string | number | boolean
+  ) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -310,6 +334,50 @@ function Options() {
             />
             <div className="setting-hint">
               使用 {"{text}"} 作为待翻译文本的占位符
+            </div>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h2>功能设置</h2>
+
+          <div className="setting-item">
+            <label htmlFor="thinkingEnabled">思考模式</label>
+            <div className="switch-container">
+              <input
+                type="checkbox"
+                id="thinkingEnabled"
+                checked={settings.thinkingEnabled}
+                onChange={(e) =>
+                  handleInputChange("thinkingEnabled", e.target.checked)
+                }
+                className="switch-input"
+              />
+              <label htmlFor="thinkingEnabled" className="switch-label"></label>
+            </div>
+            <div className="setting-hint">
+              开启后将显示AI的思考过程，让你了解翻译背后的逻辑
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label htmlFor="logLevel">日志级别</label>
+            <select
+              id="logLevel"
+              value={settings.logLevel}
+              onChange={(e) =>
+                handleInputChange("logLevel", e.target.value as LogLevel)
+              }
+              className="log-level-select"
+            >
+              <option value={LOG_LEVELS.OFF}>关闭日志</option>
+              <option value={LOG_LEVELS.ERROR}>仅错误</option>
+              <option value={LOG_LEVELS.WARN}>警告及以上</option>
+              <option value={LOG_LEVELS.INFO}>信息及以上</option>
+              <option value={LOG_LEVELS.DEBUG}>全部日志</option>
+            </select>
+            <div className="setting-hint">
+              控制控制台中显示的日志级别，便于开发调试和问题排查
             </div>
           </div>
         </div>

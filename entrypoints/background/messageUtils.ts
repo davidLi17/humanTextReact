@@ -10,7 +10,7 @@ export class MessageUtils {
     try {
       await browser.tabs.sendMessage(tabId, message);
     } catch (error) {
-      console.log("发送消息失败（可能是popup已关闭）:", error);
+      logger.log("发送消息失败（可能是popup已关闭）:", error);
     }
   }
 
@@ -20,7 +20,7 @@ export class MessageUtils {
   static sendRuntimeMessage(message: any, callback?: () => void): void {
     browser.runtime.sendMessage(message, () => {
       if (browser.runtime.lastError) {
-        console.log("runtime消息发送失败:", browser.runtime.lastError);
+        logger.log("runtime消息发送失败:", browser.runtime.lastError);
         callback?.();
       }
     });
