@@ -4,6 +4,7 @@ import {
 } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { PopupManager } from "./popupManager";
+import { SettingsUtils } from "./settingsUtils";
 
 const logger = createLogger("content-message", "📨");
 
@@ -28,7 +29,8 @@ export class MessageHandler {
       switch (request.action) {
         case MESSAGE_TYPES.SHOW_TRANSLATION_POPUP:
           logger.info("处理显示弹窗消息");
-          return this.handleShowTranslationPopup(request, sendResponse);
+          this.handleShowTranslationPopup(request, sendResponse);
+          return true;
 
         case MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION:
           logger.info("处理content翻译更新");
@@ -50,10 +52,10 @@ export class MessageHandler {
     }
   };
 
-  private handleShowTranslationPopup(
+  private handleShowTranslationPopup = async (
     request: TranslationRequest,
     sendResponse: (response?: any) => void
-  ): boolean {
+  ): Promise<boolean> => {
     logger.info("开始处理显示弹窗", {
       hasText: !!request.text,
       textLength: request.text?.length || 0,
@@ -66,6 +68,13 @@ export class MessageHandler {
       return true;
     }
 
+    // 获取用户设置，确保传递 thinkingEnabled 等参数
+    const userSettings = await SettingsUtils.getSettings();
+    logger.log("⚙️ [Content MessageHandler] 获取用户设置", {
+      thinkingEnabled: userSettings.thinkingEnabled,
+      hasApiKey: !!userSettings.apiKey,
+    });
+
     const oldPopup = document.querySelector(".translator-popup");
     if (oldPopup) {
       logger.log("🔄 [Content MessageHandler] 发现旧的翻译弹窗，先移除");
@@ -76,6 +85,10 @@ export class MessageHandler {
         browser.runtime.sendMessage({
           action: MESSAGE_TYPES.TRANSLATE,
           text: request.text,
+          thinkingEnabled: userSettings.thinkingEnabled,
+          temperature: userSettings.temperature,
+          promptTemplate: userSettings.promptTemplate,
+          apiKey: userSettings.apiKey,
         });
       });
     } else {
@@ -84,6 +97,10 @@ export class MessageHandler {
       browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         text: request.text,
+        thinkingEnabled: userSettings.thinkingEnabled,
+        temperature: userSettings.temperature,
+        promptTemplate: userSettings.promptTemplate,
+        apiKey: userSettings.apiKey,
       });
     }
 

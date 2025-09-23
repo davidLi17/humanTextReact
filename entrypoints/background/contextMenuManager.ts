@@ -1,3 +1,7 @@
+import { createLogger } from "@/entrypoints/shared/logger";
+
+const logger = createLogger("context-menu-manager", "🖱️");
+
 /**
  * 右键菜单管理器
  * 负责创建和管理右键菜单

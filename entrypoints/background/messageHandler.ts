@@ -4,6 +4,7 @@ import { HistoryManager } from "./historyManager";
 import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
+import { SettingsManager } from "./settingsManager";
 
 /**
  * 消息处理器
@@ -39,24 +40,35 @@ export class MessageHandler {
     if (request.action === MESSAGE_TYPES.TRANSLATE) {
       const tabId = sender.tab?.id;
 
-      // 构建翻译参数，支持新的多模态格式
-      const translationParams = {
-        text: request.text,
-        images: request.images || [],
-        thinkingEnabled:
-          request.thinkingEnabled !== undefined
-            ? request.thinkingEnabled
-            : true,
-        tabId,
+      // 异步处理翻译请求，支持设置获取
+      const handleTranslate = async () => {
+        try {
+          // 如果请求中没有传递 thinkingEnabled，则从设置中获取
+          let thinkingEnabled = request.thinkingEnabled;
+          if (thinkingEnabled === undefined) {
+            const settings = await SettingsManager.getSettings();
+            thinkingEnabled = settings.thinkingEnabled;
+          }
+
+          // 构建翻译参数，支持新的多模态格式
+          const translationParams = {
+            text: request.text,
+            images: request.images || [],
+            thinkingEnabled,
+            temperature: request.temperature,
+            promptTemplate: request.promptTemplate,
+            apiKey: request.apiKey,
+            tabId,
+          };
+
+          const result = await TranslationService.translateText(translationParams);
+          sendResponse({ success: true, result });
+        } catch (error: any) {
+          sendResponse({ success: false, error: error.message });
+        }
       };
 
-      TranslationService.translateText(translationParams)
-        .then((result) => {
-          sendResponse({ success: true, result });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
+      handleTranslate();
       return true;
     }
 

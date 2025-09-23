@@ -326,13 +326,13 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
 
     // 显示成功状态
     if (copyIcon && checkIcon) {
-      copyIcon.style.display = 'none';
-      checkIcon.style.display = 'block';
+      (copyIcon as HTMLElement).style.display = 'none';
+      (checkIcon as HTMLElement).style.display = 'block';
 
       // 2秒后恢复原状
       setTimeout(() => {
-        copyIcon.style.display = 'block';
-        checkIcon.style.display = 'none';
+        (copyIcon as HTMLElement).style.display = 'block';
+        (checkIcon as HTMLElement).style.display = 'none';
       }, 2000);
     }
   } catch (error) {
@@ -347,11 +347,11 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
     document.body.removeChild(textArea);
 
     if (copyIcon && checkIcon) {
-      copyIcon.style.display = 'none';
-      checkIcon.style.display = 'block';
+      (copyIcon as HTMLElement).style.display = 'none';
+      (checkIcon as HTMLElement).style.display = 'block';
       setTimeout(() => {
-        copyIcon.style.display = 'block';
-        checkIcon.style.display = 'none';
+        (copyIcon as HTMLElement).style.display = 'block';
+        (checkIcon as HTMLElement).style.display = 'none';
       }, 2000);
     }
   }

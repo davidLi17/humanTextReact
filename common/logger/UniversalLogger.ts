@@ -96,7 +96,7 @@ export class UniversalLogger {
   private log(level: LogLevel, ...args: any[]): void {
     if (this.shouldLog(level)) {
       const formattedArgs = this.formatMessage(level, args);
-      this.debugger(...formattedArgs);
+      this.debugger.apply(this.debugger, formattedArgs as [any, ...any[]]);
     }
   }
 
@@ -142,7 +142,7 @@ export class UniversalLogger {
     if (this.shouldLog(LogLevel.INFO)) {
       const formattedArgs = this.formatMessage(LogLevel.INFO, args);
       formattedArgs[1] = "✅ [SUCCESS]"; // 替换为成功 emoji
-      this.debugger(...formattedArgs);
+      this.debugger.apply(this.debugger, formattedArgs as [any, ...any[]]);
     }
   }
 

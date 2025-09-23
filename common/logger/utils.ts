@@ -190,7 +190,7 @@ export const EnvironmentUtils = {
    * 检测是否为 Node.js 环境
    */
   isNode(): boolean {
-    return typeof process !== 'undefined' && process.versions && process.versions.node;
+    return !!(typeof process !== 'undefined' && process.versions && process.versions.node);
   },
 
   /**
@@ -204,7 +204,8 @@ export const EnvironmentUtils = {
    * 检测是否为浏览器扩展环境
    */
   isExtension(): boolean {
-    return typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+    // 检查 WXT 的 browser 对象（浏览器扩展）
+    return !!(typeof (globalThis as any).browser !== 'undefined' && (globalThis as any).browser.runtime && (globalThis as any).browser.runtime.id);
   }
 };
 
