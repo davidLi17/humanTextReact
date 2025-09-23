@@ -1,14 +1,14 @@
 // 导入必要的类型和模块
 import {
-  PopupState, // 弹窗状态类型
-  MESSAGE_TYPES, // 消息类型常量
+  MESSAGE_TYPES,
+  PopupState, // 消息类型常量
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
-import { PopupEventHandler } from "./popupEventHandler";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { parseMarkdown, initializeCodeCopy } from "@/shared/utils/markdown"; // Markdown解析工具
+import { PopupEventHandler } from "./popupEventHandler";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
-import { parseMarkdown } from "../../shared/utils/markdown"; // Markdown解析工具
 
 // 弹窗管理类，负责创建、显示、更新和删除翻译弹窗
 export class PopupManager {
@@ -43,6 +43,8 @@ export class PopupManager {
 
     // 将弹窗添加到页面中
     document.body.appendChild(popup);
+    // 初始化复制功能
+    initializeCodeCopy();
     // 设置弹窗位置
     this.positionPopup(popup);
     // 设置事件处理器

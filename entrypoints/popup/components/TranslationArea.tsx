@@ -1,13 +1,13 @@
-import React, { useEffect, useRef, useCallback, useState } from "react";
+import { TranslationAreaProps } from "@/entrypoints/popup/types";
+import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
+import { createLogger } from "@/entrypoints/shared/logger";
+import { injectMarkdownStyles } from "@/shared/styles/markdown";
+import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown";
 import throttle from "lodash-es/throttle";
-import { TranslationAreaProps } from "../types";
-import { parseMarkdown } from "../../../shared/utils/markdown";
-import { injectMarkdownStyles } from "../../../shared/styles/markdown";
+import React, { useCallback, useEffect, useRef } from "react";
+import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
-import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
-import { ImageUtils } from "../utils/imageUtils";
-import { createLogger } from "@/entrypoints/shared/logger";
 
 const logger = createLogger("popup-translation-area", "📝");
 
@@ -24,9 +24,10 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   const resultSectionWrapperRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 注入 Markdown 样式
+  // 注入 Markdown 样式和初始化复制功能
   useEffect(() => {
     injectMarkdownStyles("popup-markdown-styles");
+    initializeCodeCopy();
   }, []);
 
   // 处理结果区域的滚动事件

@@ -1,5 +1,6 @@
 import { PopupState } from "@/entrypoints/shared/constants";
-
+import { createLogger } from "@/entrypoints/shared/logger";
+const logger = createLogger("快捷键+右键PopUp", "😘");
 export class PopupEventHandler {
   // 标记是否正在拖拽中
   private isDragging = false;

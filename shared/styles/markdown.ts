@@ -58,12 +58,66 @@ export const MARKDOWN_STYLES = /*css*/ `
   }
 
   /* 代码块样式 */
-  .code-block {
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  .code-block-container {
+    position: relative;
+    margin: 1em 0;
     border: 1px solid #e2e8f0;
     border-radius: 8px;
-    margin: 1em 0;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     overflow: hidden;
+  }
+
+  .code-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5em 1em;
+    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+    border-bottom: 1px solid #e2e8f0;
+  }
+
+  .code-language {
+    font-size: 0.85em;
+    color: #64748b;
+    text-transform: uppercase;
+    font-weight: 500;
+  }
+
+  .copy-button {
+    background: transparent;
+    border: none;
+    padding: 0.25em;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    transition: all 0.2s ease;
+  }
+
+  .copy-button:hover {
+    background: #e2e8f0;
+    color: #1e293b;
+  }
+
+  .copy-button:active {
+    background: #cbd5e1;
+  }
+
+  .copy-icon, .check-icon {
+    stroke-width: 2;
+  }
+
+  .check-icon {
+    color: #10b981;
+  }
+
+  .code-block {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow-x: auto;
   }
 
   .code-block code {
@@ -254,9 +308,35 @@ export const MARKDOWN_STYLES = /*css*/ `
       color: #e5e5e5;
     }
 
-    .code-block {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
+    .code-block-container {
       border-color: #444;
+      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
+    }
+
+    .code-block-header {
+      background: linear-gradient(135deg, #333 0%, #444 100%);
+      border-bottom-color: #444;
+    }
+
+    .code-language {
+      color: #9ca3af;
+    }
+
+    .copy-button {
+      color: #9ca3af;
+    }
+
+    .copy-button:hover {
+      background: #444;
+      color: #e5e5e5;
+    }
+
+    .copy-button:active {
+      background: #555;
+    }
+
+    .code-block {
+      background: transparent;
     }
 
     .code-block code {

@@ -18,8 +18,29 @@ export function parseMarkdown(text: string): string {
   html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
     const index = codeBlocks.length;
     const language = lang || "text";
+    const escapedCode = code.trim()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
     codeBlocks.push(
-      `<pre class="code-block"><code class="language-${language}">${code.trim()}</code></pre>`
+      `<div class="code-block-container">
+        <div class="code-block-header">
+          <span class="code-language">${language}</span>
+          <button class="copy-button" onclick="copyCode(this)" data-code="${escapedCode}" title="复制代码">
+            <svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <svg class="check-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display: none;">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </button>
+        </div>
+        <pre class="code-block"><code class="language-${language}">${escapedCode}</code></pre>
+      </div>`
     );
     return `__CODE_BLOCK_${index}__`;
   });
@@ -287,4 +308,59 @@ function parseParagraphs(html: string): string {
       }
     })
     .join("\n\n");
+}
+
+/**
+ * 复制代码到剪贴板
+ */
+export async function copyCode(button: HTMLButtonElement): Promise<void> {
+  const code = button.getAttribute('data-code');
+  if (!code) return;
+
+  const copyIcon = button.querySelector('.copy-icon');
+  const checkIcon = button.querySelector('.check-icon');
+
+  try {
+    // 使用现代 Clipboard API
+    await navigator.clipboard.writeText(code);
+
+    // 显示成功状态
+    if (copyIcon && checkIcon) {
+      copyIcon.style.display = 'none';
+      checkIcon.style.display = 'block';
+
+      // 2秒后恢复原状
+      setTimeout(() => {
+        copyIcon.style.display = 'block';
+        checkIcon.style.display = 'none';
+      }, 2000);
+    }
+  } catch (error) {
+    // 降级方案
+    const textArea = document.createElement('textarea');
+    textArea.value = code;
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+
+    if (copyIcon && checkIcon) {
+      copyIcon.style.display = 'none';
+      checkIcon.style.display = 'block';
+      setTimeout(() => {
+        copyIcon.style.display = 'block';
+        checkIcon.style.display = 'none';
+      }, 2000);
+    }
+  }
+}
+
+/**
+ * 初始化代码块复制功能
+ */
+export function initializeCodeCopy(): void {
+  // 创建全局的 copyCode 函数供 HTML 使用
+  (window as any).copyCode = copyCode;
 }
