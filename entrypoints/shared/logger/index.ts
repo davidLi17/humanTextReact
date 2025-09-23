@@ -119,36 +119,38 @@ export async function initializeLogger() {
 
     // 根据日志级别设置 debug 包的启用状态
     if (logLevel === LOG_LEVELS.OFF) {
-      debugLib.enabled = () => false;
+      debugLib.disable(); // 完全禁用 debug
       // 只在 localStorage 可用时操作
       if (isLocalStorageAvailable()) {
         localStorage.removeItem("debug");
       }
     } else {
       const patterns = getDebugPatterns(logLevel);
-      debugLib.enabled = () => true;
+      // 启用 debug 并设置模式
+      debugLib.enable(patterns);
       // 只在 localStorage 可用时操作
       if (isLocalStorageAvailable()) {
         localStorage.setItem("debug", patterns);
       }
     }
+
+    // 调试输出当前日志级别
+    console.log(`[日志系统] 已初始化，级别: ${logLevel}`);
   } catch (error) {
     console.error("初始化日志系统失败:", error);
   }
 }
 /**
  * 根据日志级别获取 debug 模式的启用模式
+ * 注意：debug 包启用所有匹配的命名空间，实际的级别过滤通过 shouldLog 函数控制
  */
 function getDebugPatterns(logLevel: LogLevel): string {
   switch (logLevel) {
     case LOG_LEVELS.ERROR:
-      return "human-text:*"; // debug 包不支持 emoji 过滤，使用程序逻辑控制
     case LOG_LEVELS.WARN:
-      return "human-text:*";
     case LOG_LEVELS.INFO:
-      return "human-text:*";
     case LOG_LEVELS.DEBUG:
-      return "human-text:*"; // 显示所有日志
+      return "human-text:*"; // 启用所有 human-text 命名空间，具体级别由 shouldLog 控制
     default:
       return "";
   }
@@ -177,7 +179,7 @@ export function shouldLog(
         logType === "success"
       );
     case LOG_LEVELS.DEBUG:
-      return true;
+      return true; // 显示所有日志类型
     default:
       return false;
   }

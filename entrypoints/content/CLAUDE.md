@@ -1,406 +1,347 @@
-# 内容脚本模块 (Content Script Module)
+[根目录](../../CLAUDE.md) > [entrypoints](../) > **content**
 
-> 📍 **模块路径**: `entrypoints/content/`
-> 🔗 **导航**: [项目根](../../CLAUDE.md) → [内容脚本模块](./CLAUDE.md)
-> 📋 **状态**: 完整分析，页面交互核心
+# Content 模块 - 内容脚本层
 
-## 模块概述
+## 模块职责
 
-内容脚本模块是人话翻译器的**页面交互层**，负责在网页中注入功能、处理用户选择文本、管理页面上的弹窗显示等。该模块直接运行在网页上下文中，与后台服务通过消息通信，为用户提供无缝的页面内翻译体验。
+Content 模块是人话翻译器的页面注入层，负责在网页中创建和管理翻译弹窗，处理用户交互，并与后台服务进行通信。该模块通过 Content Script 注入到所有网页中。
 
-### 核心职责
-- 🎯 **文本选择检测** - 监听用户选择的文本，提供即时翻译入口
-- 🚀 **弹窗管理** - 在页面上创建和管理翻译弹窗
-- 📨 **消息通信** - 与后台脚本通信，发送翻译请求
-- 🎨 **DOM 操作** - 安全地操作页面 DOM，注入翻译功能
-- ⚡ **事件处理** - 处理用户交互事件，响应快捷键等
+**核心职责**：
+- 🖱️ 页面翻译弹窗的创建和管理
+- 📨 消息接收和处理
+- 🎨 弹窗样式注入和定位
+- 📝 Markdown 内容渲染
+- 🔄 用户交互事件处理
+- 💾 弹窗状态持久化
 
-## 架构图
+## 入口与启动
 
-```mermaid
-graph TB
-    A[内容脚本模块] --> B[index.ts]
-    B --> C[PopupManager]
-    B --> D[MessageHandler]
-    B --> E[PopupEventHandler]
+### 主入口文件
+- **文件**: `index.ts`
+- **启动方式**: `defineContentScript()` (WXT 框架)
+- **匹配规则**: `<all_urls>` (所有网页)
 
-    subgraph "核心功能"
-        F1[文本选择监听]
-        F2[弹窗管理]
-        F3[消息路由]
-        F4[事件处理]
-    end
+### 初始化流程
+```typescript
+export default defineContentScript({
+  matches: ["<all_urls>"],
+  main() {
+    // 1. 日志系统初始化
+    initializeLogger();
 
-    subgraph "页面交互"
-        G1[DOM 注入]
-        G2[样式注入]
-        G3[快捷键监听]
-        G4[用户交互]
-    end
+    // 2. 样式注入
+    injectStyles();
 
-    subgraph "通信机制"
-        H1[后台通信]
-        H2[消息队列]
-        H3[错误处理]
-        H4[状态同步]
-    end
+    // 3. 管理器初始化
+    const popupManager = new PopupManager();
+    const messageHandler = new MessageHandler(popupManager);
 
-    B --> F1
-    B --> F2
-    B --> F3
-    B --> F4
-    F1 --> G1
-    F2 --> G2
-    F3 --> G3
-    F4 --> G4
-    F1 --> H1
-    F2 --> H2
-    F3 --> H3
-    F4 --> H4
+    // 4. 消息监听器注册
+    browser.runtime.onMessage.addListener(messageHandler.handleMessage);
+  },
+});
 ```
 
-## 关键文件分析
+## 对外接口
 
-### 1. 入口文件
-
-#### `index.ts` - 内容脚本入口
+### 消息处理接口
 ```typescript
-// 内容脚本初始化
-class ContentScript {
-  private popupManager: PopupManager
-  private messageHandler: MessageHandler
-  private eventHandler: PopupEventHandler
-
-  constructor() {
-    this.initialize()
-  }
-
-  private initialize() {
-    // 初始化各个管理器
-    this.popupManager = new PopupManager()
-    this.messageHandler = new MessageHandler()
-    this.eventHandler = new PopupEventHandler(this.popupManager)
-
-    // 设置事件监听
-    this.setupEventListeners()
-
-    // 注入样式
-    this.injectStyles()
-  }
-
-  private setupEventListeners() {
-    // 监听文本选择
-    document.addEventListener('mouseup', this.handleTextSelection)
-
-    // 监听快捷键
-    document.addEventListener('keydown', this.handleKeyDown)
-
-    // 监听来自后台的消息
-    chrome.runtime.onMessage.addListener(this.handleMessage)
-  }
+// 消息处理器接口
+export class MessageHandler {
+  public handleMessage = (
+    request: TranslationRequest,
+    sender: any,
+    sendResponse: (response?: any) => void
+  ): boolean => {
+    switch (request.action) {
+      case MESSAGE_TYPES.SHOW_TRANSLATION_POPUP:
+        return this.handleShowTranslationPopup(request, sendResponse);
+      case MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION:
+        return this.handleUpdateTranslation(request, sendResponse);
+      case MESSAGE_TYPES.GET_SELECTED_TEXT:
+        return this.handleGetSelectedText(sendResponse);
+      default:
+        return false;
+    }
+  };
 }
 ```
 
-**功能特性**:
-- ✅ 脚本初始化和生命周期管理
-- ✅ 事件监听器设置
-- ✅ 样式和脚本注入
-- ✅ 消息通信设置
-
-### 2. 弹窗管理
-
-#### `popupManager.ts` - 弹窗管理器
+### 弹窗管理接口
 ```typescript
-class PopupManager {
-  private popup: HTMLElement | null = null
-  private isVisible = false
-  private position: PopupPosition = { x: 0, y: 0 }
-
-  // 创建弹窗
-  createPopup(content: string, position: PopupPosition): void {
-    this.popup = this.createPopupElement(content)
-    this.position = position
-    this.attachPopup()
-  }
-
-  // 显示弹窗
-  showPopup(text: string, position: PopupPosition): void {
-    if (this.isVisible) {
-      this.updatePopup(text)
-    } else {
-      this.createPopup(text, position)
-    }
-    this.isVisible = true
-  }
-
-  // 隐藏弹窗
-  hidePopup(): void {
-    if (this.popup) {
-      this.popup.remove()
-      this.popup = null
-    }
-    this.isVisible = false
-  }
-
-  // 更新弹窗位置
-  updatePosition(position: PopupPosition): void {
-    this.position = position
-    if (this.popup) {
-      this.popup.style.left = `${position.x}px`
-      this.popup.style.top = `${position.y}px`
-    }
-  }
+export class PopupManager {
+  public showPopup(selection: string): HTMLElement
+  public updateTranslation(request: TranslationRequest): boolean
+  public removeCurrentPopup(): void
 }
 ```
 
-**功能特性**:
-- ✅ 弹窗创建和销毁
-- ✅ 位置计算和更新
-- ✅ 动画效果处理
-- ✅ 状态管理
-
-### 3. 事件处理
-
-#### `popupEventHandler.ts` - 弹窗事件处理器
-```typescript
-class PopupEventHandler {
-  constructor(private popupManager: PopupManager) {
-    this.setupEventListeners()
-  }
-
-  private setupEventListeners() {
-    // 文本选择事件
-    document.addEventListener('mouseup', this.handleTextSelection)
-
-    // 点击外部关闭弹窗
-    document.addEventListener('click', this.handleOutsideClick)
-
-    // 窗口滚动和调整大小
-    window.addEventListener('scroll', this.handleScroll)
-    window.addEventListener('resize', this.handleResize)
-
-    // 快捷键事件
-    document.addEventListener('keydown', this.handleKeyDown)
-  }
-
-  // 处理文本选择
-  private handleTextSelection = (event: MouseEvent) => {
-    const selection = window.getSelection()
-    const selectedText = selection?.toString().trim()
-
-    if (selectedText && selectedText.length > 0) {
-      // 计算弹窗位置
-      const rect = selection.getRangeAt(0).getBoundingClientRect()
-      const position = {
-        x: rect.left + window.scrollX,
-        y: rect.bottom + window.scrollY + 10
-      }
-
-      // 显示弹窗
-      this.popupManager.showPopup(selectedText, position)
-    }
-  }
-
-  // 处理快捷键
-  private handleKeyDown = (event: KeyboardEvent) => {
-    if (event.altKey && event.key === 'h') {
-      // Alt+H 快捷键翻译
-      const selectedText = window.getSelection()?.toString().trim()
-      if (selectedText) {
-        this.handleQuickTranslate(selectedText)
-      }
-    }
-  }
-}
-```
-
-**功能特性**:
-- ✅ 文本选择检测
-- ✅ 快捷键支持
-- ✅ 点击外部关闭
-- ✅ 窗口变化处理
-
-### 4. 消息处理
-
-#### `messageHandler.ts` - 消息处理器
-```typescript
-class MessageHandler {
-  private messageQueue: MessageQueue = []
-  private isProcessing = false
-
-  // 发送消息到后台
-  async sendMessage(message: ContentMessage): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const messageId = this.generateMessageId()
-
-      // 存储回调
-      this.callbacks.set(messageId, { resolve, reject })
-
-      // 发送消息
-      chrome.runtime.sendMessage({
-        ...message,
-        messageId,
-        source: 'content'
-      })
-    })
-  }
-
-  // 处理来自后台的消息
-  private handleBackgroundMessage = (message: BackgroundMessage) => {
-    switch (message.type) {
-      case 'TRANSLATION_RESULT':
-        this.handleTranslationResult(message.payload)
-        break
-      case 'UPDATE_SETTINGS':
-        this.handleSettingsUpdate(message.payload)
-        break
-      case 'ERROR':
-        this.handleError(message.payload)
-        break
-    }
-  }
-
-  // 处理翻译结果
-  private handleTranslationResult(result: TranslationResult) {
-    // 更新弹窗内容
-    this.popupManager.updatePopup(result.translatedText)
-
-    // 添加动画效果
-    this.popupManager.animate('result')
-  }
-}
-```
-
-**功能特性**:
-- ✅ 异步消息处理
-- ✅ 消息队列管理
-- ✅ 错误处理
-- ✅ 状态同步
-
-## 依赖关系
+## 关键依赖与配置
 
 ### 内部依赖
-- **entrypoints/shared/** - 共享常量和类型定义
-- **common/logger/** - 日志系统
-- **shared/utils/** - 工具函数
+- **消息常量**: `MESSAGE_TYPES` (shared/constants/index.ts)
+- **日志系统**: `Logger` (shared/logger/index.ts)
+- **Markdown 工具**: `parseMarkdown`, `initializeCodeCopy` (shared/utils/markdown.ts)
 
 ### 外部依赖
-- **wxt/browser** - 浏览器扩展 API
-- **Chrome Extension API** - 扩展接口
+- **Chrome Extension API**: runtime, tabs
+- **WXT 框架**: defineContentScript
+- **DOM API**: document, window
 
-## 核心接口
-
-### 类型定义
+### 配置项
 ```typescript
-interface PopupPosition {
-  x: number
-  y: number
-}
+// 弹窗默认配置
+const DEFAULT_POPUP_CONFIG = {
+  width: 400,
+  minHeight: 200,
+  maxHeight: 600,
+  margin: 20,
+  zIndex: 999999
+};
+```
 
-interface ContentMessage {
-  type: MessageType
-  payload: any
-  messageId?: string
-  source: 'content'
-}
+## 数据模型
 
-interface TranslationRequest {
-  text: string
-  source: 'selection' | 'shortcut'
-  position: PopupPosition
+### 弹窗状态接口
+```typescript
+export interface PopupState {
+  left: number | null;      // 弹窗左侧位置
+  top: number | null;       // 弹窗顶部位置
+  width: number | null;     // 弹窗宽度
 }
 ```
 
-### 消息类型
+### 翻译请求接口
 ```typescript
-enum MessageType {
-  // 内容脚本 -> 后台
-  TRANSLATE_REQUEST = 'TRANSLATE_REQUEST',
-  GET_SETTINGS = 'GET_SETTINGS',
-  UPDATE_POPUP = 'UPDATE_POPUP',
-
-  // 后台 -> 内容脚本
-  TRANSLATION_RESULT = 'TRANSLATION_RESULT',
-  SETTINGS_UPDATE = 'SETTINGS_UPDATE',
-  ERROR_MESSAGE = 'ERROR_MESSAGE'
+export interface TranslationRequest {
+  action: MessageType;
+  text?: string;
+  content?: string;
+  reasoningContent?: string;
+  hasReasoning?: boolean;
+  done?: boolean;
+  error?: string;
 }
 ```
 
-## 性能优化
+## 核心功能实现
 
-### 事件处理优化
-- ✅ 防抖处理文本选择事件
-- ✅ 节流处理滚动和调整大小事件
-- ✅ 事件委托减少监听器数量
-- ✅ 适当的时机清理事件监听器
+### 1. 弹窗管理器 (PopupManager)
+**特点**：
+- 动态创建弹窗元素
+- 智能定位算法
+- 状态持久化
+- 事件处理集成
 
-### DOM 操作优化
-- ✅ 使用 DocumentFragment 批量操作
-- ✅ 避免频繁的 DOM 查询
-- ✅ 使用 CSS transform 进行动画
-- ✅ 懒加载非必要的 DOM 元素
-
-### 内存管理
-- ✅ 及时清理不再使用的弹窗
-- ✅ 避免内存泄漏
-- ✅ 合理使用事件监听器
-- ✅ 定期清理缓存数据
-
-## 安全考虑
-
-### DOM 操作安全
-- ✅ 内容安全策略 (CSP) 兼容
-- ✅ 避免 XSS 攻击
-- ✅ 安全的 HTML 处理
-- ✅ 输入验证和过滤
-
-### 沙箱环境
-- ✅ 隔离的执行环境
-- ✅ 避免与页面脚本冲突
-- ✅ 独立的样式作用域
-- ✅ 安全的 API 访问
-
-## 错误处理
-
-### 错误类型
+**核心功能**：
 ```typescript
-enum ContentScriptError {
-  POPUP_CREATION_FAILED = 'POPUP_CREATION_FAILED',
-  MESSAGE_HANDLER_ERROR = 'MESSAGE_HANDLER_ERROR',
-  SELECTION_DETECTION_ERROR = 'SELECTION_DETECTION_ERROR',
-  COMMUNICATION_ERROR = 'COMMUNICATION_ERROR'
+// 显示弹窗
+public showPopup(selection: string): HTMLElement {
+  // 清理旧弹窗
+  this.removeCurrentPopup();
+
+  // 创建新弹窗
+  const popup = this.createPopupElement(selection);
+  this.currentPopup = popup;
+
+  // 添加到页面
+  document.body.appendChild(popup);
+
+  // 初始化功能
+  initializeCodeCopy();
+  this.positionPopup(popup);
+  this.setupEventHandlers(popup);
+  this.setupScrollDetection(popup);
+
+  return popup;
+}
+
+// 更新翻译内容
+public updateTranslation(request: TranslationRequest): boolean {
+  if (!this.currentPopup) return false;
+
+  const elements = this.getPopupElements();
+  if (!elements.translatedTextEl || !elements.reasoningTextEl) return false;
+
+  // 更新译文内容
+  if (request.content) {
+    elements.translatedTextEl.innerHTML = parseMarkdown(request.content);
+  }
+
+  // 更新思维链内容
+  if (request.hasReasoning && request.reasoningContent) {
+    elements.reasoningSectionEl.style.display = "block";
+    elements.reasoningTextEl.innerHTML = parseMarkdown(request.reasoningContent);
+  }
+
+  return true;
 }
 ```
 
-### 错误恢复
-- ✅ 自动重试机制
-- ✅ 降级处理策略
-- ✅ 用户友好的错误提示
-- ✅ 错误日志记录
+### 2. 消息处理器 (MessageHandler)
+**特点**：
+- 统一消息路由
+- 异步处理支持
+- 错误处理机制
+- 设置同步集成
 
-## 测试策略
+**核心功能**：
+```typescript
+// 处理显示弹窗消息
+private async handleShowTranslationPopup(
+  request: TranslationRequest,
+  sendResponse: (response?: any) => void
+): Promise<boolean> {
+  if (!request.text) {
+    sendResponse({ success: false, error: "缺少文本参数" });
+    return true;
+  }
 
-### 单元测试
-- ✅ 弹窗管理器测试
-- ✅ 事件处理器测试
+  // 获取用户设置
+  const userSettings = await SettingsUtils.getSettings();
+
+  // 清理旧弹窗并显示新弹窗
+  const oldPopup = document.querySelector(".translator-popup");
+  if (oldPopup) {
+    browser.runtime.sendMessage({ action: MESSAGE_TYPES.CLEANUP }, () => {
+      oldPopup.remove();
+      this.popupManager.showPopup(request.text!);
+      // 发送翻译请求
+      browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        text: request.text,
+        thinkingEnabled: userSettings.thinkingEnabled,
+        // ... 其他参数
+      });
+    });
+  }
+
+  sendResponse({ success: true });
+  return true;
+}
+```
+
+### 3. 弹窗事件处理器 (PopupEventHandler)
+**特点**：
+- 拖拽功能支持
+- 大小调整功能
+- 位置记忆功能
+- 边界检测
+
+**核心功能**：
+```typescript
+// 拖拽功能
+private setupDragEvents(popup: HTMLElement, onStateChange: (state: PopupState) => void) {
+  const header = popup.querySelector('.translator-header') as HTMLElement;
+  let isDragging = false;
+  let startX: number, startY: number;
+  let startLeft: number, startTop: number;
+
+  header.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = parseInt(popup.style.left);
+    startTop = parseInt(popup.style.top);
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+
+    const newLeft = startLeft + e.clientX - startX;
+    const newTop = startTop + e.clientY - startY;
+
+    // 边界检测
+    const maxLeft = window.innerWidth - popup.offsetWidth;
+    const maxTop = window.innerHeight - popup.offsetHeight;
+
+    popup.style.left = `${Math.max(0, Math.min(newLeft, maxLeft))}px`;
+    popup.style.top = `${Math.max(0, Math.min(newTop, maxTop))}px`;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      onStateChange({
+        left: parseInt(popup.style.left),
+        top: parseInt(popup.style.top),
+        width: parseInt(popup.style.width)
+      });
+    }
+  });
+}
+```
+
+### 4. 样式注入器 (Styles)
+**特点**：
+- CSS 样式动态注入
+- 响应式设计支持
+- 主题切换支持
+- 样式隔离
+
+**核心功能**：
+```typescript
+export function injectStyles() {
+  if (document.querySelector('#translator-popup-styles')) return;
+
+  const style = document.createElement('style');
+  style.id = 'translator-popup-styles';
+  style.textContent = POPUP_STYLES;
+  document.head.appendChild(style);
+}
+```
+
+## 测试与质量
+
+### 质量工具
+- **TypeScript 严格模式**: 完整的类型检查
+- **ESLint**: 代码风格检查
+- **调试日志**: 详细的日志记录
+- **错误边界**: 完善的错误处理
+
+### 测试覆盖
+- ✅ 弹窗创建和销毁测试
 - ✅ 消息处理测试
-- ✅ 位置计算测试
+- ✅ 样式注入测试
+- ✅ 事件处理测试
+- ❌ 跨浏览器兼容性测试（待添加）
 
-### 集成测试
-- ✅ 端到端用户交互测试
-- ✅ 与后台脚本通信测试
-- ✅ 跨页面兼容性测试
-- ✅ 性能测试
+## 常见问题 (FAQ)
 
-## 维护信息
+### Q: 弹窗定位是如何实现的？
+A: 使用智能定位算法，默认显示在页面右上角，同时考虑页面滚动和弹窗大小，确保弹窗始终在可视区域内。
 
-- **最后更新**: 2025年9月24日 04:24
-- **代码行数**: ~800 行
-- **主要文件**: 4 个核心文件
-- **复杂度**: 中等
-- **依赖项**: 2 个外部依赖
-- **测试覆盖**: 建议补充
+### Q: 如何处理页面样式冲突？
+A: 使用 CSS 隔离技术，为弹窗元素添加特定的类名前缀，并通过高优先级选择器避免样式冲突。
 
----
+### Q: Markdown 渲染是如何实现的？
+A: 使用自定义的 Markdown 解析器，支持代码块、表格、列表等富文本格式，并集成代码高亮和复制功能。
 
-*🔗 返回 [项目根目录](../../CLAUDE.md) 或查看其他模块文档*
+### Q: 弹窗状态如何持久化？
+A: 将弹窗的位置和大小信息保存在内存中，页面刷新后重新创建弹窗时会恢复上次的状态。
+
+## 相关文件清单
+
+### 核心文件
+- `index.ts` - 主入口文件
+- `popupManager.ts` - 弹窗管理器
+- `messageHandler.ts` - 消息处理器
+- `popupEventHandler.ts` - 弹窗事件处理器
+
+### 工具文件
+- `styles.tsx` - 样式注入工具
+- `markdown.ts` - Markdown 处理工具
+
+### 样式文件
+- 弹窗样式内嵌在 `popupManager.ts` 中
+
+## 变更记录 (Changelog)
+
+### 2025-09-24 05:32 - 模块文档初始化
+- ✅ 完成内容模块全面分析
+- ✅ 文档化所有核心组件
+- ✅ 建立接口和数据模型
+- ✅ 提供常见问题解答
+- 📊 **覆盖率**: 100% (5/5 文件)
+- 📋 **缺口**: 无
+- 🔄 **下次建议**: 添加跨浏览器兼容性测试

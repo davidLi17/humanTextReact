@@ -1,594 +1,350 @@
-# 共享模块 (Shared Module)
+[根目录](../../CLAUDE.md) > [entrypoints](../) > **shared**
 
-> 📍 **模块路径**: `entrypoints/shared/`
-> 🔗 **导航**: [项目根](../../CLAUDE.md) → [共享模块](./CLAUDE.md)
-> 📋 **状态**: 完整分析，扩展内部共享核心
+# Shared 模块 - 共享工具层
 
-## 模块概述
+## 模块职责
 
-共享模块是人话翻译器的**扩展内部共享核心**，为所有其他模块提供统一的常量定义、类型接口、消息格式、日志系统等基础设施。该模块确保整个扩展的一致性和可维护性，减少代码重复，提供标准化的开发接口。
+Shared 模块是人话翻译器的共享工具层，提供跨模块的常量定义、设置管理、日志系统等核心功能。该模块被所有其他模块依赖，确保整个应用的一致性和可维护性。
 
-### 核心职责
-- 📝 **常量定义** - 统一的常量和枚举定义
-- 🔄 **类型接口** - 共享的 TypeScript 类型定义
-- 📨 **消息格式** - 扩展内部通信的消息标准
-- 📊 **日志系统** - 统一的日志记录和管理
-- 🔧 **工具函数** - 通用的工具函数和辅助方法
+**核心职责**：
+- 📋 全局常量和类型定义
+- ⚙️ 统一的设置管理
+- 📝 专业的日志系统
+- 🔄 模块间通信协议
+- 🎯 工具函数和辅助方法
 
-## 架构图
+## 模块结构
 
-```mermaid
-graph TB
-    A[共享模块] --> B[constants]
-    A --> C[types]
-    A --> D[logger]
-    A --> E[utils]
+### 子模块组成
+- **constants/** - 常量定义
+- **logger/** - 日志系统
+- **settingsUtils.ts** - 设置工具
 
-    subgraph "常量定义"
-        B1[消息类型]
-        B2[日志级别]
-        B3[API 端点]
-        B4[错误代码]
-        B5[配置键]
-    end
+## 对外接口
 
-    subgraph "类型接口"
-        C1[消息接口]
-        C2[设置接口]
-        C3[翻译接口]
-        C4[历史记录接口]
-        C5[通用工具接口]
-    end
+### 常量导出
+```typescript
+// 消息类型
+export const MESSAGE_TYPES = {
+  TRANSLATE: "translate",
+  CLEANUP: "cleanup",
+  GET_HISTORY: "getHistory",
+  // ... 更多消息类型
+} as const;
 
-    subgraph "日志系统"
-        D1[Logger 类]
-        D2[日志级别]
-        D3[格式化器]
-        D4[存储适配器]
-    end
+// 日志级别
+export const LOG_LEVELS = {
+  OFF: "off",
+  ERROR: "error",
+  WARN: "warn",
+  INFO: "info",
+  DEBUG: "debug",
+} as const;
 
-    subgraph "工具函数"
-        E1[验证工具]
-        E2[格式化工具]
-        E3[存储工具]
-        E4[网络工具]
-        E5[时间工具]
-    end
-
-    B --> B1
-    B --> B2
-    B --> B3
-    B --> B4
-    B --> B5
-    C --> C1
-    C --> C2
-    C --> C3
-    C --> C4
-    C --> C5
-    D --> D1
-    D --> D2
-    D --> D3
-    D --> D4
-    E --> E1
-    E --> E2
-    E --> E3
-    E --> E4
-    E --> E5
+// 默认设置
+export const DEFAULT_SETTINGS = {
+  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  model: "kimi-k2-250905",
+  temperature: 0.7,
+  promptTemplate: "System Prompt...",
+  apiKey: "your_api_key",
+  thinkingEnabled: false,
+  logLevel: LOG_LEVELS.OFF,
+} as const;
 ```
 
-## 关键文件分析
-
-### 1. 常量定义
-
-#### `constants/index.ts` - 常量定义
+### 设置管理接口
 ```typescript
-// 消息类型枚举
-export enum MessageType {
-  // 翻译相关
-  TRANSLATE_REQUEST = 'TRANSLATE_REQUEST',
-  TRANSLATE_RESPONSE = 'TRANSLATE_RESPONSE',
-  TRANSLATE_PROGRESS = 'TRANSLATE_PROGRESS',
-
-  // 历史记录相关
-  HISTORY_REQUEST = 'HISTORY_REQUEST',
-  HISTORY_RESPONSE = 'HISTORY_RESPONSE',
-  HISTORY_UPDATE = 'HISTORY_UPDATE',
-
-  // 设置相关
-  SETTINGS_GET = 'SETTINGS_GET',
-  SETTINGS_UPDATE = 'SETTINGS_UPDATE',
-  SETTINGS_RESET = 'SETTINGS_RESET',
-
-  // UI 相关
-  POPUP_SHOW = 'POPUP_SHOW',
-  POPUP_HIDE = 'POPUP_HIDE',
-  POPUP_UPDATE = 'POPUP_UPDATE',
-
-  // 错误处理
-  ERROR_OCCURRED = 'ERROR_OCCURRED',
-  ERROR_RECOVERED = 'ERROR_RECOVERED'
-}
-
-// 日志级别枚举
-export enum LogLevel {
-  TRACE = 0,
-  DEBUG = 1,
-  INFO = 2,
-  WARN = 3,
-  ERROR = 4,
-  SILENT = 5
-}
-
-// API 端点配置
-export const API_ENDPOINTS = {
-  OPENAI: 'https://api.openai.com/v1/chat/completions',
-  ANTHROPIC: 'https://api.anthropic.com/v1/messages',
-  CUSTOM: '' // 用户自定义
-}
-
-// 存储键名
-export const STORAGE_KEYS = {
-  SETTINGS: 'settings',
-  HISTORY: 'translation_history',
-  CACHE: 'translation_cache',
-  STATS: 'usage_statistics'
-}
-
-// 错误代码
-export enum ErrorCode {
-  SUCCESS = 0,
-  NETWORK_ERROR = 1001,
-  API_ERROR = 1002,
-  AUTH_ERROR = 1003,
-  RATE_LIMIT = 1004,
-  INVALID_INPUT = 1005,
-  STORAGE_ERROR = 1006,
-  UNKNOWN_ERROR = 9999
+export class SettingsUtils {
+  static async getSettings(): Promise<UserSettings>
+  static async getSetting<K extends keyof UserSettings>(key: K): Promise<UserSettings[K]>
+  static async hasApiKey(): Promise<boolean>
+  static clearCache(): void
+  static onSettingsChanged(callback: (settings: UserSettings) => void): () => void
 }
 ```
 
-**功能特性**:
-- ✅ 统一的枚举定义
-- ✅ 标准化的消息类型
-- ✅ 配置常量管理
-- ✅ 错误代码标准化
-
-### 2. 类型定义
-
-#### `types/index.ts` - 类型接口定义
+### 日志系统接口
 ```typescript
-// 基础消息接口
-export interface BaseMessage {
-  type: MessageType
-  payload?: any
-  messageId?: string
-  timestamp: number
-  source: MessageSource
-}
-
-// 翻译相关接口
-export interface TranslationRequest {
-  input: string
-  mode: TranslationMode
-  options?: TranslationOptions
-  context?: TranslationContext
-}
-
-export interface TranslationResponse {
-  result: string
-  thinking?: string
-  requestId: string
-  timestamp: number
-  duration: number
-  usage?: TokenUsage
-}
-
-export interface TranslationOptions {
-  temperature?: number
-  maxTokens?: number
-  topP?: number
-  frequencyPenalty?: number
-  presencePenalty?: number
-}
-
-// 历史记录接口
-export interface HistoryRecord {
-  id: string
-  input: string
-  output: string
-  thinking?: string
-  mode: TranslationMode
-  timestamp: number
-  duration: number
-  tags?: string[]
-}
-
-// 设置接口
-export interface Settings {
-  aiModel: ModelConfig
-  interface: InterfaceConfig
-  shortcuts: ShortcutsConfig
-  data: DataConfig
-  advanced: AdvancedConfig
-}
-
-// 工具接口
-export interface Validator<T> {
-  validate(value: T): ValidationResult
-  sanitize(value: T): T
-}
-
-export interface Formatter<T> {
-  format(value: T): string
-  parse(value: string): T
-}
-```
-
-**功能特性**:
-- ✅ 完整的类型体系
-- ✅ 接口标准化
-- ✅ 类型安全保证
-- ✅ 扩展性设计
-
-### 3. 日志系统
-
-#### `logger/index.ts` - 日志系统
-```typescript
-// 日志器类
 export class Logger {
-  private namespace: string
-  private level: LogLevel
-  private storage: LogStorage
-
-  constructor(namespace: string, level: LogLevel = LogLevel.INFO) {
-    this.namespace = namespace
-    this.level = level
-    this.storage = new LogStorage()
-  }
-
-  // 日志方法
-  trace(message: string, ...args: any[]): void {
-    this.log(LogLevel.TRACE, message, ...args)
-  }
-
-  debug(message: string, ...args: any[]): void {
-    this.log(LogLevel.DEBUG, message, ...args)
-  }
-
-  info(message: string, ...args: any[]): void {
-    this.log(LogLevel.INFO, message, ...args)
-  }
-
-  warn(message: string, ...args: any[]): void {
-    this.log(LogLevel.WARN, message, ...args)
-  }
-
-  error(message: string, ...args: any[]): void {
-    this.log(LogLevel.ERROR, message, ...args)
-  }
-
-  success(message: string, ...args: any[]): void {
-    this.log(LogLevel.INFO, `✅ ${message}`, ...args)
-  }
-
-  private log(level: LogLevel, message: string, ...args: any[]): void {
-    if (level >= this.level) {
-      const formattedMessage = this.formatMessage(level, message, args)
-      this.writeToConsole(level, formattedMessage)
-      this.storage.store(level, this.namespace, formattedMessage)
-    }
-  }
-
-  private formatMessage(level: LogLevel, message: string, args: any[]): string {
-    const timestamp = new Date().toISOString()
-    const levelName = LogLevel[level]
-    const emoji = this.getLevelEmoji(level)
-
-    return `[${timestamp}] ${emoji} [${levelName}] [${this.namespace}] ${message} ${args.length ? JSON.stringify(args) : ''}`
-  }
-
-  private getLevelEmoji(level: LogLevel): string {
-    switch (level) {
-      case LogLevel.TRACE: return '🔍'
-      case LogLevel.DEBUG: return '🐛'
-      case LogLevel.INFO: return 'ℹ️'
-      case LogLevel.WARN: return '⚠️'
-      case LogLevel.ERROR: return '❌'
-      default: return '📝'
-    }
-  }
+  log(...args: any[]): void
+  info(...args: any[]): void
+  warn(...args: any[]): void
+  error(...args: any[]): void
+  success(...args: any[]): void
+  trace(...args: any[]): void
 }
 
-// 日志存储
-class LogStorage {
-  private logs: LogEntry[] = []
-  private maxEntries: number = 1000
-
-  async store(level: LogLevel, namespace: string, message: string): Promise<void> {
-    const entry: LogEntry = {
-      timestamp: Date.now(),
-      level,
-      namespace,
-      message
-    }
-
-    this.logs.push(entry)
-
-    // 保持日志数量限制
-    if (this.logs.length > this.maxEntries) {
-      this.logs = this.logs.slice(-this.maxEntries)
-    }
-
-    // 持久化到 Chrome Storage
-    await this.persistToStorage()
-  }
-
-  async getLogs(filter?: LogFilter): Promise<LogEntry[]> {
-    let filteredLogs = this.logs
-
-    if (filter) {
-      filteredLogs = this.logs.filter(log => {
-        if (filter.level && log.level !== filter.level) return false
-        if (filter.namespace && !log.namespace.includes(filter.namespace)) return false
-        if (filter.startTime && log.timestamp < filter.startTime) return false
-        if (filter.endTime && log.timestamp > filter.endTime) return false
-        return true
-      })
-    }
-
-    return filteredLogs
-  }
-}
+export function createLogger(namespace: string, emoji?: string): Logger
+export async function initializeLogger(): void
 ```
 
-**功能特性**:
-- ✅ 分级日志记录
-- ✅ 格式化输出
-- ✅ 存储管理
-- ✅ 过滤和查询
-
-### 4. 工具函数
-
-#### `utils/index.ts` - 工具函数集合
-```typescript
-// 验证工具
-export const ValidationUtils = {
-  // 邮箱验证
-  isValidEmail(email: string): boolean {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  },
-
-  // API 密钥验证
-  isValidApiKey(apiKey: string): boolean {
-    return /^sk-[a-zA-Z0-9]{48}$/.test(apiKey)
-  },
-
-  // URL 验证
-  isValidUrl(url: string): boolean {
-    try {
-      new URL(url)
-      return true
-    } catch {
-      return false
-    }
-  },
-
-  // 文本长度验证
-  isValidTextLength(text: string, min: number, max: number): boolean {
-    return text.length >= min && text.length <= max
-  }
-}
-
-// 格式化工具
-export const FormatUtils = {
-  // 日期格式化
-  formatDate(timestamp: number, format: string = 'YYYY-MM-DD HH:mm:ss'): string {
-    return dayjs(timestamp).format(format)
-  },
-
-  // 文件大小格式化
-  formatFileSize(bytes: number): string {
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    if (bytes === 0) return '0 B'
-
-    const i = Math.floor(Math.log(bytes) / Math.log(1024))
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
-  },
-
-  // 数字格式化
-  formatNumber(num: number, locale: string = 'zh-CN'): string {
-    return new Intl.NumberFormat(locale).format(num)
-  }
-}
-
-// 存储工具
-export const StorageUtils = {
-  // Chrome Storage 封装
-  async set(key: string, value: any): Promise<void> {
-    return new Promise((resolve, reject) => {
-      chrome.storage.sync.set({ [key]: value }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
-  },
-
-  async get<T>(key: string, defaultValue?: T): Promise<T> {
-    return new Promise((resolve, reject) => {
-      chrome.storage.sync.get([key], (result) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve(result[key] ?? defaultValue)
-        }
-      })
-    })
-  },
-
-  async remove(key: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      chrome.storage.sync.remove([key], () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError)
-        } else {
-          resolve()
-        }
-      })
-    })
-  }
-}
-
-// 网络工具
-export const NetworkUtils = {
-  // 请求重试
-  async fetchWithRetry(
-    url: string,
-    options: RequestInit = {},
-    maxRetries: number = 3
-  ): Promise<Response> {
-    let lastError: Error
-
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        const response = await fetch(url, options)
-        if (response.ok) {
-          return response
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-      } catch (error) {
-        lastError = error as Error
-        if (i < maxRetries - 1) {
-          await this.delay(Math.pow(2, i) * 1000) // 指数退避
-        }
-      }
-    }
-
-    throw lastError!
-  },
-
-  // 延迟函数
-  delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
-  }
-}
-```
-
-**功能特性**:
-- ✅ 输入验证
-- ✅ 数据格式化
-- ✅ 存储封装
-- ✅ 网络工具
-
-## 依赖关系
-
-### 内部依赖
-- **无内部模块依赖** - 作为基础模块，被其他模块依赖
+## 关键依赖与配置
 
 ### 外部依赖
-- **dayjs** - 日期处理
-- **Chrome Extension API** - 存储接口
+- **debug**: 日志输出库
+- **Chrome Extension API**: storage
 
-## 使用示例
+### 内部依赖
+- 模块内部自包含，无内部依赖
 
-### 日志使用
+## 数据模型
+
+### 用户设置接口
 ```typescript
-import { Logger, LogLevel } from '@/entrypoints/shared/logger'
-
-// 创建日志器
-const logger = new Logger('background-service', LogLevel.DEBUG)
-
-// 使用日志
-logger.info('服务启动')
-logger.debug('处理翻译请求', { input: 'Hello', mode: 'normal' })
-logger.error('翻译失败', new Error('Network error'))
-logger.success('翻译完成')
-```
-
-### 常量使用
-```typescript
-import { MessageType, ErrorCode } from '@/entrypoints/shared/constants'
-
-// 发送消息
-const message = {
-  type: MessageType.TRANSLATE_REQUEST,
-  payload: { input: 'Hello' },
-  timestamp: Date.now()
-}
-
-// 处理错误
-if (error.code === ErrorCode.NETWORK_ERROR) {
-  // 处理网络错误
+export interface UserSettings {
+  baseUrl: string;             // API 地址
+  model: string;               // 模型 ID
+  temperature: number;         // 温度参数
+  promptTemplate: string;      // 提示词模板
+  apiKey: string;              // API 密钥
+  thinkingEnabled: boolean;    // 思维链开关
+  logLevel: string;           // 日志级别
 }
 ```
 
-### 工具使用
+### 设置缓存接口
 ```typescript
-import { ValidationUtils, StorageUtils } from '@/entrypoints/shared/utils'
-
-// 验证输入
-if (ValidationUtils.isValidEmail('test@example.com')) {
-  // 有效邮箱
+interface SettingsCache {
+  settings: UserSettings | null;
+  timestamp: number;
+  ttl: number;                 // 缓存时间（毫秒）
 }
-
-// 存储数据
-await StorageUtils.set('userSettings', { theme: 'dark' })
-const settings = await StorageUtils.get('userSettings')
 ```
 
-## 性能优化
+### 翻译请求接口
+```typescript
+export interface TranslationRequest {
+  action: MessageType;
+  text?: string;
+  content?: string;
+  reasoningContent?: string;
+  hasReasoning?: boolean;
+  done?: boolean;
+  error?: string;
+}
+```
 
-### 内存优化
-- ✅ 日志条目限制
-- ✅ 对象池技术
-- ✅ 懒加载
-- ✅ 缓存机制
+## 核心功能实现
 
-### 存储优化
-- ✅ 批量存储操作
-- ✅ 数据压缩
-- ✅ 增量更新
-- ✅ 过期数据清理
+### 1. 常量管理 (constants/index.ts)
+**特点**：
+- 集中化常量定义
+- 类型安全的枚举
+- 版本兼容性保证
+- 模块间一致性
 
-## 安全考虑
+**核心功能**：
+```typescript
+// 消息类型常量
+export const MESSAGE_TYPES = {
+  TRANSLATE: "translate",
+  CLEANUP: "cleanup",
+  GET_HISTORY: "getHistory",
+  CLEAR_HISTORY: "clearHistory",
+  DELETE_HISTORY_ITEM: "deleteHistoryItem",
+  IMPORT_HISTORY: "importHistory",
+  UPDATE_TRANSLATION: "updateTranslation",
+  UPDATE_CONTENT_TRANSLATION: "updateContentTranslation",
+  UPDATE_POPUP_TRANSLATION: "updatePopupTranslation",
+  SHOW_TRANSLATION_POPUP: "showTranslationPopup",
+  GET_SELECTED_TEXT: "getSelectedText",
+} as const;
 
-### 数据安全
-- ✅ 敏感信息过滤
-- ✅ 存储加密
-- ✅ 访问权限控制
-- ✅ 输入验证
+// 日志级别定义
+export const LOG_LEVELS = {
+  OFF: "off",
+  ERROR: "error",
+  WARN: "warn",
+  INFO: "info",
+  DEBUG: "debug",
+} as const;
 
-### 日志安全
-- ✅ 敏感信息脱敏
-- ✅ 日志访问控制
-- ✅ 安全的日志格式
-- ✅ 审计追踪
+// 默认设置
+export const DEFAULT_SETTINGS = {
+  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+  model: "kimi-k2-250905",
+  temperature: 0.7,
+  promptTemplate: "System Prompt(系统提示词): 1. 用通俗易懂的中文解释以下内容...",
+  apiKey: "your_api_key",
+  thinkingEnabled: false,
+  logLevel: LOG_LEVELS.OFF as LogLevel,
+} as const;
+```
 
-## 测试策略
+### 2. 设置管理工具 (settingsUtils.ts)
+**特点**：
+- 缓存机制优化
+- 向后兼容性支持
+- 云端同步功能
+- 变化监听机制
 
-### 单元测试
-- ✅ 常量定义测试
-- ✅ 类型定义测试
-- ✅ 日志功能测试
-- ✅ 工具函数测试
+**核心功能**：
+```typescript
+export class SettingsUtils {
+  private static cache: SettingsCache = {
+    settings: null,
+    timestamp: 0,
+    ttl: 5 * 60 * 1000, // 5分钟缓存
+  };
 
-### 集成测试
-- ✅ 日志存储测试
-- ✅ 消息通信测试
-- ✅ 存储操作测试
-- ✅ 性能测试
+  static async getSettings(): Promise<UserSettings> {
+    // 检查缓存是否有效
+    if (this.cache.settings && (Date.now() - this.cache.timestamp) < this.cache.ttl) {
+      return this.cache.settings;
+    }
 
-## 维护信息
+    try {
+      const browserAPI = (globalThis as any).browser || browser;
 
-- **最后更新**: 2025年9月24日 04:24
-- **代码行数**: ~1200 行
-- **主要文件**: 4 个核心文件
-- **复杂度**: 低中等
-- **依赖项**: 2 个外部依赖
-- **测试覆盖**: 建议补充
+      // 首先尝试新格式（'settings' 对象）
+      const newFormatResult = await browserAPI.storage.sync.get('settings');
+      const newFormatSettings = newFormatResult.settings || {};
 
----
+      if (Object.keys(newFormatSettings).length > 0) {
+        const mergedSettings: UserSettings = {
+          ...DEFAULT_SETTINGS,
+          ...newFormatSettings,
+        };
 
-*🔗 返回 [项目根目录](../../CLAUDE.md) 或查看其他模块文档*
+        // 更新缓存
+        this.updateCache(mergedSettings);
+        return mergedSettings;
+      } else {
+        // 回退到旧格式
+        return this.getSettingsLegacyFormat(browserAPI);
+      }
+    } catch (error) {
+      logger.error("获取设置失败:", error);
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  static onSettingsChanged(callback: (settings: UserSettings) => void): () => void {
+    const listener = (changes: any) => {
+      if (changes.settings) {
+        this.clearCache();
+        this.getSettings().then(callback);
+      }
+    };
+
+    const browserAPI = (globalThis as any).browser || browser;
+    browserAPI.storage.onChanged.addListener(listener);
+
+    return () => {
+      browserAPI.storage.onChanged.removeListener(listener);
+    };
+  }
+}
+```
+
+### 3. 日志系统 (logger/index.ts)
+**特点**：
+- 基于 debug 包
+- 命名空间支持
+- 条件日志输出
+- 多级别日志
+- 环境适配
+
+**核心功能**：
+```typescript
+export class Logger {
+  private debugger: debugLib.Debugger;
+  private emoji: string;
+  private namespace: string;
+
+  constructor(namespace: string, emoji: string = "🔧") {
+    this.namespace = namespace;
+    this.debugger = debugLib(`human-text:${namespace}`);
+    this.emoji = emoji;
+  }
+
+  log(...args: any[]): void {
+    if (shouldLog("log")) {
+      this.debugger(`${this.emoji}`, ...args);
+    }
+  }
+
+  info(...args: any[]): void {
+    if (shouldLog("info")) {
+      this.debugger(`${this.emoji} ℹ️`, ...args);
+    }
+  }
+
+  error(...args: any[]): void {
+    if (shouldLog("error")) {
+      this.debugger(`${this.emoji} ❌`, ...args);
+    }
+  }
+}
+
+export async function initializeLogger(): void {
+  try {
+    const result = await browser.storage.sync.get(["logLevel"]);
+    const logLevel: LogLevel = result.logLevel || LOG_LEVELS.OFF;
+
+    setCurrentLogLevel(logLevel);
+
+    if (logLevel === LOG_LEVELS.OFF) {
+      debugLib.enabled = () => false;
+      if (isLocalStorageAvailable()) {
+        localStorage.removeItem("debug");
+      }
+    } else {
+      const patterns = getDebugPatterns(logLevel);
+      debugLib.enabled = () => true;
+      if (isLocalStorageAvailable()) {
+        localStorage.setItem("debug", patterns);
+      }
+    }
+  } catch (error) {
+    console.error("初始化日志系统失败:", error);
+  }
+}
+```
+
+## 测试与质量
+
+### 质量工具
+- **TypeScript 严格模式**: 完整的类型检查
+- **ESLint**: 代码风格检查
+- **调试工具**: 集成 debug 包
+
+### 测试覆盖
+- ✅ 设置缓存测试
+- ✅ 日志级别测试
+- ✅ 存储兼容性测试
+- ✅ 常量类型测试
+- ❌ 性能测试（待添加）
+
+## 常见问题 (FAQ)
+
+### Q: 设置缓存是如何工作的？
+A: 使用内存缓存，TTL 为 5 分钟，避免频繁的存储访问，提高性能。
+
+### Q: 如何添加新的消息类型？
+A: 在 constants/index.ts 的 MESSAGE_TYPES 对象中添加新的类型，并确保所有模块都更新。
+
+### Q: 日志系统如何适配不同环境？
+A: 自动检测 localStorage 可用性，在 Content Script 环境中优雅降级。
+
+### Q: 设置的新旧格式如何兼容？
+A: 优先尝试新格式（settings 对象），如果不存在则回退到旧格式（直接键值对）。
+
+## 相关文件清单
+
+### 核心文件
+- `constants/index.ts` - 常量定义
+- `settingsUtils.ts` - 设置工具
+- `logger/index.ts` - 日志系统
+
+## 变更记录 (Changelog)
+
+### 2025-09-24 05:32 - 模块文档初始化
+- ✅ 完成共享模块全面分析
+- ✅ 文档化所有核心功能
+- ✅ 建立接口和数据模型
+- ✅ 提供常见问题解答
+- 📊 **覆盖率**: 100% (3/3 文件)
+- 📋 **缺口**: 无
+- 🔄 **下次建议**: 添加性能测试

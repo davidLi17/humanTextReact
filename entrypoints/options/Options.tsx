@@ -41,6 +41,9 @@ function Options() {
 
     loadSettings();
     loadShortcut();
+
+    // 显示当前日志级别状态
+    showCurrentLogLevelStatus();
   }, []);
 
   const loadSettings = async () => {
@@ -95,7 +98,8 @@ function Options() {
     if (saveStatus === "saving") return; // 防止重复提交
 
     setSaveStatus("saving");
-    optionsLogger.info("开始保存设置", settings);
+    // 使用 console.log 确保能看到日志
+    console.log("[Options] 开始保存设置:", settings);
 
     try {
       // 同时保存到云端和本地
@@ -104,17 +108,52 @@ function Options() {
         browser.storage.local.set(settings),
       ]);
 
-      // 如果开发者模式设置发生了变化，重新初始化日志系统
-      optionsLogger.info("设置保存成功，重新初始化日志系统");
+      // 重新初始化日志系统以应用新的日志级别
+      console.log("[Options] 设置保存成功，重新初始化日志系统");
       await initializeLogger();
+
+      // 测试新设置的日志级别
+      await testLogLevel(settings.logLevel);
 
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
-      optionsLogger.success("设置保存完成");
     } catch (error) {
+      console.error("[Options] 保存设置失败:", error);
       optionsLogger.error("保存设置失败:", error);
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 2000);
+    }
+  };
+
+  // 测试日志级别设置
+  const testLogLevel = async (logLevel: LogLevel) => {
+    console.log(`[Options] 测试日志级别: ${logLevel}`);
+
+    // 测试不同级别的日志
+    optionsLogger.trace("这是一条 trace 日志");
+    optionsLogger.log("这是一条 log 日志");
+    optionsLogger.info("这是一条 info 日志");
+    optionsLogger.warn("这是一条 warn 日志");
+    optionsLogger.error("这是一条 error 日志");
+    optionsLogger.success("这是一条 success 日志");
+
+    console.log(`[Options] 日志级别测试完成，当前级别: ${logLevel}`);
+  };
+
+  // 显示当前日志级别状态
+  const showCurrentLogLevelStatus = async () => {
+    try {
+      const result = await browser.storage.sync.get(["logLevel"]);
+      const currentLogLevel = result.logLevel || LOG_LEVELS.OFF;
+      console.log(`[Options] 当前日志级别: ${currentLogLevel}`);
+
+      // 检查 localStorage 中的 debug 设置
+      if (typeof localStorage !== "undefined") {
+        const debugSetting = localStorage.getItem("debug");
+        console.log(`[Options] localStorage debug 设置: ${debugSetting}`);
+      }
+    } catch (error) {
+      console.error("[Options] 获取日志级别状态失败:", error);
     }
   };
 

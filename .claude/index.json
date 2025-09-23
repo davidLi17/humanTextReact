@@ -1,0 +1,251 @@
+{
+  "timestamp": "2025-09-24T05:32:48.000Z",
+  "project": {
+    "name": "人话翻译器",
+    "version": "1.3.0",
+    "description": "基于 React + WXT 框架的 Chrome 扩展程序",
+    "type": "chrome-extension",
+    "framework": "wxt"
+  },
+  "modules": [
+    {
+      "path": "entrypoints/background",
+      "name": "核心服务模块",
+      "type": "service",
+      "entry": "index.ts",
+      "responsibilities": [
+        "翻译核心逻辑",
+        "API 请求处理",
+        "消息路由管理",
+        "历史记录管理",
+        "设置管理",
+        "右键菜单管理",
+        "快捷键管理"
+      ],
+      "interfaces": [
+        "TranslationService",
+        "ApiService",
+        "HistoryManager",
+        "MessageHandler",
+        "RequestManager",
+        "ContextMenuManager",
+        "ShortcutManager"
+      ],
+      "dependencies": [
+        "Chrome Extension API",
+        "WXT framework",
+        "shared/constants",
+        "shared/logger",
+        "shared/settingsUtils"
+      ],
+      "coverage": {
+        "files": 12,
+        "total": 12,
+        "percentage": 100,
+        "gaps": []
+      }
+    },
+    {
+      "path": "entrypoints/popup",
+      "name": "用户界面模块",
+      "type": "ui",
+      "entry": "App.tsx",
+      "responsibilities": [
+        "用户界面渲染",
+        "文本输入处理",
+        "翻译结果展示",
+        "历史记录管理",
+        "智能搜索功能",
+        "设置同步"
+      ],
+      "interfaces": [
+        "TranslationArea",
+        "HistoryPanel",
+        "SmartInput",
+        "CollapsibleThinkingChain",
+        "CopyFooter"
+      ],
+      "dependencies": [
+        "React 19",
+        "TypeScript",
+        "@icon-park/react",
+        "fuse.js",
+        "dayjs",
+        "lodash-es",
+        "shared/settingsUtils",
+        "shared/logger"
+      ],
+      "coverage": {
+        "files": 12,
+        "total": 12,
+        "percentage": 100,
+        "gaps": []
+      }
+    },
+    {
+      "path": "entrypoints/content",
+      "name": "内容脚本模块",
+      "type": "content-script",
+      "entry": "index.ts",
+      "responsibilities": [
+        "页面弹窗管理",
+        "消息处理",
+        "样式注入",
+        "Markdown 渲染",
+        "用户交互事件"
+      ],
+      "interfaces": [
+        "PopupManager",
+        "MessageHandler",
+        "PopupEventHandler"
+      ],
+      "dependencies": [
+        "Chrome Extension API",
+        "WXT framework",
+        "shared/constants",
+        "shared/logger",
+        "shared/settingsUtils",
+        "shared/utils/markdown"
+      ],
+      "coverage": {
+        "files": 5,
+        "total": 5,
+        "percentage": 100,
+        "gaps": []
+      }
+    },
+    {
+      "path": "entrypoints/options",
+      "name": "设置管理模块",
+      "type": "ui",
+      "entry": "Options.tsx",
+      "responsibilities": [
+        "用户配置管理",
+        "API 设置",
+        "模型选择",
+        "提示词定制",
+        "快捷键管理",
+        "设置同步"
+      ],
+      "interfaces": [
+        "Settings",
+        "ApiHint",
+        "ApiPlatformHint"
+      ],
+      "dependencies": [
+        "React 19",
+        "TypeScript",
+        "@icon-park/react",
+        "shared/settingsUtils",
+        "shared/logger",
+        "shared/constants"
+      ],
+      "coverage": {
+        "files": 4,
+        "total": 4,
+        "percentage": 100,
+        "gaps": []
+      }
+    },
+    {
+      "path": "entrypoints/shared",
+      "name": "共享工具模块",
+      "type": "shared",
+      "entry": "constants/index.ts",
+      "responsibilities": [
+        "常量定义",
+        "设置管理",
+        "日志系统",
+        "类型定义"
+      ],
+      "interfaces": [
+        "MESSAGE_TYPES",
+        "LOG_LEVELS",
+        "DEFAULT_SETTINGS",
+        "SettingsUtils",
+        "Logger"
+      ],
+      "dependencies": [
+        "debug",
+        "Chrome Extension API"
+      ],
+      "coverage": {
+        "files": 3,
+        "total": 3,
+        "percentage": 100,
+        "gaps": []
+      }
+    },
+    {
+      "path": "common/logger",
+      "name": "通用日志模块",
+      "type": "utility",
+      "entry": "UniversalLogger.ts",
+      "responsibilities": [
+        "统一日志接口",
+        "命名空间管理",
+        "日志级别控制",
+        "条件日志输出"
+      ],
+      "interfaces": [
+        "UniversalLogger",
+        "LoggerConfig",
+        "LogLevel"
+      ],
+      "dependencies": [
+        "debug",
+        "TypeScript"
+      ],
+      "coverage": {
+        "files": 5,
+        "total": 5,
+        "percentage": 100,
+        "gaps": []
+      }
+    }
+  ],
+  "statistics": {
+    "totalFiles": 41,
+    "analyzedFiles": 41,
+    "coveragePercentage": 100,
+    "ignoredFiles": 0,
+    "modules": 6,
+    "documentationFiles": 7,
+    "technologyStack": {
+      "frontend": ["React 19", "TypeScript", "Less"],
+      "extension": ["WXT 0.20.6", "Chrome Extension MV3"],
+      "utilities": ["fuse.js", "dayjs", "lodash-es", "debug", "@icon-park/react"]
+    }
+  },
+  "quality": {
+    "architecture": "modular",
+    "typeSafety": "strict",
+    "errorHandling": "comprehensive",
+    "testing": "partial",
+    "documentation": "complete"
+  },
+  "recommendations": {
+    "nextSteps": [
+      "添加单元测试覆盖",
+      "性能优化测试",
+      "跨浏览器兼容性测试",
+      "国际化支持"
+    ],
+    "improvements": [
+      "添加错误边界组件",
+      "实现离线功能",
+      "优化包大小",
+      "添加用户反馈机制"
+    ]
+  },
+  "changelog": [
+    {
+      "timestamp": "2025-09-24T05:32:48.000Z",
+      "action": "initialization",
+      "description": "完成项目全面架构分析和文档初始化",
+      "coverage": "100%",
+      "modules": 6,
+      "files": 41
+    }
+  ]
+}
