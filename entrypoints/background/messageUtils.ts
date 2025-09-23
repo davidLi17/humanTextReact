@@ -1,3 +1,6 @@
+import { createLogger } from "@/entrypoints/shared/logger/index";
+
+const logger = createLogger("MessageUtils");
 /**
  * 消息工具类
  * 负责处理消息发送的工具函数

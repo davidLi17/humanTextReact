@@ -1,8 +1,8 @@
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
-import { TranslationService } from "./translationService";
+import { createLogger } from "@/entrypoints/shared/logger";
 import { MessageUtils } from "./messageUtils";
 import { SettingsManager } from "./settingsManager";
-import { createLogger } from "@/entrypoints/shared/logger";
+import { TranslationService } from "./translationService";
 
 const logger = createLogger("context-menu", "🖱️");
 

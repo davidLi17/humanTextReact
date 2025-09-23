@@ -318,8 +318,8 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
   const code = button.getAttribute("data-code");
   if (!code) return;
 
-  const copyIcon = button.querySelector(".copy-icon");
-  const checkIcon = button.querySelector(".check-icon");
+  const copyIcon = button.querySelector(".copy-icon") as HTMLElement;
+  const checkIcon = button.querySelector(".check-icon") as HTMLElement;
 
   try {
     // 使用现代 Clipboard API

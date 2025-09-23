@@ -1,13 +1,13 @@
 import {
-  MESSAGE_TYPES,
   DEFAULT_SETTINGS,
+  MESSAGE_TYPES,
   THINKING_CONFIG,
 } from "@/entrypoints/shared/constants";
-import { SettingsManager } from "./settingsManager";
-import { RequestManager } from "./requestManager";
+import { createLogger } from "@/entrypoints/shared/logger";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
-import { createLogger } from "@/entrypoints/shared/logger";
+import { RequestManager } from "./requestManager";
+import { SettingsManager } from "./settingsManager";
 
 const logger = createLogger("translation-service", "🌐");
 

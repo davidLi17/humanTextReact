@@ -1,9 +1,9 @@
-import "./App.less";
-import { useState, useEffect } from "react";
-import TranslationArea from "./components/TranslationArea";
-import HistoryPanel from "./components/HistoryPanel";
-import { TranslationState, HistoryItem, MessageRequest } from "./types";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { useEffect, useState } from "react";
+import "./App.less";
+import HistoryPanel from "./components/HistoryPanel";
+import TranslationArea from "./components/TranslationArea";
+import { HistoryItem, MessageRequest, TranslationState } from "./types";
 
 const logger = createLogger("popup-app", "🔽");
 

@@ -1,13 +1,13 @@
-import "./Options.less";
-import { useState, useEffect } from "react";
 import {
   DEFAULT_SETTINGS,
   LOG_LEVELS,
   LogLevel,
 } from "@/entrypoints/shared/constants";
-import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
-import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
 import { initializeLogger, optionsLogger } from "@/entrypoints/shared/logger";
+import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
+import { useEffect, useState } from "react";
+import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
+import "./Options.less";
 
 interface Settings {
   apiKey: string;

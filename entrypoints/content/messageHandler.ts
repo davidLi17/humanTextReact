@@ -2,8 +2,8 @@ import {
   MESSAGE_TYPES,
   TranslationRequest,
 } from "@/entrypoints/shared/constants";
-import { PopupManager } from "./popupManager";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { PopupManager } from "./popupManager";
 
 const logger = createLogger("content-message", "📨");
 

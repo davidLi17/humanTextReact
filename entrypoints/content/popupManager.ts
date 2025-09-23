@@ -5,7 +5,7 @@ import {
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
 import { createLogger } from "@/entrypoints/shared/logger";
-import { parseMarkdown, initializeCodeCopy } from "@/shared/utils/markdown"; // Markdown解析工具
+import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown"; // Markdown解析工具
 import { PopupEventHandler } from "./popupEventHandler";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器

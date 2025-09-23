@@ -1,7 +1,7 @@
-import { injectStyles } from "./styles";
-import { PopupManager } from "./popupManager";
+import { contentLogger, initializeLogger } from "@/entrypoints/shared/logger";
 import { MessageHandler } from "./messageHandler";
-import { initializeLogger, contentLogger } from "@/entrypoints/shared/logger";
+import { PopupManager } from "./popupManager";
+import { injectStyles } from "./styles";
 
 export default defineContentScript({
   matches: ["<all_urls>"],

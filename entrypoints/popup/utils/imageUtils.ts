@@ -1,6 +1,6 @@
 import { IMAGE_CONFIG } from "@/entrypoints/shared/constants";
-import { ImageContent } from "../types";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { ImageContent } from "../types";
 
 const logger = createLogger("popup-image", "🖼️");
 

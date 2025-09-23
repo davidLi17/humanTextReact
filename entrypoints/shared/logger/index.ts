@@ -1,5 +1,5 @@
-import debugLib from "debug";
 import { LOG_LEVELS, LogLevel } from "@/entrypoints/shared/constants";
+import debugLib from "debug";
 
 /**
  * 专业的日志管理系统

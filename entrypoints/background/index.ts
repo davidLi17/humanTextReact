@@ -1,30 +1,30 @@
 // 统一导出所有背景脚本模块
 export {
-  MESSAGE_TYPES,
   DEFAULT_SETTINGS,
   MAX_HISTORY_COUNT,
+  MESSAGE_TYPES,
 } from "@/entrypoints/shared/constants";
-export { SettingsManager } from "./settingsManager";
-export { ShortcutManager } from "./shortcutManager";
+export { ApiService } from "./apiService";
+export { ContextMenuHandler } from "./contextMenuHandler";
 export { ContextMenuManager } from "./contextMenuManager";
-export { RequestManager } from "./requestManager";
 export { HistoryManager } from "./historyManager";
 export type { HistoryItem } from "./historyManager";
-export { ApiService } from "./apiService";
-export { MessageUtils } from "./messageUtils";
-export { TranslationService } from "./translationService";
 export { MessageHandler } from "./messageHandler";
-export { ContextMenuHandler } from "./contextMenuHandler";
+export { MessageUtils } from "./messageUtils";
+export { RequestManager } from "./requestManager";
+export { SettingsManager } from "./settingsManager";
+export { ShortcutManager } from "./shortcutManager";
+export { TranslationService } from "./translationService";
 
-import { ShortcutManager } from "./shortcutManager";
+import {
+  backgroundLogger,
+  initializeLogger,
+} from "@/entrypoints/shared/logger";
+import { ContextMenuHandler } from "./contextMenuHandler";
 import { ContextMenuManager } from "./contextMenuManager";
 import { MessageHandler } from "./messageHandler";
-import { ContextMenuHandler } from "./contextMenuHandler";
 import { RequestManager } from "./requestManager";
-import {
-  initializeLogger,
-  backgroundLogger,
-} from "@/entrypoints/shared/logger";
+import { ShortcutManager } from "./shortcutManager";
 
 export default defineBackground(() => {
   // 初始化日志系统

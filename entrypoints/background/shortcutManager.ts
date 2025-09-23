@@ -1,5 +1,5 @@
-import { ContextMenuHandler } from "./contextMenuHandler";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { ContextMenuHandler } from "./contextMenuHandler";
 
 const logger = createLogger("shortcuts", "⌨️");
 

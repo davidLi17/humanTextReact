@@ -1,7 +1,7 @@
+import { createLogger } from "@/entrypoints/shared/logger";
+import dayjs from "dayjs";
 import debounce from "lodash-es/debounce";
 import throttle from "lodash-es/throttle";
-import dayjs from "dayjs";
-import { createLogger } from "@/entrypoints/shared/logger";
 
 const logger = createLogger("popup-helpers", "🛠️");
 
