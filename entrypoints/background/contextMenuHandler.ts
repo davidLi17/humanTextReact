@@ -1,7 +1,7 @@
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { MessageUtils } from "./messageUtils";
-import { SettingsManager } from "./settingsManager";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { TranslationService } from "./translationService";
 
 const logger = createLogger("context-menu", "🖱️");
@@ -32,7 +32,7 @@ export class ContextMenuHandler {
           });
 
           // 获取当前设置，确保思维链状态正确
-          const settings = await SettingsManager.getSettings();
+          const settings = await SettingsUtils.getSettings();
           logger.log("⚙️ [ContextMenuHandler] 获取设置", {
             thinkingEnabled: settings.thinkingEnabled,
             hasApiKey: !!settings.apiKey,

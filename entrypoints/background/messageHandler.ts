@@ -4,7 +4,7 @@ import { HistoryManager } from "./historyManager";
 import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
-import { SettingsManager } from "./settingsManager";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 /**
  * 消息处理器
@@ -46,7 +46,7 @@ export class MessageHandler {
           // 如果请求中没有传递 thinkingEnabled，则从设置中获取
           let thinkingEnabled = request.thinkingEnabled;
           if (thinkingEnabled === undefined) {
-            const settings = await SettingsManager.getSettings();
+            const settings = await SettingsUtils.getSettings();
             thinkingEnabled = settings.thinkingEnabled;
           }
 

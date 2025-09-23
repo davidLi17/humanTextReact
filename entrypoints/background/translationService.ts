@@ -7,7 +7,7 @@ import { createLogger } from "@/entrypoints/shared/logger";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
 import { RequestManager } from "./requestManager";
-import { SettingsManager } from "./settingsManager";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("translation-service", "🌐");
 
@@ -70,7 +70,7 @@ export class TranslationService {
     const controller = RequestManager.createRequest(actualTabId);
 
     // 获取设置，优先从云端获取，失败时从本地获取
-    const config = await SettingsManager.getSettings();
+    const config = await SettingsUtils.getSettings();
 
     if (!config.apiKey) {
       throw new Error("请先在设置中配置 API Key");

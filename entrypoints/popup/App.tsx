@@ -4,6 +4,7 @@ import "./App.less";
 import HistoryPanel from "./components/HistoryPanel";
 import TranslationArea from "./components/TranslationArea";
 import { HistoryItem, MessageRequest, TranslationState } from "./types";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("popup-app", "🔽");
 
@@ -84,9 +85,46 @@ function App() {
     }
   }, []);
 
-  // 组件初始化时加载历史记录，用于智能补全
+  // 组件初始化时加载设置和历史记录
   useEffect(() => {
+    // 加载用户设置
+    const loadSettings = async () => {
+      try {
+        const settings = await SettingsUtils.getSettings();
+        logger.log("⚙️ [Popup App] 初始化设置", {
+          thinkingEnabled: settings.thinkingEnabled,
+          hasApiKey: !!settings.apiKey,
+        });
+
+        setTranslationState((prev: TranslationState) => ({
+          ...prev,
+          thinkingEnabled: settings.thinkingEnabled,
+        }));
+      } catch (error) {
+        logger.error("❌ [Popup App] 加载设置失败:", error);
+      }
+    };
+
+    loadSettings();
     loadHistory();
+
+    // 监听设置变化
+    const unsubscribeSettings = SettingsUtils.onSettingsChanged((newSettings) => {
+      logger.log("🔄 [Popup App] 设置已更新", {
+        thinkingEnabled: newSettings.thinkingEnabled,
+        previousState: translationState.thinkingEnabled,
+      });
+
+      setTranslationState((prev: TranslationState) => ({
+        ...prev,
+        thinkingEnabled: newSettings.thinkingEnabled,
+      }));
+    });
+
+    // 清理监听器
+    return () => {
+      unsubscribeSettings();
+    };
   }, []);
 
   // 处理滚动事件（空函数，现在滚动在TranslationArea内部处理）
@@ -115,19 +153,28 @@ function App() {
       hasReasoning: false,
     }));
 
-    // 不再需要用户滚动状态的跟踪
-
     try {
+      // 获取完整设置，确保传递所有必要参数
+      const userSettings = await SettingsUtils.getSettings();
+      logger.log("⚙️ [Popup App] 翻译时使用设置", {
+        thinkingEnabled: userSettings.thinkingEnabled,
+        temperature: userSettings.temperature,
+        hasApiKey: !!userSettings.apiKey,
+      });
+
       // 先发送清理请求
       if (browser?.runtime) {
         await browser.runtime.sendMessage({ action: "cleanup" });
 
-        // 开始新的翻译
+        // 开始新的翻译，传递完整设置
         await browser.runtime.sendMessage({
           action: "translate",
           text,
           images: translationState.images,
-          thinkingEnabled: translationState.thinkingEnabled,
+          thinkingEnabled: userSettings.thinkingEnabled,
+          temperature: userSettings.temperature,
+          promptTemplate: userSettings.promptTemplate,
+          apiKey: userSettings.apiKey,
           source: "popup",
         });
       }

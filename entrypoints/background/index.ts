@@ -12,7 +12,7 @@ export type { HistoryItem } from "./historyManager";
 export { MessageHandler } from "./messageHandler";
 export { MessageUtils } from "./messageUtils";
 export { RequestManager } from "./requestManager";
-export { SettingsManager } from "./settingsManager";
+// SettingsManager 已被替换为 SettingsUtils (shared/settingsUtils.ts)
 export { ShortcutManager } from "./shortcutManager";
 export { TranslationService } from "./translationService";
 

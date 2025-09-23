@@ -4,7 +4,7 @@ import {
 } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { PopupManager } from "./popupManager";
-import { SettingsUtils } from "./settingsUtils";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("content-message", "📨");
 
