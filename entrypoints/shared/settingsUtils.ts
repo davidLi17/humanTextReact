@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, LogLevel } from "./constants";
+import { DEFAULT_SETTINGS, LogLevel, ThemeMode } from "./constants";
 import { createLogger } from "./logger";
 
 const logger = createLogger("shared-settings-utils", "⚙️");
@@ -14,6 +14,7 @@ export interface UserSettings {
   apiKey: string;
   thinkingEnabled: boolean;
   logLevel: LogLevel;
+  theme: ThemeMode;
 }
 
 /**
@@ -76,6 +77,7 @@ export class SettingsUtils {
             newFormatSettings.thinkingEnabled ??
             DEFAULT_SETTINGS.thinkingEnabled,
           logLevel: newFormatSettings.logLevel || DEFAULT_SETTINGS.logLevel,
+          theme: newFormatSettings.theme || DEFAULT_SETTINGS.theme,
         };
 
         // 更新缓存
@@ -108,6 +110,7 @@ export class SettingsUtils {
         apiKey: DEFAULT_SETTINGS.apiKey,
         thinkingEnabled: DEFAULT_SETTINGS.thinkingEnabled,
         logLevel: DEFAULT_SETTINGS.logLevel,
+        theme: DEFAULT_SETTINGS.theme,
       };
     }
   }
@@ -128,6 +131,7 @@ export class SettingsUtils {
         "promptTemplate",
         "thinkingEnabled",
         "logLevel",
+        "theme",
       ]);
 
       if (Object.keys(syncSettings).length > 0) {
@@ -160,6 +164,7 @@ export class SettingsUtils {
         "promptTemplate",
         "thinkingEnabled",
         "logLevel",
+        "theme",
       ]);
 
       if (Object.keys(localSettings).length > 0) {

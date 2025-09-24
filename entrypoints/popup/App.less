@@ -400,6 +400,19 @@ h1 {
   order: 2; // 确保译文区域在思维链之后显示
   flex: 1;
 }
+
+/* 主题：暗色模式覆盖（基于 data-theme） */
+[data-theme="dark"] {
+  .container { background: #0b1220; box-shadow: 0 -4px 24px rgba(0,0,0,0.4); }
+  .input-area { background: #0f172a; border-color: #334155; }
+  .input-area textarea { color: #e5e7eb; }
+  .result-area { background: linear-gradient(135deg, #111827 0%, #0f172a 100%); border-color: #334155; }
+  .result-content { color: #e5e7eb; }
+  .result-section { background: rgba(17,24,39,0.9); border-color: rgba(255,255,255,0.08); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+  .icon-btn { background: rgba(102,126,234,0.08); border-color: rgba(102,126,234,0.2); color: #cbd5ff; }
+  .icon-btn:hover { background: #667eea; color: #fff; }
+  .input-copy-btn { background: rgba(17,24,39,0.95); border-color: #334155; color: #cbd5ff; }
+}
 .result-label {
   font-size: 12px;
   color: @primary-color-start;
