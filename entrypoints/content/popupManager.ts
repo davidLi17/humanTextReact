@@ -5,8 +5,10 @@ import {
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
 import { createLogger } from "@/entrypoints/shared/logger";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown"; // Markdown解析工具
 import { PopupEventHandler } from "./popupEventHandler";
+import { applyPopupTheme } from "./styles";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
 
@@ -151,6 +153,15 @@ export class PopupManager {
       </div>
       <button class="translator-copy-btn">复制译文</button>
     `;
+    // 读取设置并应用主题
+    SettingsUtils.getSettings()
+      .then((s) => {
+        try {
+          applyPopupTheme(popup, (s as any).theme || "system");
+        } catch {}
+      })
+      .catch(() => {});
+
     return popup;
   }
 

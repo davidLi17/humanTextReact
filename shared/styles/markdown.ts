@@ -359,6 +359,28 @@ export const MARKDOWN_STYLES = /*css*/ `
       border-bottom-color: #444;
     }
 
+
+  /* 显式暗色主题，父元素设置 data-theme=dark 时启用 */
+  [data-theme="dark"] .markdown-content {
+    color: #e5e5e5;
+  }
+  [data-theme="dark"] .markdown-paragraph,
+  [data-theme="dark"] .markdown-content h1,
+  [data-theme="dark"] .markdown-content h2,
+  [data-theme="dark"] .markdown-content h3,
+  [data-theme="dark"] .markdown-content h4,
+  [data-theme="dark"] .markdown-content h5,
+  [data-theme="dark"] .markdown-content h6 { color: #e5e5e5; }
+  [data-theme="dark"] .code-block-container { border-color: #444; background: linear-gradient(135deg, #2a2a2a 0%, #333 100%); }
+  [data-theme="dark"] .code-block-header { background: linear-gradient(135deg, #333 0%, #444 100%); border-bottom-color: #444; }
+  [data-theme="dark"] .code-language, [data-theme="dark"] .copy-button { color: #9ca3af; }
+  [data-theme="dark"] .copy-button:hover { background: #444; color: #e5e5e5; }
+  [data-theme="dark"] .copy-button:active { background: #555; }
+  [data-theme="dark"] .code-block { background: transparent; }
+  [data-theme="dark"] .code-block code { color: #e5e5e5; }
+  [data-theme="dark"] .inline-code { background: rgba(255,255,255,0.1); color: #ff6b9d; }
+  [data-theme="dark"] .markdown-quote { background: linear-gradient(135deg, #2d1b0a 0%, #3d2a0f 100%); color: #d97706; }
+  [data-theme="dark"] .markdown-table th { background: linear-gradient(135deg, #2a2a2a 0%, #333 100%); color: #e5e5e5; border-bottom-color: #444; }
     .markdown-table {
       border-color: #444;
     }

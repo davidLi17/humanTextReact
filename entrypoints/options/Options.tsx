@@ -2,6 +2,8 @@ import {
   DEFAULT_SETTINGS,
   LOG_LEVELS,
   LogLevel,
+  THEME_MODES,
+  ThemeMode,
 } from "@/entrypoints/shared/constants";
 import { initializeLogger, optionsLogger } from "@/entrypoints/shared/logger";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
@@ -18,6 +20,7 @@ interface Settings {
   promptTemplate: string;
   thinkingEnabled: boolean;
   logLevel: LogLevel;
+  theme: ThemeMode;
 }
 
 function Options() {
@@ -46,6 +49,39 @@ function Options() {
     // 显示当前日志级别状态
     showCurrentLogLevelStatus();
   }, []);
+
+  // 根据设置应用主题（支持系统跟随）
+  useEffect(() => {
+    const cleanup = applyTheme(settings.theme);
+    return cleanup;
+  }, [settings.theme]);
+
+  const applyTheme = (mode: ThemeMode) => {
+    const root = document.documentElement;
+    const media =
+      window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+
+    const setDataTheme = (val: "light" | "dark" | "system") => {
+      if (val === "system") {
+        root.removeAttribute("data-theme");
+        // 同步一次系统当前主题
+        root.setAttribute("data-theme", media?.matches ? "dark" : "light");
+      } else {
+        root.setAttribute("data-theme", val);
+      }
+    };
+
+    setDataTheme(mode as any);
+
+    // 当选择系统时，监听系统主题变化
+    const listener = () => {
+      if (mode === THEME_MODES.SYSTEM) {
+        root.setAttribute("data-theme", media?.matches ? "dark" : "light");
+      }
+    };
+    media?.addEventListener?.("change", listener);
+    return () => media?.removeEventListener?.("change", listener);
+  };
 
   const loadSettings = async () => {
     try {
@@ -389,6 +425,25 @@ function Options() {
             </select>
             <div className="setting-hint">
               控制控制台中显示的日志级别，便于开发调试和问题排查
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label htmlFor="themeMode">主题模式</label>
+            <select
+              id="themeMode"
+              value={settings.theme}
+              onChange={(e) =>
+                handleInputChange("theme", e.target.value as ThemeMode)
+              }
+              className="log-level-select"
+            >
+              <option value={THEME_MODES.SYSTEM}>跟随系统</option>
+              <option value={THEME_MODES.LIGHT}>浅色</option>
+              <option value={THEME_MODES.DARK}>深色</option>
+            </select>
+            <div className="setting-hint">
+              选择界面颜色风格；选择“跟随系统”将随系统设置自动切换
             </div>
           </div>
         </div>

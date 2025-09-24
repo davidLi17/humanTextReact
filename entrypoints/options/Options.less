@@ -46,6 +46,80 @@ body {
   height: 90vh;
 }
 
+// 主题适配：通过 data-theme 切换暗色
+[data-theme="dark"] {
+  // 覆盖色板
+  @text-color: #e5e7eb;
+  @text-color-light: #9ca3af;
+  @border-color: #374151;
+  @background-color: #0f172a; // 页面背景深
+  @card-background: #111827;  // 顶卡片
+  @section-background: #0b1220; // 内容卡片
+  @white: #111827;
+
+  body {
+    background-color: @background-color;
+    color: @text-color;
+  }
+
+  .options-container {
+    background: @background-color;
+  }
+
+  .options-header,
+  .options-footer {
+    background: @card-background;
+    color: @text-color;
+    border-color: @border-color;
+  }
+
+  .settings-section {
+    background: @section-background;
+    border-color: @border-color;
+  }
+
+  .setting-item {
+    label { color: @text-color; }
+    input[type="text"],
+    input[type="password"],
+    select,
+    textarea {
+      background: #0f172a;
+      color: @text-color;
+      border-color: @border-color;
+    }
+    .setting-hint { color: @text-color-light; }
+  }
+
+  .shortcut-display {
+    background: #0f172a;
+    border-color: @border-color;
+    color: @text-color;
+  }
+
+  .switch-label {
+    background-color: #374151;
+  }
+
+  .log-level-select {
+    background-color: #0f172a;
+    color: @text-color;
+    border-color: @border-color;
+    option {
+      background-color: #0f172a;
+      color: @text-color;
+    }
+  }
+
+  .test-api-btn,
+  .shortcut-btn {
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .save-success { color: @success-color; }
+  .save-error { color: @error-color; }
+}
+
 // --- Layout ---
 .options-container {
   max-width: 1200px;

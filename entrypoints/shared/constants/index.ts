@@ -36,6 +36,17 @@ export const LOG_LEVELS = {
 export type LogLevel = (typeof LOG_LEVELS)[keyof typeof LOG_LEVELS];
 
 /**
+ * 主题模式定义
+ */
+export const THEME_MODES = {
+  SYSTEM: "system",
+  LIGHT: "light",
+  DARK: "dark",
+} as const;
+
+export type ThemeMode = (typeof THEME_MODES)[keyof typeof THEME_MODES];
+
+/**
  * 默认设置
  */
 export const DEFAULT_SETTINGS = {
@@ -48,6 +59,7 @@ export const DEFAULT_SETTINGS = {
   apiKey: "your_api_key",
   thinkingEnabled: false,
   logLevel: LOG_LEVELS.OFF as LogLevel,
+  theme: THEME_MODES.SYSTEM as ThemeMode,
 } as const;
 
 /**

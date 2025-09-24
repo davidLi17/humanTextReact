@@ -107,6 +107,21 @@ function App() {
           ...prev,
           thinkingEnabled: settings.thinkingEnabled,
         }));
+
+        // 应用主题
+        try {
+          const root = document.documentElement;
+          const media =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)");
+          const current =
+            (settings as any).theme === "system"
+              ? media?.matches
+                ? "dark"
+                : "light"
+              : (settings as any).theme;
+          root.setAttribute("data-theme", current);
+        } catch {}
       } catch (error) {
         logger.error("❌ [Popup App] 加载设置失败:", error);
       }

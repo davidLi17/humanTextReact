@@ -259,6 +259,27 @@ export const POPUP_STYLES = /*css*/ `
     }
   }
 
+  /* 明确支持通过 data-theme=dark 触发暗色（优先于系统） */
+  .translator-popup[data-theme="dark"] {
+    background: #1a1a1a;
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #e5e5e5;
+  }
+  .translator-popup[data-theme="dark"] .translator-header {
+    background: rgba(26, 26, 26, 0.95);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  .translator-popup[data-theme="dark"] .translator-title,
+  .translator-popup[data-theme="dark"] .translator-text,
+  .translator-popup[data-theme="dark"] .translator-translated-text {
+    color: #e5e5e5;
+  }
+  .translator-popup[data-theme="dark"] .translator-reasoning-text {
+    background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
+    color: #b0b0b0;
+    border-left-color: #666;
+  }
+
   /* 响应式设计 */
   @media (max-width: 480px) {
     .translator-popup {
@@ -277,4 +298,19 @@ export function injectStyles() {
     style.textContent = POPUP_STYLES;
     document.head.appendChild(style);
   }
+}
+
+/**
+ * 根据主题在弹窗根元素上设置 data-theme，实现暗色/浅色切换。
+ * mode: 'light' | 'dark' | 'system'
+ */
+export function applyPopupTheme(
+  rootEl: HTMLElement,
+  mode: "light" | "dark" | "system"
+) {
+  const media =
+    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  const current =
+    mode === "system" ? (media?.matches ? "dark" : "light") : mode;
+  rootEl.setAttribute("data-theme", current);
 }
