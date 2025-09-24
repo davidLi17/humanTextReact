@@ -1,6 +1,7 @@
 import { TranslationAreaProps } from "@/entrypoints/popup/types";
 import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { injectMarkdownStyles } from "@/shared/styles/markdown";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown";
 import throttle from "lodash-es/throttle";
@@ -131,28 +132,27 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
     return success;
   };
 
-  // 处理思考模式切换
-  const handleThinkingToggle = () => {
-    setTranslationState((prev) => ({
-      ...prev,
-      thinkingEnabled: !prev.thinkingEnabled,
-    }));
-    // 保存到本地存储
-    localStorage.setItem(
-      "thinkingEnabled",
-      (!translationState.thinkingEnabled).toString()
-    );
+  // 处理思考模式切换（写入到 SettingsUtils -> storage，保证后台能读取到最新设置）
+  const handleThinkingToggle = async () => {
+    const next = !translationState.thinkingEnabled;
+    setTranslationState((prev) => ({ ...prev, thinkingEnabled: next }));
+    try {
+      await SettingsUtils.setSetting("thinkingEnabled", next);
+    } catch (e) {
+      logger.error("更新思考模式失败:", e);
+    }
   };
 
-  // 初始化思考模式设置
+  // 初始化思考模式设置（从 SettingsUtils 获取）
   useEffect(() => {
-    const savedThinking = localStorage.getItem("thinkingEnabled");
-    if (savedThinking !== null) {
-      setTranslationState((prev) => ({
-        ...prev,
-        thinkingEnabled: savedThinking === "true",
-      }));
-    }
+    SettingsUtils.getSettings()
+      .then((s) => {
+        setTranslationState((prev) => ({
+          ...prev,
+          thinkingEnabled: s.thinkingEnabled,
+        }));
+      })
+      .catch((e) => logger.error("读取思考模式失败:", e));
   }, [setTranslationState]);
 
   // 处理剪贴板粘贴

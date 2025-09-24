@@ -1,10 +1,10 @@
-import { createLogger } from "@/entrypoints/shared/logger";
+import { createLogger, initializeLogger } from "@/entrypoints/shared/logger";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { useEffect, useState } from "react";
 import "./App.less";
 import HistoryPanel from "./components/HistoryPanel";
 import TranslationArea from "./components/TranslationArea";
 import { HistoryItem, MessageRequest, TranslationState } from "./types";
-import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("popup-app", "🔽");
 
@@ -23,6 +23,11 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // 初始化日志系统（确保 popup 遵循最新日志级别）
+  useEffect(() => {
+    initializeLogger();
+  }, []);
 
   // 监听来自background script的消息
   useEffect(() => {
@@ -90,6 +95,8 @@ function App() {
     // 加载用户设置
     const loadSettings = async () => {
       try {
+        // 每次进入 popup 时确保拿到最新设置
+        SettingsUtils.clearCache();
         const settings = await SettingsUtils.getSettings();
         logger.log("⚙️ [Popup App] 初始化设置", {
           thinkingEnabled: settings.thinkingEnabled,
@@ -109,17 +116,19 @@ function App() {
     loadHistory();
 
     // 监听设置变化
-    const unsubscribeSettings = SettingsUtils.onSettingsChanged((newSettings) => {
-      logger.log("🔄 [Popup App] 设置已更新", {
-        thinkingEnabled: newSettings.thinkingEnabled,
-        previousState: translationState.thinkingEnabled,
-      });
+    const unsubscribeSettings = SettingsUtils.onSettingsChanged(
+      (newSettings) => {
+        logger.log("🔄 [Popup App] 设置已更新", {
+          thinkingEnabled: newSettings.thinkingEnabled,
+          previousState: translationState.thinkingEnabled,
+        });
 
-      setTranslationState((prev: TranslationState) => ({
-        ...prev,
-        thinkingEnabled: newSettings.thinkingEnabled,
-      }));
-    });
+        setTranslationState((prev: TranslationState) => ({
+          ...prev,
+          thinkingEnabled: newSettings.thinkingEnabled,
+        }));
+      }
+    );
 
     // 清理监听器
     return () => {
@@ -155,6 +164,7 @@ function App() {
 
     try {
       // 获取完整设置，确保传递所有必要参数
+      SettingsUtils.clearCache();
       const userSettings = await SettingsUtils.getSettings();
       logger.log("⚙️ [Popup App] 翻译时使用设置", {
         thinkingEnabled: userSettings.thinkingEnabled,

@@ -4,6 +4,7 @@ import {
   LogLevel,
 } from "@/entrypoints/shared/constants";
 import { initializeLogger, optionsLogger } from "@/entrypoints/shared/logger";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
 import { useEffect, useState } from "react";
 import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
@@ -48,33 +49,8 @@ function Options() {
 
   const loadSettings = async () => {
     try {
-      // 优先从云端获取
-      let result = await browser.storage.sync.get([
-        "apiKey",
-        "baseUrl",
-        "model",
-        "temperature",
-        "promptTemplate",
-        "thinkingEnabled",
-        "logLevel",
-      ]);
-
-      // 如果云端没有，从本地获取
-      if (Object.keys(result).length === 0) {
-        result = await browser.storage.local.get([
-          "apiKey",
-          "baseUrl",
-          "model",
-          "temperature",
-          "promptTemplate",
-          "thinkingEnabled",
-          "logLevel",
-        ]);
-      }
-
-      if (Object.keys(result).length > 0) {
-        setSettings((prev) => ({ ...prev, ...result }));
-      }
+      const s = await SettingsUtils.getSettings();
+      setSettings((prev) => ({ ...prev, ...s }));
     } catch (error) {
       optionsLogger.error("加载设置失败:", error);
     }
@@ -102,11 +78,8 @@ function Options() {
     console.log("[Options] 开始保存设置:", settings);
 
     try {
-      // 同时保存到云端和本地
-      await Promise.all([
-        browser.storage.sync.set(settings),
-        browser.storage.local.set(settings),
-      ]);
+      // 使用 SettingsUtils 统一保存
+      await SettingsUtils.setSettings(settings as any);
 
       // 重新初始化日志系统以应用新的日志级别
       console.log("[Options] 设置保存成功，重新初始化日志系统");
@@ -143,9 +116,8 @@ function Options() {
   // 显示当前日志级别状态
   const showCurrentLogLevelStatus = async () => {
     try {
-      const result = await browser.storage.sync.get(["logLevel"]);
-      const currentLogLevel = result.logLevel || LOG_LEVELS.OFF;
-      console.log(`[Options] 当前日志级别: ${currentLogLevel}`);
+      const s = await SettingsUtils.getSettings();
+      console.log(`[Options] 当前日志级别: ${s.logLevel}`);
 
       // 检查 localStorage 中的 debug 设置
       if (typeof localStorage !== "undefined") {
