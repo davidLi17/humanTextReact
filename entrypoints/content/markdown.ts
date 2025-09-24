@@ -15,21 +15,16 @@ export function parseMarkdown(text: string): string {
 
   // 3. 处理代码块 (```) - 优先级最高
   const codeBlocks: string[] = [];
-  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
     const index = codeBlocks.length;
     const language = lang || "text";
-    const escapedCode = code.trim()
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+    const escapedCode = code.trim();
 
     codeBlocks.push(
       `<div class="code-block-container">
         <div class="code-block-header">
           <span class="code-language">${language}</span>
-          <button class="copy-button" onclick="copyCode(this)" data-code="${escapedCode}" title="复制代码">
+          <button class="copy-button" data-code="${escapedCode}" title="复制代码">
             <svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -314,11 +309,11 @@ function parseParagraphs(html: string): string {
  * 复制代码到剪贴板
  */
 export async function copyCode(button: HTMLButtonElement): Promise<void> {
-  const code = button.getAttribute('data-code');
+  const code = button.getAttribute("data-code");
   if (!code) return;
 
-  const copyIcon = button.querySelector('.copy-icon');
-  const checkIcon = button.querySelector('.check-icon');
+  const copyIcon = button.querySelector(".copy-icon");
+  const checkIcon = button.querySelector(".check-icon");
 
   try {
     // 使用现代 Clipboard API
@@ -326,32 +321,32 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
 
     // 显示成功状态
     if (copyIcon && checkIcon) {
-      (copyIcon as HTMLElement).style.display = 'none';
-      (checkIcon as HTMLElement).style.display = 'block';
+      (copyIcon as HTMLElement).style.display = "none";
+      (checkIcon as HTMLElement).style.display = "block";
 
       // 2秒后恢复原状
       setTimeout(() => {
-        (copyIcon as HTMLElement).style.display = 'block';
-        (checkIcon as HTMLElement).style.display = 'none';
+        (copyIcon as HTMLElement).style.display = "block";
+        (checkIcon as HTMLElement).style.display = "none";
       }, 2000);
     }
   } catch (error) {
     // 降级方案
-    const textArea = document.createElement('textarea');
+    const textArea = document.createElement("textarea");
     textArea.value = code;
-    textArea.style.position = 'fixed';
-    textArea.style.opacity = '0';
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
     document.body.appendChild(textArea);
     textArea.select();
-    document.execCommand('copy');
+    document.execCommand("copy");
     document.body.removeChild(textArea);
 
     if (copyIcon && checkIcon) {
-      (copyIcon as HTMLElement).style.display = 'none';
-      (checkIcon as HTMLElement).style.display = 'block';
+      (copyIcon as HTMLElement).style.display = "none";
+      (checkIcon as HTMLElement).style.display = "block";
       setTimeout(() => {
-        (copyIcon as HTMLElement).style.display = 'block';
-        (checkIcon as HTMLElement).style.display = 'none';
+        (copyIcon as HTMLElement).style.display = "block";
+        (checkIcon as HTMLElement).style.display = "none";
       }, 2000);
     }
   }
@@ -361,6 +356,14 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
  * 初始化代码块复制功能
  */
 export function initializeCodeCopy(): void {
-  // 创建全局的 copyCode 函数供 HTML 使用
-  (window as any).copyCode = copyCode;
+  // 使用事件委托替代内联事件处理器
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest(".copy-button") as HTMLButtonElement;
+
+    if (button && button.classList.contains("copy-button")) {
+      event.preventDefault();
+      copyCode(button);
+    }
+  });
 }

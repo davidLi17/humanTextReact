@@ -15,22 +15,16 @@ export function parseMarkdown(text: string): string {
 
   // 3. 处理代码块 (```) - 优先级最高
   const codeBlocks: string[] = [];
-  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
     const index = codeBlocks.length;
     const language = lang || "text";
-    const escapedCode = code
-      .trim()
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+    const escapedCode = code.trim();
 
     codeBlocks.push(
       `<div class="code-block-container">
         <div class="code-block-header">
           <span class="code-language">${language}</span>
-          <button class="copy-button" onclick="copyCode(this)" data-code="${escapedCode}" title="复制代码">
+          <button class="copy-button" data-code="${escapedCode}" title="复制代码">
             <svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -48,7 +42,7 @@ export function parseMarkdown(text: string): string {
 
   // 4. 处理行内代码 (`)
   const inlineCodes: string[] = [];
-  html = html.replace(/`([^`\n]+)`/g, (match, code) => {
+  html = html.replace(/`([^`\n]+)`/g, (_match, code) => {
     const index = inlineCodes.length;
     inlineCodes.push(`<code class="inline-code">${code}</code>`);
     return `__INLINE_CODE_${index}__`;
@@ -108,7 +102,7 @@ function parseTable(html: string): string {
   // 简单表格格式：| 列1 | 列2 | 列3 |
   const tableRegex = /^(\|.*\|)\n(\|[-\s|:]*\|)\n((?:\|.*\|\n?)*)/gm;
 
-  return html.replace(tableRegex, (match, header, separator, rows) => {
+  return html.replace(tableRegex, (_match, header, _separator, rows) => {
     const headerCells = header
       .split("|")
       .slice(1, -1)
@@ -344,7 +338,25 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
     textArea.style.opacity = "0";
     document.body.appendChild(textArea);
     textArea.select();
-    document.execCommand("copy");
+    // 使用现代 Clipboard API 作为备选方案
+    try {
+      await navigator.clipboard.writeText(code);
+    } catch (clipboardError) {
+      // 降级方案：创建临时文本区域
+      const textArea = document.createElement("textarea");
+      textArea.value = code;
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      textArea.style.left = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.select();
+
+      try {
+        document.execCommand("copy");
+      } finally {
+        document.body.removeChild(textArea);
+      }
+    }
     document.body.removeChild(textArea);
 
     if (copyIcon && checkIcon) {
@@ -362,6 +374,14 @@ export async function copyCode(button: HTMLButtonElement): Promise<void> {
  * 初始化代码块复制功能
  */
 export function initializeCodeCopy(): void {
-  // 创建全局的 copyCode 函数供 HTML 使用
-  (window as any).copyCode = copyCode;
+  // 使用事件委托替代内联事件处理器
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest(".copy-button") as HTMLButtonElement;
+
+    if (button && button.classList.contains("copy-button")) {
+      event.preventDefault();
+      copyCode(button);
+    }
+  });
 }
