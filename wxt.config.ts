@@ -20,5 +20,8 @@ export default defineConfig({
       default_popup: "entrypoints/popup/index.html",
       default_title: "人话翻译器",
     },
+    content_security_policy: {
+      extension_pages: "script-src 'self'; object-src 'self'",
+    },
   },
 });
