@@ -110,9 +110,26 @@ function isLocalStorageAvailable(): boolean {
  */
 export async function initializeLogger() {
   try {
-    // 从存储中获取日志级别设置
-    const result = await browser.storage.sync.get(["logLevel"]);
-    const logLevel: LogLevel = result.logLevel || LOG_LEVELS.OFF;
+    // 从存储中获取日志级别设置（兼容新老两种格式，并从 local 做兜底）
+    const syncResult = await browser.storage.sync.get(["logLevel", "settings"]);
+    let logLevel: LogLevel = LOG_LEVELS.OFF;
+
+    if (syncResult?.settings?.logLevel) {
+      logLevel = syncResult.settings.logLevel as LogLevel;
+    } else if (syncResult?.logLevel) {
+      logLevel = syncResult.logLevel as LogLevel;
+    } else {
+      // 兜底从 local 读取
+      const localResult = await browser.storage.local.get([
+        "logLevel",
+        "settings",
+      ]);
+      if (localResult?.settings?.logLevel) {
+        logLevel = localResult.settings.logLevel as LogLevel;
+      } else if (localResult?.logLevel) {
+        logLevel = localResult.logLevel as LogLevel;
+      }
+    }
 
     // 设置当前日志级别
     setCurrentLogLevel(logLevel);

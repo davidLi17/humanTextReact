@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS } from "./constants";
+import { DEFAULT_SETTINGS, LogLevel } from "./constants";
 import { createLogger } from "./logger";
 
 const logger = createLogger("shared-settings-utils", "⚙️");
@@ -13,7 +13,7 @@ export interface UserSettings {
   promptTemplate: string;
   apiKey: string;
   thinkingEnabled: boolean;
-  logLevel: string;
+  logLevel: LogLevel;
 }
 
 /**
@@ -45,7 +45,10 @@ export class SettingsUtils {
    */
   static async getSettings(): Promise<UserSettings> {
     // 检查缓存是否有效
-    if (this.cache.settings && (Date.now() - this.cache.timestamp) < this.cache.ttl) {
+    if (
+      this.cache.settings &&
+      Date.now() - this.cache.timestamp < this.cache.ttl
+    ) {
       logger.log("📦 [SettingsUtils] 使用缓存的设置");
       return this.cache.settings;
     }
@@ -56,7 +59,7 @@ export class SettingsUtils {
       const browserAPI = (globalThis as any).browser || browser;
 
       // 首先尝试新格式（'settings' 对象）
-      const newFormatResult = await browserAPI.storage.sync.get('settings');
+      const newFormatResult = await browserAPI.storage.sync.get("settings");
       const newFormatSettings = newFormatResult.settings || {};
 
       if (Object.keys(newFormatSettings).length > 0) {
@@ -64,10 +67,14 @@ export class SettingsUtils {
         const mergedSettings: UserSettings = {
           baseUrl: newFormatSettings.baseUrl || DEFAULT_SETTINGS.baseUrl,
           model: newFormatSettings.model || DEFAULT_SETTINGS.model,
-          temperature: newFormatSettings.temperature ?? DEFAULT_SETTINGS.temperature,
-          promptTemplate: newFormatSettings.promptTemplate || DEFAULT_SETTINGS.promptTemplate,
+          temperature:
+            newFormatSettings.temperature ?? DEFAULT_SETTINGS.temperature,
+          promptTemplate:
+            newFormatSettings.promptTemplate || DEFAULT_SETTINGS.promptTemplate,
           apiKey: newFormatSettings.apiKey || DEFAULT_SETTINGS.apiKey,
-          thinkingEnabled: newFormatSettings.thinkingEnabled ?? DEFAULT_SETTINGS.thinkingEnabled,
+          thinkingEnabled:
+            newFormatSettings.thinkingEnabled ??
+            DEFAULT_SETTINGS.thinkingEnabled,
           logLevel: newFormatSettings.logLevel || DEFAULT_SETTINGS.logLevel,
         };
 
@@ -108,7 +115,9 @@ export class SettingsUtils {
   /**
    * 使用旧格式（键值对直接存储）获取设置（向后兼容）
    */
-  private static async getSettingsLegacyFormat(browserAPI: any): Promise<UserSettings> {
+  private static async getSettingsLegacyFormat(
+    browserAPI: any
+  ): Promise<UserSettings> {
     try {
       // 尝试从云端获取设置（旧格式）
       const syncSettings = await browserAPI.storage.sync.get([
@@ -223,7 +232,7 @@ export class SettingsUtils {
    * 获取思维链设置
    */
   static async getThinkingEnabled(): Promise<boolean> {
-    return this.getSetting('thinkingEnabled');
+    return this.getSetting("thinkingEnabled");
   }
 
   /**
@@ -236,9 +245,52 @@ export class SettingsUtils {
   }
 
   /**
+   * 写入完整设置到 storage.sync 的 'settings' 对象，同时备份到 storage.local
+   */
+  static async setSettings(newSettings: Partial<UserSettings>): Promise<void> {
+    try {
+      const browserAPI = (globalThis as any).browser || browser;
+      // 读取现有 settings
+      const { settings: existing = {} } = await browserAPI.storage.sync.get(
+        "settings"
+      );
+      const merged = {
+        ...DEFAULT_SETTINGS,
+        ...existing,
+        ...newSettings,
+      } as UserSettings;
+
+      await Promise.all([
+        browserAPI.storage.sync.set({ settings: merged }),
+        browserAPI.storage.local.set({ settings: merged }),
+      ]);
+
+      this.clearCache();
+      logger.success("✅ [SettingsUtils] 设置已更新", {
+        keys: Object.keys(newSettings),
+      });
+    } catch (error) {
+      logger.error("❌ [SettingsUtils] 更新设置失败:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * 写入单个设置键
+   */
+  static async setSetting<K extends keyof UserSettings>(
+    key: K,
+    value: UserSettings[K]
+  ): Promise<void> {
+    return this.setSettings({ [key]: value } as Partial<UserSettings>);
+  }
+
+  /**
    * 监听设置变化
    */
-  static onSettingsChanged(callback: (settings: UserSettings) => void): () => void {
+  static onSettingsChanged(
+    callback: (settings: UserSettings) => void
+  ): () => void {
     const listener = (changes: any) => {
       if (changes.settings) {
         logger.log("🔄 [SettingsUtils] 检测到设置变化");
