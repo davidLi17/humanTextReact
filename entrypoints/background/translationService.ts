@@ -3,27 +3,52 @@ import { SettingsManager } from "./settingsManager";
 import { RequestManager } from "./requestManager";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
+import { getTranslationCache, TranslationCacheItem } from "./translationCache";
 
 /**
  * 翻译服务
  * 负责处理文本翻译的核心逻辑
+ *
+ * 性能优化：
+ * - LRU 缓存：相同文本直接返回缓存结果，避免重复 API 调用
+ * - 缓存命中率统计：可用于分析和优化
  */
 export class TranslationService {
+  // 获取缓存服务实例
+  private static cache = getTranslationCache();
+
   /**
    * 翻译文本函数 - 支持流式响应
+   *
+   * 优化流程：
+   * 1. 检查缓存是否命中
+   * 2. 命中则直接返回缓存结果
+   * 3. 未命中则调用 API 并缓存结果
    */
   static async translateText(
     text: string,
     tabId?: number
   ): Promise<string | void> {
-    const controller = RequestManager.createRequest(tabId);
-
-    // 获取设置，优先从云端获取，失败时从本地获取
+    // 获取设置
     const config = await SettingsManager.getSettings();
 
     if (!config.apiKey) {
       throw new Error("请先在设置中配置 API Key");
     }
+
+    const model = config.model || DEFAULT_SETTINGS.model;
+
+    // 🚀 性能优化：检查缓存
+    const cachedResult = this.cache.get(text, model);
+    if (cachedResult) {
+      console.log("[TranslationService] 缓存命中，跳过 API 调用");
+      // 发送缓存的结果
+      await this.sendCachedResult(tabId, cachedResult, text);
+      return cachedResult.translatedText;
+    }
+
+    // 缓存未命中，执行 API 调用
+    const controller = RequestManager.createRequest(tabId);
 
     // 使用提示词模板
     const promptTemplate =
@@ -127,6 +152,23 @@ export class TranslationService {
       // 发送完成信号
       await this.sendTranslationUpdate(tabId, result, reasoningContent, true);
 
+      // 🚀 性能优化：缓存翻译结果
+      if (result) {
+        this.cache.set(
+          text,
+          {
+            translatedText: result,
+            reasoningContent: reasoningContent || undefined,
+            hasReasoning: reasoningContent.length > 0,
+          },
+          model
+        );
+        console.log(
+          "[TranslationService] 翻译结果已缓存，当前缓存统计:",
+          this.cache.stats
+        );
+      }
+
       // 在成功翻译完成后，保存翻译历史
       if (result) {
         try {
@@ -199,5 +241,55 @@ export class TranslationService {
         return;
       }
     }
+  }
+
+  /**
+   * 发送缓存的翻译结果
+   * 模拟流式响应，提供一致的用户体验
+   */
+  private static async sendCachedResult(
+    tabId: number | undefined,
+    cached: TranslationCacheItem,
+    originalText: string
+  ): Promise<void> {
+    // 发送完整结果（模拟流式完成）
+    await this.sendTranslationUpdate(
+      tabId,
+      cached.translatedText,
+      cached.reasoningContent || "",
+      true // 直接标记为完成
+    );
+
+    // 缓存命中也保存到历史（如果需要更新时间戳）
+    try {
+      await HistoryManager.saveTranslationHistory(
+        originalText,
+        cached.translatedText,
+        cached.reasoningContent || ""
+      );
+    } catch (error) {
+      console.error("保存翻译历史失败:", error);
+    }
+  }
+
+  /**
+   * 获取缓存统计信息
+   */
+  static getCacheStats() {
+    return this.cache.stats;
+  }
+
+  /**
+   * 清空翻译缓存
+   */
+  static clearCache(): void {
+    this.cache.clear();
+  }
+
+  /**
+   * 设置缓存启用状态
+   */
+  static setCacheEnabled(enabled: boolean): void {
+    this.cache.setEnabled(enabled);
   }
 }

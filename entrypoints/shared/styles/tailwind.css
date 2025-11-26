@@ -1,0 +1,196 @@
+/**
+ * Design Tokens - 设计系统基础变量
+ * 
+ * 定义项目的颜色、间距、圆角等设计规范
+ * Tailwind v4 使用 CSS 变量方式配置
+ */
+
+/* Tailwind v4 导入 */
+@import "tailwindcss";
+
+/* 
+ * 主题配置 - Design Tokens
+ * 使用 @theme 定义自定义设计变量
+ */
+@theme {
+  /* ========== 颜色系统 ========== */
+
+  /* 品牌主色 - 绿色系 */
+  --color-primary-50: oklch(0.97 0.02 160);
+  --color-primary-100: oklch(0.94 0.04 160);
+  --color-primary-200: oklch(0.88 0.08 160);
+  --color-primary-300: oklch(0.8 0.12 160);
+  --color-primary-400: oklch(0.7 0.16 160);
+  --color-primary-500: oklch(0.6 0.18 160); /* 主色 */
+  --color-primary-600: oklch(0.5 0.16 160);
+  --color-primary-700: oklch(0.42 0.14 160);
+  --color-primary-800: oklch(0.35 0.12 160);
+  --color-primary-900: oklch(0.28 0.1 160);
+
+  /* 中性色 - 灰色系 */
+  --color-gray-50: oklch(0.98 0 0);
+  --color-gray-100: oklch(0.96 0 0);
+  --color-gray-200: oklch(0.92 0 0);
+  --color-gray-300: oklch(0.87 0 0);
+  --color-gray-400: oklch(0.7 0 0);
+  --color-gray-500: oklch(0.55 0 0);
+  --color-gray-600: oklch(0.45 0 0);
+  --color-gray-700: oklch(0.37 0 0);
+  --color-gray-800: oklch(0.27 0 0);
+  --color-gray-900: oklch(0.18 0 0);
+
+  /* 语义色 */
+  --color-success: oklch(0.72 0.19 142);
+  --color-warning: oklch(0.8 0.18 84);
+  --color-error: oklch(0.63 0.24 27);
+  --color-info: oklch(0.7 0.15 240);
+
+  /* ========== 间距系统 ========== */
+  --spacing-xs: 0.25rem; /* 4px */
+  --spacing-sm: 0.5rem; /* 8px */
+  --spacing-md: 1rem; /* 16px */
+  --spacing-lg: 1.5rem; /* 24px */
+  --spacing-xl: 2rem; /* 32px */
+  --spacing-2xl: 3rem; /* 48px */
+
+  /* ========== 圆角系统 ========== */
+  --radius-sm: 0.25rem; /* 4px */
+  --radius-md: 0.5rem; /* 8px */
+  --radius-lg: 0.75rem; /* 12px */
+  --radius-xl: 1rem; /* 16px */
+  --radius-full: 9999px;
+
+  /* ========== 字体系统 ========== */
+  --font-sans: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "Fira Code", "Fira Mono", Consolas, monospace;
+
+  /* 字号 */
+  --font-size-xs: 0.75rem; /* 12px */
+  --font-size-sm: 0.875rem; /* 14px */
+  --font-size-base: 1rem; /* 16px */
+  --font-size-lg: 1.125rem; /* 18px */
+  --font-size-xl: 1.25rem; /* 20px */
+  --font-size-2xl: 1.5rem; /* 24px */
+
+  /* ========== 阴影系统 ========== */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1),
+    0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1),
+    0 8px 10px -6px rgb(0 0 0 / 0.1);
+
+  /* ========== 过渡动画 ========== */
+  --transition-fast: 150ms;
+  --transition-normal: 250ms;
+  --transition-slow: 350ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ========== 基础样式重置 ========== */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--color-gray-50);
+    color: var(--color-gray-900);
+  }
+
+  /* 滚动条美化 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-gray-100);
+    border-radius: var(--radius-full);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-gray-300);
+    border-radius: var(--radius-full);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-gray-400);
+  }
+}
+
+/* ========== 自定义组件类 ========== */
+@layer components {
+  /* 主按钮 */
+  .btn-primary {
+    @apply bg-primary-500 text-white px-4 py-2 rounded-lg
+           hover:bg-primary-600 active:bg-primary-700
+           transition-colors duration-150;
+  }
+
+  /* 次要按钮 */
+  .btn-secondary {
+    @apply bg-gray-100 text-gray-700 px-4 py-2 rounded-lg
+           hover:bg-gray-200 active:bg-gray-300
+           transition-colors duration-150;
+  }
+
+  /* 输入框 */
+  .input-base {
+    @apply w-full px-3 py-2 border border-gray-200 rounded-lg
+           focus:outline-none focus:ring-2 focus:ring-primary-500/20 
+           focus:border-primary-500
+           transition-all duration-150;
+  }
+
+  /* 卡片 */
+  .card {
+    @apply bg-white rounded-xl shadow-md p-4;
+  }
+
+  /* 标签 */
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full 
+           text-xs font-medium bg-primary-100 text-primary-700;
+  }
+}
+
+/* ========== 工具类扩展 ========== */
+@layer utilities {
+  /* 文字截断 */
+  .text-ellipsis-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* 渐变背景 */
+  .bg-gradient-primary {
+    background: linear-gradient(
+      135deg,
+      var(--color-primary-400),
+      var(--color-primary-600)
+    );
+  }
+
+  /* 玻璃态效果 */
+  .glass {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+}

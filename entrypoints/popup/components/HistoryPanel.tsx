@@ -1,4 +1,5 @@
-import React, { useRef } from "react";
+import React, { useRef, useState, useMemo } from "react";
+import { useDebounceFn } from "ahooks";
 import { HistoryPanelProps } from "../types";
 import { formatDateTime } from "../utils/helpers";
 
@@ -15,15 +16,37 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 过滤历史记录
-  const filteredHistory =
-    searchTerm.trim() === ""
-      ? history
-      : history.filter(
-          (item) =>
-            item.original.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            item.translated.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+  // 本地输入状态（用于即时显示）
+  const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
+
+  // 🚀 性能优化：使用 ahooks 的 useDebounceFn 进行搜索防抖
+  // 防抖 300ms，避免用户快速输入时频繁过滤
+  const { run: debouncedSearch } = useDebounceFn(
+    (value: string) => {
+      onSearchChange(value);
+    },
+    { wait: 300 }
+  );
+
+  // 处理搜索输入
+  const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setLocalSearchTerm(value); // 即时更新显示
+    debouncedSearch(value); // 防抖更新过滤
+  };
+
+  // 🚀 性能优化：使用 useMemo 缓存过滤结果
+  const filteredHistory = useMemo(() => {
+    if (searchTerm.trim() === "") {
+      return history;
+    }
+    const lowerSearch = searchTerm.toLowerCase();
+    return history.filter(
+      (item) =>
+        item.original.toLowerCase().includes(lowerSearch) ||
+        item.translated.toLowerCase().includes(lowerSearch)
+    );
+  }, [history, searchTerm]);
 
   // 处理文件导入
   const handleImportClick = () => {
@@ -129,8 +152,8 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
             type="text"
             className="history-search"
             placeholder="搜索历史记录..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
+            value={localSearchTerm}
+            onChange={handleSearchInput}
           />
         </div>
       </div>

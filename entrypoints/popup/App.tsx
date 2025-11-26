@@ -1,54 +1,60 @@
-import { useState, useEffect, useRef } from "react";
+/**
+ * Popup 主应用组件
+ *
+ * 重构亮点：
+ * - 使用 Zustand 进行状态管理
+ * - 状态与 UI 分离，组件更简洁
+ * - 使用 ahooks 的 useMemoizedFn 保持函数引用稳定
+ */
+import React, { useEffect, useRef, useCallback, useState } from "react";
+import { useMemoizedFn } from "ahooks";
 import "./App.less";
 import TranslationArea from "./components/TranslationArea";
 import HistoryPanel from "./components/HistoryPanel";
-import { TranslationState, HistoryItem, MessageRequest } from "./types";
+import { useTranslationStore } from "../shared/store/translationStore";
+import { useHistoryStore, HistoryItem } from "../shared/store/historyStore";
+import { MessageRequest } from "./types";
 
 function App() {
-  const [translationState, setTranslationState] = useState<TranslationState>({
-    sourceText: "",
-    translatedText: "",
-    reasoningText: "",
-    isTranslating: false,
-    hasReasoning: false,
-    showResult: false,
-  });
+  // 使用 Zustand store
+  const {
+    sourceText,
+    translatedText,
+    reasoningText,
+    isTranslating,
+    hasReasoning,
+    showResult,
+    setSourceText,
+    startTranslation,
+    updateFromMessage,
+  } = useTranslationStore();
 
+  const { history, searchTerm, setHistory, setSearchTerm } = useHistoryStore();
+
+  // UI 状态
   const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
   const userHasScrolled = useRef(false);
   const resultAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 监听来自background script的消息
+  // 监听来自 background script 的消息
   useEffect(() => {
     const messageListener = (
       request: MessageRequest,
-      sender: any,
+      _sender: any,
       sendResponse: (response?: any) => void
     ) => {
       if (request.action === "updateTranslation") {
-        if (request.error) {
-          setTranslationState((prev: TranslationState) => ({
-            ...prev,
-            isTranslating: false,
-            translatedText: `错误: ${request.error}`,
-          }));
-        } else {
-          setTranslationState((prev: TranslationState) => ({
-            ...prev,
-            translatedText: request.content || prev.translatedText,
-            reasoningText: request.reasoningContent || prev.reasoningText,
-            hasReasoning: request.hasReasoning || false,
-            showResult: true,
-            isTranslating: !request.done,
-          }));
+        updateFromMessage({
+          content: request.content,
+          reasoningContent: request.reasoningContent,
+          hasReasoning: request.hasReasoning,
+          done: request.done,
+          error: request.error,
+        });
 
-          // 自动滚动到底部（如果用户没有手动滚动）
-          if (!userHasScrolled.current && containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-          }
+        if (!userHasScrolled.current && containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
         }
 
         sendResponse({ success: true });
@@ -58,48 +64,35 @@ function App() {
 
     if (browser.runtime.onMessage) {
       browser.runtime.onMessage.addListener(messageListener);
-
       return () => {
         browser.runtime.onMessage.removeListener(messageListener);
       };
     }
-  }, []);
+  }, [updateFromMessage]);
 
   // 处理滚动事件
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     if (containerRef.current) {
       const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
       const isAtBottom = scrollHeight - scrollTop <= clientHeight + 1;
       userHasScrolled.current = !isAtBottom;
     }
-  };
+  }, []);
 
   // 发送翻译请求
-  const handleTranslate = async () => {
-    const text = translationState.sourceText.trim();
-    console.log("LHG:popup/App.tsx text:::", text);
+  const handleTranslate = useMemoizedFn(async () => {
+    const text = sourceText.trim();
     if (!text) {
       alert("请输入要翻译的文本");
       return;
     }
 
-    setTranslationState((prev: TranslationState) => ({
-      ...prev,
-      isTranslating: true,
-      showResult: true,
-      translatedText: "",
-      reasoningText: "",
-      hasReasoning: false,
-    }));
-
+    startTranslation();
     userHasScrolled.current = false;
 
     try {
-      // 先发送清理请求
       if (browser?.runtime) {
         await browser.runtime.sendMessage({ action: "cleanup" });
-
-        // 开始新的翻译
         await browser.runtime.sendMessage({
           action: "translate",
           text,
@@ -108,74 +101,68 @@ function App() {
       }
     } catch (error: any) {
       if (!error.message?.includes("Receiving end does not exist")) {
-        setTranslationState((prev: TranslationState) => ({
-          ...prev,
-          isTranslating: false,
-          translatedText: `发生错误：${error.message}`,
-        }));
+        updateFromMessage({ error: error.message });
       }
     }
-  };
+  });
 
   // 复制文本到剪贴板
-  const copyToClipboard = async (text: string): Promise<boolean> => {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (error) {
-      console.error("复制失败:", error);
-      return false;
+  const copyToClipboard = useMemoizedFn(
+    async (text: string): Promise<boolean> => {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (error) {
+        console.error("复制失败:", error);
+        return false;
+      }
     }
-  };
+  );
 
   // 加载历史记录
-  const loadHistory = () => {
+  const loadHistory = useMemoizedFn(() => {
     if (browser?.runtime) {
       browser.runtime.sendMessage({ action: "getHistory" }, (response: any) => {
-        if (response && response.success) {
+        if (response?.success) {
           setHistory(response.history || []);
         }
       });
     }
-  };
+  });
 
   // 显示历史记录面板
-  const showHistoryPanel = () => {
+  const showHistoryPanel = useMemoizedFn(() => {
     setShowHistory(true);
     setSearchTerm("");
     loadHistory();
-  };
+  });
 
   // 隐藏历史记录面板
-  const hideHistoryPanel = () => {
+  const hideHistoryPanel = useMemoizedFn(() => {
     setShowHistory(false);
-  };
+  });
 
   // 恢复历史记录项
-  const restoreHistoryItem = (item: HistoryItem) => {
-    setTranslationState({
-      sourceText: item.original,
-      translatedText: item.translated,
-      reasoningText: item.reasoning || "",
-      hasReasoning: item.hasReasoning || false,
-      isTranslating: false,
-      showResult: true,
+  const restoreHistoryItem = useMemoizedFn((item: HistoryItem) => {
+    setSourceText(item.original);
+    updateFromMessage({
+      content: item.translated,
+      reasoningContent: item.reasoning,
+      hasReasoning: item.hasReasoning,
+      done: true,
     });
     hideHistoryPanel();
-  };
+  });
 
   // 删除历史记录项
-  const deleteHistoryItem = (original: string) => {
+  const deleteHistoryItem = useMemoizedFn((original: string) => {
     if (confirm("确定要删除这条历史记录吗？")) {
       if (browser?.runtime) {
         browser.runtime.sendMessage(
-          {
-            action: "deleteHistoryItem",
-            original,
-          },
+          { action: "deleteHistoryItem", original },
           (response: any) => {
-            if (response && response.success) {
-              loadHistory(); // 重新加载历史记录
+            if (response?.success) {
+              loadHistory();
             } else {
               alert("删除失败：" + (response?.error || "未知错误"));
             }
@@ -183,16 +170,16 @@ function App() {
         );
       }
     }
-  };
+  });
 
   // 清空历史记录
-  const clearHistory = () => {
+  const clearHistory = useMemoizedFn(() => {
     if (confirm("确定要清空所有历史记录吗？此操作不可撤销。")) {
       if (browser?.runtime) {
         browser.runtime.sendMessage(
           { action: "clearHistory" },
           (response: any) => {
-            if (response && response.success) {
+            if (response?.success) {
               setHistory([]);
             } else {
               alert("清空历史记录失败：" + (response?.error || "未知错误"));
@@ -201,13 +188,13 @@ function App() {
         );
       }
     }
-  };
+  });
 
   // 导出历史记录
-  const exportHistory = () => {
+  const exportHistory = useMemoizedFn(() => {
     if (browser?.runtime) {
       browser.runtime.sendMessage({ action: "getHistory" }, (response: any) => {
-        if (response && response.success && response.history.length > 0) {
+        if (response?.success && response.history.length > 0) {
           const historyData = JSON.stringify(response.history, null, 2);
           const blob = new Blob([historyData], { type: "application/json" });
           const url = URL.createObjectURL(blob);
@@ -225,23 +212,20 @@ function App() {
         }
       });
     }
-  };
+  });
 
   // 导入历史记录
-  const importHistory = (file: File) => {
+  const importHistory = useMemoizedFn((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const history = JSON.parse(e.target?.result as string);
-        if (Array.isArray(history)) {
+        const importedHistory = JSON.parse(e.target?.result as string);
+        if (Array.isArray(importedHistory)) {
           if (browser?.runtime) {
             browser.runtime.sendMessage(
-              {
-                action: "importHistory",
-                history,
-              },
+              { action: "importHistory", history: importedHistory },
               (response: any) => {
-                if (response && response.success) {
+                if (response?.success) {
                   alert("历史记录导入成功");
                   loadHistory();
                 } else {
@@ -259,14 +243,14 @@ function App() {
       }
     };
     reader.readAsText(file);
-  };
+  });
 
   // 打开设置页面
-  const openSettings = () => {
+  const openSettings = useMemoizedFn(() => {
     if (browser?.runtime) {
       browser.runtime.openOptionsPage();
     }
-  };
+  });
 
   // 窗口卸载时清理
   useEffect(() => {
@@ -284,6 +268,27 @@ function App() {
       }
     };
   }, []);
+
+  // 构造兼容现有组件接口的对象
+  const translationState = {
+    sourceText,
+    translatedText,
+    reasoningText,
+    isTranslating,
+    hasReasoning,
+    showResult,
+  };
+
+  const setTranslationState = useMemoizedFn(
+    (updater: React.SetStateAction<typeof translationState>) => {
+      const newState =
+        typeof updater === "function" ? updater(translationState) : updater;
+
+      if (newState.sourceText !== sourceText) {
+        setSourceText(newState.sourceText);
+      }
+    }
+  );
 
   return (
     <div className="container" ref={containerRef} onScroll={handleScroll}>

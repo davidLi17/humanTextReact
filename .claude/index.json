@@ -1,0 +1,190 @@
+{
+  "project_info": {
+    "name": "人话翻译器",
+    "type": "Chrome Extension",
+    "framework": "React + TypeScript + WXT",
+    "timestamp": "2025-11-26T23:32:46.000Z",
+    "version": "1.2.0"
+  },
+  "coverage": {
+    "total_files_scanned": 29,
+    "total_modules_identified": 6,
+    "documentation_coverage": 100,
+    "scan_truncated": false
+  },
+  "modules": [
+    {
+      "path": "entrypoints/background",
+      "name": "Background Script",
+      "type": "Service",
+      "language": "TypeScript",
+      "main_entry": "index.ts",
+      "key_interfaces": [
+        "TranslationService",
+        "ApiService",
+        "SettingsManager",
+        "HistoryManager",
+        "RequestManager",
+        "ContextMenuManager",
+        "ShortcutManager",
+        "MessageHandler",
+        "MessageUtils"
+      ],
+      "files": [
+        "index.ts",
+        "translationService.ts",
+        "apiService.ts",
+        "constants.ts",
+        "contextMenuHandler.ts",
+        "contextMenuManager.ts",
+        "historyManager.ts",
+        "messageHandler.ts",
+        "messageUtils.ts",
+        "requestManager.ts",
+        "settingsManager.ts",
+        "shortcutManager.ts"
+      ],
+      "documentation_status": "complete",
+      "scan_status": "full"
+    },
+    {
+      "path": "entrypoints/popup",
+      "name": "Popup 弹窗",
+      "type": "UI Component",
+      "language": "React + TypeScript + Less",
+      "main_entry": "main.tsx",
+      "key_interfaces": [
+        "TranslationArea",
+        "HistoryPanel",
+        "App Component"
+      ],
+      "files": [
+        "main.tsx",
+        "App.tsx",
+        "index.html",
+        "components/TranslationArea.tsx",
+        "components/HistoryPanel.tsx",
+        "types.ts",
+        "utils/helpers.ts",
+        "App.less",
+        "style.less"
+      ],
+      "documentation_status": "complete",
+      "scan_status": "full"
+    },
+    {
+      "path": "entrypoints/content",
+      "name": "Content Script",
+      "type": "Script",
+      "language": "TypeScript",
+      "main_entry": "index.ts",
+      "key_interfaces": [
+        "PopupManager",
+        "MessageHandler",
+        "StyleInjector"
+      ],
+      "files": [
+        "index.ts",
+        "popupManager.ts",
+        "messageHandler.ts",
+        "styles.tsx",
+        "markdown.ts",
+        "popupEventHandler.ts"
+      ],
+      "documentation_status": "complete",
+      "scan_status": "full"
+    },
+    {
+      "path": "entrypoints/options",
+      "name": "Options 设置页面",
+      "type": "UI Component",
+      "language": "React + TypeScript + Less",
+      "main_entry": "main.tsx",
+      "key_interfaces": [
+        "Settings Component",
+        "Configuration Manager"
+      ],
+      "files": [
+        "main.tsx",
+        "Options.tsx",
+        "index.html",
+        "Options.less",
+        "config/index.ts"
+      ],
+      "documentation_status": "complete",
+      "scan_status": "full"
+    },
+    {
+      "path": "entrypoints/shared",
+      "name": "Shared 共享模块",
+      "type": "Data Module",
+      "language": "TypeScript",
+      "main_entry": "constants.ts",
+      "key_interfaces": [
+        "Constants",
+        "Types",
+        "Default Settings"
+      ],
+      "files": [
+        "constants.ts"
+      ],
+      "documentation_status": "complete",
+      "scan_status": "full"
+    },
+    {
+      "path": "public",
+      "name": "Public 静态资源",
+      "type": "Assets",
+      "main_entry": "icon/",
+      "key_interfaces": [
+        "Extension Icons"
+      ],
+      "files": [
+        "icon/16.png",
+        "icon/32.png",
+        "icon/48.png",
+        "icon/96.png",
+        "icon/128.png",
+        "wxt.svg"
+      ],
+      "documentation_status": "not_required",
+      "scan_status": "partial"
+    }
+  ],
+  "ignored_patterns": [
+    "node_modules/**",
+    ".git/**",
+    ".github/**",
+    "dist/**",
+    "build/**",
+    ".next/**",
+    "__pycache__/**",
+    "*.lock",
+    "*.log",
+    "*.bin",
+    ".wxt/**",
+    ".output/**"
+  ],
+  "scan_gaps": {
+    "missing_tests": {
+      "description": "项目暂未发现测试文件，建议补充单元测试和集成测试",
+      "priority": "medium"
+    },
+    "config_files": {
+      "description": "建议检查并文档化更多配置文件，如 tsconfig.json 的详细配置",
+      "priority": "low"
+    }
+  },
+  "recommendations": {
+    "immediate_actions": [
+      "建议为关键模块添加单元测试，特别是 TranslationService 和 MessageHandler",
+      "考虑添加 ESLint 和 Prettier 配置以保持代码质量",
+      "建议为 API 调用添加重试机制和更好的错误处理"
+    ],
+    "future_enhancements": [
+      "考虑添加国际化支持（i18n）",
+      "建议实现缓存机制以提升性能",
+      "可以考虑添加更多 AI 模型的支持"
+    ]
+  }
+}
