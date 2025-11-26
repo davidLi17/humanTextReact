@@ -59,8 +59,8 @@ export const MARKDOWN_STYLES = /*css*/ `
 
   /* 代码块样式 */
   .code-block {
-    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-    border: 1px solid #e2e8f0;
+    background: linear-gradient(135deg, #1e1e2e 0%, #2d2d3f 100%);
+    border: 1px solid #3d3d5c;
     border-radius: 8px;
     margin: 1em 0;
     overflow: hidden;
@@ -74,8 +74,80 @@ export const MARKDOWN_STYLES = /*css*/ `
       "Courier New", monospace;
     font-size: 13px;
     line-height: 1.5;
-    color: #2d3748;
+    color: #cdd6f4;
     background: transparent;
+  }
+
+  /* Prism 语法高亮主题 - Catppuccin Mocha 风格 */
+  .code-block .token.comment,
+  .code-block .token.prolog,
+  .code-block .token.doctype,
+  .code-block .token.cdata {
+    color: #6c7086;
+    font-style: italic;
+  }
+
+  .code-block .token.punctuation {
+    color: #9399b2;
+  }
+
+  .code-block .token.property,
+  .code-block .token.tag,
+  .code-block .token.boolean,
+  .code-block .token.number,
+  .code-block .token.constant,
+  .code-block .token.symbol {
+    color: #fab387;
+  }
+
+  .code-block .token.selector,
+  .code-block .token.attr-name,
+  .code-block .token.string,
+  .code-block .token.char,
+  .code-block .token.builtin {
+    color: #a6e3a1;
+  }
+
+  .code-block .token.operator,
+  .code-block .token.entity,
+  .code-block .token.url,
+  .code-block .language-css .token.string,
+  .code-block .style .token.string,
+  .code-block .token.variable {
+    color: #94e2d5;
+  }
+
+  .code-block .token.atrule,
+  .code-block .token.attr-value,
+  .code-block .token.function,
+  .code-block .token.class-name {
+    color: #89b4fa;
+  }
+
+  .code-block .token.keyword {
+    color: #cba6f7;
+  }
+
+  .code-block .token.regex,
+  .code-block .token.important {
+    color: #f9e2af;
+  }
+
+  .code-block .token.important,
+  .code-block .token.bold {
+    font-weight: bold;
+  }
+
+  .code-block .token.italic {
+    font-style: italic;
+  }
+
+  .code-block .token.deleted {
+    color: #f38ba8;
+  }
+
+  .code-block .token.inserted {
+    color: #a6e3a1;
   }
 
   .inline-code {
@@ -251,15 +323,6 @@ export const MARKDOWN_STYLES = /*css*/ `
     .markdown-content h4,
     .markdown-content h5,
     .markdown-content h6 {
-      color: #e5e5e5;
-    }
-
-    .code-block {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-      border-color: #444;
-    }
-
-    .code-block code {
       color: #e5e5e5;
     }
 

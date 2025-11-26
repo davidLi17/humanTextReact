@@ -1,3 +1,23 @@
+import Prism from "prismjs";
+// 导入常用语言支持
+import "prismjs/components/prism-javascript";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-css";
+import "prismjs/components/prism-python";
+import "prismjs/components/prism-java";
+import "prismjs/components/prism-c";
+import "prismjs/components/prism-cpp";
+import "prismjs/components/prism-csharp";
+import "prismjs/components/prism-go";
+import "prismjs/components/prism-rust";
+import "prismjs/components/prism-bash";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-yaml";
+import "prismjs/components/prism-markdown";
+import "prismjs/components/prism-sql";
+
 /**
  * 高级 Markdown 解析器
  * 支持完整的 Markdown 语法，包括代码块、列表、链接、表格等
@@ -13,13 +33,25 @@ export function parseMarkdown(text: string): string {
   // 2. 转义HTML标签（但保留换行）
   html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // 3. 处理代码块 (```) - 优先级最高
+  // 3. 处理代码块 (```) - 优先级最高，使用 Prism 高亮
   const codeBlocks: string[] = [];
   html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
     const index = codeBlocks.length;
     const language = lang || "text";
+    const trimmedCode = code.trim();
+    
+    // 尝试使用 Prism 高亮
+    let highlightedCode: string;
+    const grammar = Prism.languages[language];
+    if (grammar) {
+      highlightedCode = Prism.highlight(trimmedCode, grammar, language);
+    } else {
+      // 语言不支持时，保持原样但转义 HTML
+      highlightedCode = trimmedCode;
+    }
+    
     codeBlocks.push(
-      `<pre class="code-block"><code class="language-${language}">${code.trim()}</code></pre>`
+      `<pre class="code-block language-${language}"><code class="language-${language}">${highlightedCode}</code></pre>`
     );
     return `__CODE_BLOCK_${index}__`;
   });
