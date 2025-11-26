@@ -16,9 +16,12 @@
   },
   "dependencies": {
     "@icon-park/react": "^1.4.2",
+    "@tailwindcss/cli": "^4.1.17",
+    "ahooks": "^3.9.6",
     "less": "^4.4.1",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.17"
   },
   "devDependencies": {
     "@types/react": "^19.1.2",
