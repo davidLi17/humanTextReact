@@ -2,17 +2,33 @@ import { LOG_LEVELS, LogLevel } from "@/entrypoints/shared/constants";
 import debugLib from "debug";
 
 /**
+ * 日志命名空间前缀
+ * 可通过环境变量 DEBUG_NAMESPACE_PREFIX 自定义
+ */
+const DEBUG_NAMESPACE_PREFIX =
+  (typeof globalThis !== "undefined" && (globalThis as any).DEBUG_NAMESPACE_PREFIX) ||
+  "human-text";
+
+/**
  * 专业的日志管理系统
  * 基于 debug 包，支持命名空间和条件日志输出
+ *
+ * @example
+ * ```ts
+ * const logger = new Logger("background", "🔙");
+ * logger.info("启动消息");
+ * ```
  */
 export class Logger {
   private debugger: debugLib.Debugger;
   private emoji: string;
   private namespace: string;
+  private prefix: string;
 
-  constructor(namespace: string, emoji: string = "🔧") {
+  constructor(namespace: string, emoji: string = "🔧", prefix?: string) {
     this.namespace = namespace;
-    this.debugger = debugLib(`human-text:${namespace}`);
+    this.prefix = prefix || DEBUG_NAMESPACE_PREFIX;
+    this.debugger = debugLib(`${this.prefix}:${namespace}`);
     this.emoji = emoji;
   }
 
@@ -81,15 +97,49 @@ export class Logger {
    * 获取完整的调试器命名空间
    */
   getFullNamespace(): string {
-    return `human-text:${this.namespace}`;
+    return `${this.prefix}:${this.namespace}`;
+  }
+
+  /**
+   * 创建子日志器
+   * 继承父日志器的配置,但使用子命名空间
+   *
+   * @example
+   * ```ts
+   * const parentLogger = new Logger("api", "🌐");
+   * const childLogger = parentLogger.child("http"); // api:http
+   * ```
+   */
+  child(childNamespace: string, childEmoji?: string): Logger {
+    const fullNamespace = `${this.namespace}:${childNamespace}`;
+    return new Logger(fullNamespace, childEmoji || this.emoji, this.prefix);
+  }
+
+  /**
+   * 更新配置 (动态修改 emoji 和 prefix)
+   */
+  updateConfig(emoji?: string, prefix?: string): void {
+    if (emoji) this.emoji = emoji;
+    if (prefix) {
+      this.prefix = prefix;
+      this.debugger = debugLib(`${this.prefix}:${this.namespace}`);
+    }
   }
 }
 
 /**
  * 创建新的日志器实例
+ *
+ * @param namespace - 命名空间
+ * @param emoji - 表情符号
+ * @param prefix - 命名空间前缀 (可选,默认使用全局配置)
  */
-export function createLogger(namespace: string, emoji?: string): Logger {
-  return new Logger(namespace, emoji);
+export function createLogger(
+  namespace: string,
+  emoji?: string,
+  prefix?: string
+): Logger {
+  return new Logger(namespace, emoji, prefix);
 }
 
 /**
@@ -162,25 +212,85 @@ export async function initializeLogger() {
  * 注意：debug 包启用所有匹配的命名空间，实际的级别过滤通过 shouldLog 函数控制
  */
 function getDebugPatterns(logLevel: LogLevel): string {
+  const prefix = DEBUG_NAMESPACE_PREFIX;
   switch (logLevel) {
     case LOG_LEVELS.ERROR:
     case LOG_LEVELS.WARN:
     case LOG_LEVELS.INFO:
     case LOG_LEVELS.DEBUG:
-      return "human-text:*"; // 启用所有 human-text 命名空间，具体级别由 shouldLog 控制
+      return `${prefix}:*`; // 启用所有配置前缀的命名空间，具体级别由 shouldLog 控制
     default:
       return "";
   }
 }
 
 /**
+ * 获取当前日志级别
+ */
+let currentLogLevel: LogLevel = LOG_LEVELS.OFF;
+
+function getCurrentLogLevel(): LogLevel {
+  return currentLogLevel;
+}
+
+/**
+ * 日志类型缓存
+ * 避免每次日志调用都进行级别判断,提升性能
+ */
+const logTypeCache = new Map<"log" | "info" | "warn" | "error" | "success" | "trace", boolean>();
+
+/**
+ * 更新日志类型缓存
+ * 在日志级别变更时调用
+ */
+function updateLogTypeCache(): void {
+  logTypeCache.clear();
+
+  if (currentLogLevel === LOG_LEVELS.OFF) {
+    // 所有类型都返回 false
+    return;
+  }
+
+  switch (currentLogLevel) {
+    case LOG_LEVELS.ERROR:
+      logTypeCache.set("error", true);
+      break;
+    case LOG_LEVELS.WARN:
+      logTypeCache.set("error", true);
+      logTypeCache.set("warn", true);
+      break;
+    case LOG_LEVELS.INFO:
+      logTypeCache.set("error", true);
+      logTypeCache.set("warn", true);
+      logTypeCache.set("info", true);
+      logTypeCache.set("success", true);
+      break;
+    case LOG_LEVELS.DEBUG:
+      // 所有类型都返回 true
+      logTypeCache.set("log", true);
+      logTypeCache.set("info", true);
+      logTypeCache.set("warn", true);
+      logTypeCache.set("error", true);
+      logTypeCache.set("success", true);
+      logTypeCache.set("trace", true);
+      break;
+  }
+}
+
+/**
  * 检查当前日志级别是否应该显示特定类型的日志
+ * 使用缓存优化性能,避免重复计算
  */
 export function shouldLog(
   logType: "log" | "info" | "warn" | "error" | "success" | "trace"
 ): boolean {
-  const currentLevel = getCurrentLogLevel();
+  // 优先从缓存读取
+  if (logTypeCache.has(logType)) {
+    return logTypeCache.get(logType)!;
+  }
 
+  // 缓存未命中时的回退逻辑
+  const currentLevel = getCurrentLogLevel();
   if (currentLevel === LOG_LEVELS.OFF) return false;
 
   switch (currentLevel) {
@@ -196,26 +306,19 @@ export function shouldLog(
         logType === "success"
       );
     case LOG_LEVELS.DEBUG:
-      return true; // 显示所有日志类型
+      return true;
     default:
       return false;
   }
 }
 
 /**
- * 获取当前日志级别
- */
-let currentLogLevel: LogLevel = LOG_LEVELS.OFF;
-
-function getCurrentLogLevel(): LogLevel {
-  return currentLogLevel;
-}
-
-/**
  * 设置当前日志级别
+ * 同时更新缓存以优化性能
  */
 function setCurrentLogLevel(level: LogLevel): void {
   currentLogLevel = level;
+  updateLogTypeCache(); // 级别变更时更新缓存
 }
 
 // 预定义的日志器实例
