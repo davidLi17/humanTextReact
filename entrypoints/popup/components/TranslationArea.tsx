@@ -1,11 +1,11 @@
 import { TranslationAreaProps } from "@/entrypoints/popup/types";
+import { useAutoScroll } from "@/entrypoints/popup/hooks/useAutoScroll";
 import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { injectMarkdownStyles } from "@/shared/styles/markdown";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown";
-import throttle from "lodash-es/throttle";
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useEffect } from "react";
 import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
@@ -19,88 +19,22 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onCopy,
   onShowHistory,
   onOpenSettings,
-  history, // 添加 history 属性
+  history,
 }) => {
-  const userHasScrolledRef = useRef(false);
-  const resultSectionWrapperRef = useRef<HTMLDivElement>(null);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // ========== 自动滚动 Hook ==========
+  const { containerRef: resultSectionWrapperRef, handleScroll: throttledScrollHandler } =
+    useAutoScroll({
+      // 当翻译内容或推理内容变化时触发自动滚动
+      deps: [translationState.translatedText, translationState.reasoningText],
+      // 新内容到达时重置滚动状态（翻译开始时需要重新启用自动滚动）
+      resetOnNewContent: translationState.isTranslating,
+      // 默认配置：10px 容差，16ms 节流，1000ms 延迟重置
+    });
 
-  // 注入 Markdown 样式和初始化复制功能
+  // ========== Markdown 样式注入 ==========
   useEffect(() => {
     injectMarkdownStyles("popup-markdown-styles");
     initializeCodeCopy();
-  }, []);
-
-  // 处理结果区域的滚动事件
-  const handleResultScroll = useCallback(() => {
-    if (resultSectionWrapperRef.current) {
-      const { scrollHeight, scrollTop, clientHeight } =
-        resultSectionWrapperRef.current;
-      const isAtBottom = Math.abs(scrollHeight - scrollTop - clientHeight) < 10;
-      userHasScrolledRef.current = !isAtBottom;
-
-      // 如果用户滚动离开底部，设置一个延迟重置定时器
-      if (!isAtBottom) {
-        if (scrollTimeoutRef.current) {
-          clearTimeout(scrollTimeoutRef.current);
-        }
-        scrollTimeoutRef.current = setTimeout(() => {
-          if (resultSectionWrapperRef.current) {
-            const { scrollHeight, scrollTop, clientHeight } =
-              resultSectionWrapperRef.current;
-            const stillAtBottom =
-              Math.abs(scrollHeight - scrollTop - clientHeight) < 10;
-            if (stillAtBottom) {
-              userHasScrolledRef.current = false;
-            }
-          }
-        }, 1000); // 1秒后如果还在底部就重置状态
-      }
-    }
-  }, []);
-
-  // 节流的滚动处理函数
-  const throttledScrollHandler = useCallback(
-    throttle(handleResultScroll, 16), // 16ms ≈ 60fps
-    [handleResultScroll]
-  );
-
-  // 自动滚动到底部（当有新内容且用户没有手动滚动时）
-  useEffect(() => {
-    if (
-      !userHasScrolledRef.current &&
-      resultSectionWrapperRef.current &&
-      (translationState.translatedText || translationState.reasoningText)
-    ) {
-      // 使用 requestAnimationFrame 优化滚动性能
-      requestAnimationFrame(() => {
-        if (resultSectionWrapperRef.current) {
-          resultSectionWrapperRef.current.scrollTop =
-            resultSectionWrapperRef.current.scrollHeight;
-        }
-      });
-    }
-  }, [translationState.translatedText, translationState.reasoningText]);
-
-  // 翻译开始时重置滚动状态
-  useEffect(() => {
-    if (translationState.isTranslating) {
-      userHasScrolledRef.current = false;
-      // 清除可能存在的滚动重置定时器
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-        scrollTimeoutRef.current = null;
-      }
-    }
-  }, [translationState.isTranslating]);
-
-  // 组件卸载时清理定时器
-  useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
   }, []);
 
   // 处理键盘事件
