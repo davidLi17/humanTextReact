@@ -2,6 +2,41 @@
  * API 服务
  * 负责处理与外部 API 的交互
  */
+
+// 定义错误处理策略接口
+interface ErrorStrategy {
+  match: (status: number) => boolean;
+  handle: (errorText: string) => never;
+}
+
+// 各种状态码的处理策略
+const errorStrategies: ErrorStrategy[] = [
+  {
+    match: (status) => status === 401,
+    handle: () => {
+      throw new Error("API Key无效或已过期");
+    },
+  },
+  {
+    match: (status) => status === 404,
+    handle: () => {
+      throw new Error("API地址或模型不存在");
+    },
+  },
+  {
+    match: (status) => status === 429,
+    handle: () => {
+      throw new Error("请求频率过高，请稍后重试");
+    },
+  },
+  {
+    match: (_status) => true, // 默认策略，建议放最后
+    handle: (errorText: string) => {
+      throw new Error(`API请求失败: ${errorText}`);
+    },
+  },
+];
+
 export class ApiService {
   /**
    * API连接测试函数
@@ -38,14 +73,10 @@ export class ApiService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        if (response.status === 401) {
-          throw new Error("API Key无效或已过期");
-        } else if (response.status === 404) {
-          throw new Error("API地址或模型不存在");
-        } else if (response.status === 429) {
-          throw new Error("请求频率过高，请稍后重试");
-        } else {
-          throw new Error(`API请求失败: ${response.status} ${errorText}`);
+        // 使用策略模式处理错误
+        const strategy = errorStrategies.find((s) => s.match(response.status));
+        if (strategy) {
+          strategy.handle(`${response.status} ${errorText}`);
         }
       }
 

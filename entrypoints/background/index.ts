@@ -60,7 +60,9 @@ export default defineBackground(() => {
   );
 
   // 消息监听器
-  browser.runtime.onMessage.addListener(MessageHandler.handleRuntimeMessage);
+  browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    return MessageHandler.handleRuntimeMessage(request, sender, sendResponse);
+  });
 
   // 监听标签页关闭事件
   browser.tabs.onRemoved.addListener((tabId: number) => {
