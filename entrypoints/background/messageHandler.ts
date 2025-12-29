@@ -5,6 +5,15 @@ import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import { isNil } from "lodash-es";
+
+/**
+ * 消息处理器类型定义
+ */
+type MessageHandlerFn = (
+  request: any,
+  sender: Browser.runtime.MessageSender
+) => Promise<any> | any;
 
 /**
  * 消息处理器
@@ -12,129 +21,113 @@ import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
  */
 export class MessageHandler {
   /**
-   * 处理运行时消息
+   * 消息处理器映射表（策略模式）
    */
-  static handleRuntimeMessage(
-    request: any,
-    sender: any,
-    sendResponse: (response?: any) => void
-  ): boolean {
-    // 处理options页面发来的快捷键更改消息
-    if (request.action === "shortcutChanged") {
+  private static handlers: Record<string, MessageHandlerFn> = {
+    // 快捷键更改
+    shortcutChanged: async () => {
       ContextMenuManager.createContextMenu();
-      sendResponse({ success: true });
-      return false;
-    }
-
-    if (request.action === MESSAGE_TYPES.GET_HISTORY) {
-      HistoryManager.getTranslationHistory()
-        .then((history) => {
-          sendResponse({ success: true, history });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
-      return true;
-    }
-
-    if (request.action === MESSAGE_TYPES.TRANSLATE) {
+      return { success: true };
+    },
+    // 获取历史记录
+    [MESSAGE_TYPES.GET_HISTORY]: async () => {
+      const history = await HistoryManager.getTranslationHistory();
+      return { success: true, history };
+    },
+    // 翻译
+    [MESSAGE_TYPES.TRANSLATE]: async (request, sender) => {
+      console.log(
+        "🔍LHG:background/messageHandler[MESSAGE_TYPES.TRANSLATE] request:::",
+        request
+      );
+      console.log(
+        "🔍LHG:background/messageHandler[MESSAGE_TYPES.TRANSLATE] sender:::",
+        sender
+      );
       const tabId = sender.tab?.id;
 
-      // 异步处理翻译请求，支持设置获取
-      const handleTranslate = async () => {
-        try {
-          // 如果请求中没有传递 thinkingEnabled，则从设置中获取
-          let thinkingEnabled = request.thinkingEnabled;
-          if (thinkingEnabled === undefined) {
-            const settings = await SettingsUtils.getSettings();
-            thinkingEnabled = settings.thinkingEnabled;
-          }
+      // 如果请求中没有传递 thinkingEnabled，则从设置中获取
+      let thinkingEnabled = request.thinkingEnabled;
+      if (isNil(thinkingEnabled)) {
+        const settings = await SettingsUtils.getSettings();
+        thinkingEnabled = settings.thinkingEnabled;
+      }
 
-          // 构建翻译参数，支持新的多模态格式
-          const translationParams = {
-            text: request.text,
-            images: request.images || [],
-            thinkingEnabled,
-            temperature: request.temperature,
-            promptTemplate: request.promptTemplate,
-            apiKey: request.apiKey,
-            tabId,
-          };
-
-          const result = await TranslationService.translateText(translationParams);
-          sendResponse({ success: true, result });
-        } catch (error: any) {
-          sendResponse({ success: false, error: error.message });
-        }
+      // 构建翻译参数，支持新的多模态格式
+      const translationParams = {
+        text: request.text,
+        images: request.images || [],
+        thinkingEnabled,
+        temperature: request.temperature,
+        promptTemplate: request.promptTemplate,
+        apiKey: request.apiKey,
+        tabId,
       };
 
-      handleTranslate();
-      return true;
-    }
-
-    if (request.action === MESSAGE_TYPES.SHOW_TRANSLATION_POPUP) {
-      // 这个消息类型现在主要用于右键菜单
-      sendResponse({ success: true });
-      return false;
-    }
-
-    if (request.action === MESSAGE_TYPES.CLEANUP) {
+      const result = await TranslationService.translateText(translationParams);
+      return { success: true, result };
+    },
+    // 显示翻译弹窗（主要用于右键菜单）
+    [MESSAGE_TYPES.SHOW_TRANSLATION_POPUP]: async () => {
+      return { success: true };
+    },
+    // 清理请求
+    [MESSAGE_TYPES.CLEANUP]: async (request, sender) => {
       const tabId = sender.tab?.id;
       if (tabId) {
         RequestManager.cleanupRequest(tabId);
       }
-      sendResponse({ success: true });
-      return false;
-    }
-
-    if (request.action === MESSAGE_TYPES.DELETE_HISTORY_ITEM) {
-      HistoryManager.deleteHistoryItem(request.original)
-        .then((success) => {
-          sendResponse({ success });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
-      return true;
-    }
-
-    if (request.action === MESSAGE_TYPES.CLEAR_HISTORY) {
-      HistoryManager.clearHistory()
-        .then((success) => {
-          sendResponse({ success });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
-      return true;
-    }
-
-    if (request.action === MESSAGE_TYPES.IMPORT_HISTORY) {
-      HistoryManager.importHistory(request.history)
-        .then((success) => {
-          sendResponse({ success });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
-      return true;
-    }
-
-    if (request.action === "testApiConnection") {
-      ApiService.testApiConnection(
+      return { success: true };
+    },
+    // 删除历史记录项
+    [MESSAGE_TYPES.DELETE_HISTORY_ITEM]: async (request) => {
+      const success = await HistoryManager.deleteHistoryItem(request.original);
+      return { success };
+    },
+    // 清空历史记录
+    [MESSAGE_TYPES.CLEAR_HISTORY]: async () => {
+      const success = await HistoryManager.clearHistory();
+      return { success };
+    },
+    // 导入历史记录
+    [MESSAGE_TYPES.IMPORT_HISTORY]: async (request) => {
+      const success = await HistoryManager.importHistory(request.history);
+      return { success };
+    },
+    // 测试 API 连接
+    testApiConnection: async (request) => {
+      await ApiService.testApiConnection(
         request.apiKey,
         request.baseUrl,
         request.model
-      )
-        .then((success) => {
-          sendResponse({ success: true });
-        })
-        .catch((error) => {
-          sendResponse({ success: false, error: error.message });
-        });
-      return true;
-    }
+      );
+      return { success: true };
+    },
+  };
 
-    return false;
+  /**
+   * 处理运行时消息（统一调度器）
+   */
+  static handleRuntimeMessage(
+    request: any,
+    sender: Browser.runtime.MessageSender,
+    sendResponse: (response?: any) => void
+  ): boolean {
+    const handler = this.handlers[request.action];
+    // 未找到处理器
+    if (!handler) {
+      return false;
+    }
+    // 执行处理器（统一 async/await + try/catch）
+    (async () => {
+      try {
+        const result = await handler(request, sender);
+        sendResponse(result);
+      } catch (error: any) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+
+    return true; // 表示异步响应
   }
 }
