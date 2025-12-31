@@ -6,6 +6,7 @@ import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { injectMarkdownStyles } from "@/shared/styles/markdown";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown";
 import React, { useEffect } from "react";
+import { useAutoScrollToBottom } from "../hooks/useAutoScrollToBottom";
 import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
@@ -21,15 +22,19 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onOpenSettings,
   history,
 }) => {
-  // ========== 自动滚动 Hook ==========
-  const { containerRef: resultSectionWrapperRef, handleScroll: throttledScrollHandler } =
-    useAutoScroll({
-      // 当翻译内容或推理内容变化时触发自动滚动
-      deps: [translationState.translatedText, translationState.reasoningText],
-      // 新内容到达时重置滚动状态（翻译开始时需要重新启用自动滚动）
-      resetOnNewContent: translationState.isTranslating,
-      // 默认配置：10px 容差，16ms 节流，1000ms 延迟重置
-    });
+  // 使用 useAutoScrollToBottom hook 管理滚动
+  const {
+    containerRef: resultSectionWrapperRef,
+    onScroll: handleResultScroll,
+    userHasScrolledRef,
+  } = useAutoScrollToBottom<HTMLDivElement>({
+    enabled: translationState.showResult,
+    watch: [translationState.translatedText, translationState.reasoningText],
+    bottomThresholdPx: 10,
+    throttleMs: 16,
+    resetDelayMs: 1000,
+    resetWhen: translationState.isTranslating,
+  });
 
   // ========== Markdown 样式注入 ==========
   useEffect(() => {
@@ -214,7 +219,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
           <div
             className="result-section-wrapper"
             ref={resultSectionWrapperRef}
-            onScroll={throttledScrollHandler}
+            onScroll={handleResultScroll}
           >
             <div className="result-area">
               <div className="result-header">
