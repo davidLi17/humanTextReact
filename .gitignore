@@ -13,7 +13,7 @@ stats.html
 stats-*.json
 .wxt
 web-ext.config.ts
-
+*.zip
 # Build outputs
 dist
 build
