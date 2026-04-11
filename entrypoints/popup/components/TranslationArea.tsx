@@ -10,7 +10,6 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onCopy,
   onShowHistory,
   onOpenSettings,
-  onScroll,
   resultAreaRef,
 }) => {
   const [copyButtonText, setCopyButtonText] = useState("复制");

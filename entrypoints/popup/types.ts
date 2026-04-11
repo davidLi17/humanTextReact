@@ -22,7 +22,6 @@ export interface TranslationAreaProps {
   onCopy: (text: string) => Promise<boolean>;
   onShowHistory: () => void;
   onOpenSettings: () => void;
-  onScroll: () => void;
   resultAreaRef: React.RefObject<HTMLDivElement | null>;
 }
 

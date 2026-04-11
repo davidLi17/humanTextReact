@@ -3,6 +3,7 @@ import "./App.less";
 import TranslationArea from "./components/TranslationArea";
 import HistoryPanel from "./components/HistoryPanel";
 import { TranslationState, HistoryItem, MessageRequest } from "./types";
+import { useAutoFollowScroll } from "./hooks/useAutoFollowScroll";
 
 function App() {
   const [translationState, setTranslationState] = useState<TranslationState>({
@@ -17,9 +18,17 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const userHasScrolled = useRef(false);
   const resultAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const { resetFollow } = useAutoFollowScroll({
+    containerRef,
+    watchValues: [
+      translationState.translatedText,
+      translationState.reasoningText,
+      translationState.showResult,
+    ],
+    enabled: translationState.showResult,
+  });
 
   // 监听来自background script的消息
   useEffect(() => {
@@ -45,10 +54,6 @@ function App() {
             isTranslating: !request.done,
           }));
 
-          // 自动滚动到底部（如果用户没有手动滚动）
-          if (!userHasScrolled.current && containerRef.current) {
-            containerRef.current.scrollTop = containerRef.current.scrollHeight;
-          }
         }
 
         sendResponse({ success: true });
@@ -64,15 +69,6 @@ function App() {
       };
     }
   }, []);
-
-  // 处理滚动事件
-  const handleScroll = () => {
-    if (containerRef.current) {
-      const { scrollHeight, scrollTop, clientHeight } = containerRef.current;
-      const isAtBottom = scrollHeight - scrollTop <= clientHeight + 1;
-      userHasScrolled.current = !isAtBottom;
-    }
-  };
 
   // 发送翻译请求
   const handleTranslate = async () => {
@@ -92,7 +88,7 @@ function App() {
       hasReasoning: false,
     }));
 
-    userHasScrolled.current = false;
+    resetFollow();
 
     try {
       // 先发送清理请求
@@ -286,7 +282,7 @@ function App() {
   }, []);
 
   return (
-    <div className="container" ref={containerRef} onScroll={handleScroll}>
+    <div className="container" ref={containerRef}>
       {!showHistory ? (
         <TranslationArea
           translationState={translationState}
@@ -295,7 +291,6 @@ function App() {
           onCopy={copyToClipboard}
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
-          onScroll={() => {}}
           resultAreaRef={resultAreaRef}
         />
       ) : (
