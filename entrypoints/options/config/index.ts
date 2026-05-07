@@ -31,6 +31,10 @@ export const API_HINTS = [
     name: "通义千问",
     url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
   },
+  {
+    name: "智谱AI",
+    url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  },
   { name: "自定义地址", url: "" },
 ];
 export const API_PLACEHOLDERS = [

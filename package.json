@@ -1,6 +1,6 @@
 {
-  "name": "wxt-react-starter",
-  "description": "manifest.json description",
+  "name": "human-text-translator",
+  "description": "人话翻译器 - 将专业术语翻译成通俗易懂的\"人话\"",
   "private": true,
   "version": "1.2.0",
   "type": "module",
