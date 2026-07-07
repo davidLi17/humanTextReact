@@ -9,6 +9,13 @@ const DEBUG_NAMESPACE_PREFIX =
   (typeof globalThis !== "undefined" && (globalThis as any).DEBUG_NAMESPACE_PREFIX) ||
   "human-text";
 
+interface LogSettingsStorage {
+  logLevel?: LogLevel;
+  settings?: {
+    logLevel?: LogLevel;
+  };
+}
+
 /**
  * 专业的日志管理系统
  * 基于 debug 包，支持命名空间和条件日志输出
@@ -161,7 +168,10 @@ function isLocalStorageAvailable(): boolean {
 export async function initializeLogger() {
   try {
     // 从存储中获取日志级别设置（兼容新老两种格式，并从 local 做兜底）
-    const syncResult = await browser.storage.sync.get(["logLevel", "settings"]);
+    const syncResult = (await browser.storage.sync.get([
+      "logLevel",
+      "settings",
+    ])) as LogSettingsStorage;
     let logLevel: LogLevel = LOG_LEVELS.OFF;
 
     if (syncResult?.settings?.logLevel) {
@@ -170,10 +180,10 @@ export async function initializeLogger() {
       logLevel = syncResult.logLevel as LogLevel;
     } else {
       // 兜底从 local 读取
-      const localResult = await browser.storage.local.get([
+      const localResult = (await browser.storage.local.get([
         "logLevel",
         "settings",
-      ]);
+      ])) as LogSettingsStorage;
       if (localResult?.settings?.logLevel) {
         logLevel = localResult.settings.logLevel as LogLevel;
       } else if (localResult?.logLevel) {
@@ -276,3 +286,4 @@ export const optionsLogger = createLogger("options", "⚙️");
 export const translationLogger = createLogger("translation", "🌐");
 export const messageLogger = createLogger("message", "📨");
 export const settingsLogger = createLogger("settings", "⚙️");
+

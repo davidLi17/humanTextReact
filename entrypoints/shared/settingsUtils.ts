@@ -31,6 +31,12 @@ export class SettingsUtils {
   }
 
   /**
+   * 清理设置缓存。
+   * 当前实现每次都直接读取 storage，保留该方法用于兼容调用方。
+   */
+  static clearCache(): void {}
+
+  /**
    * 获取用户设置
    * 支持两种存储格式：
    * 1. 新格式：'settings' 对象下的所有设置
@@ -211,3 +217,4 @@ export const getThinkingEnabled = (): Promise<boolean> => {
 export const getUserSettings = (): Promise<UserSettings> => {
   return SettingsUtils.getSettings();
 };
+

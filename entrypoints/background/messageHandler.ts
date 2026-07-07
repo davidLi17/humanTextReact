@@ -73,10 +73,8 @@ export class MessageHandler {
     },
     // 清理请求
     [MESSAGE_TYPES.CLEANUP]: async (request, sender) => {
-      const tabId = sender.tab?.id;
-      if (tabId) {
-        RequestManager.cleanupRequest(tabId);
-      }
+      const tabId = request.tabId ?? sender.tab?.id;
+      RequestManager.cleanupRequest(tabId);
       return { success: true };
     },
     // 删除历史记录项
@@ -131,3 +129,4 @@ export class MessageHandler {
     return true; // 表示异步响应
   }
 }
+
