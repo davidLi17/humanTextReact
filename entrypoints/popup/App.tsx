@@ -1,3 +1,4 @@
+import { DEFAULT_SETTINGS } from "@/entrypoints/shared/constants";
 import { createLogger, initializeLogger } from "@/entrypoints/shared/logger";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { useEffect, useState } from "react";
@@ -8,12 +9,21 @@ import { HistoryItem, MessageRequest, TranslationState } from "./types";
 
 const logger = createLogger("popup-app", "🔽");
 
+const DRAFT_STORAGE_KEY = "popupDraft";
+
+interface PopupDraft {
+  sourceText: string;
+  images: TranslationState["images"];
+  updatedAt: number;
+}
+
 function App() {
   const [translationState, setTranslationState] = useState<TranslationState>({
     sourceText: "",
     translatedText: "",
     reasoningText: "",
     isTranslating: false,
+    errorMessage: "",
     hasReasoning: false,
     showResult: false,
     thinkingEnabled: false,
@@ -28,6 +38,58 @@ function App() {
   useEffect(() => {
     initializeLogger();
   }, []);
+
+  // 恢复未提交草稿，避免 popup 关闭后丢失输入
+  useEffect(() => {
+    const loadDraft = async () => {
+      try {
+        if (!browser?.storage?.local) return;
+
+        const stored = await browser.storage.local.get(DRAFT_STORAGE_KEY);
+        const draft = stored?.[DRAFT_STORAGE_KEY] as PopupDraft | undefined;
+
+        if (!draft || (!draft.sourceText?.trim() && !draft.images?.length)) {
+          return;
+        }
+
+        setTranslationState((prev) => {
+          if (prev.sourceText || prev.images.length > 0) return prev;
+
+          return {
+            ...prev,
+            sourceText: draft.sourceText || "",
+            images: draft.images || [],
+          };
+        });
+      } catch (error) {
+        logger.error("恢复草稿失败:", error);
+      }
+    };
+
+    loadDraft();
+  }, []);
+
+  // 自动保存当前输入和图片草稿
+  useEffect(() => {
+    if (!browser?.storage?.local) return;
+
+    const timeoutId = window.setTimeout(() => {
+      const draft: PopupDraft = {
+        sourceText: translationState.sourceText,
+        images: translationState.images,
+        updatedAt: Date.now(),
+      };
+
+      const hasDraft = draft.sourceText.trim().length > 0 || draft.images.length > 0;
+      const action = hasDraft
+        ? browser.storage.local.set({ [DRAFT_STORAGE_KEY]: draft })
+        : browser.storage.local.remove(DRAFT_STORAGE_KEY);
+
+      action.catch((error: unknown) => logger.error("保存草稿失败:", error));
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [translationState.sourceText, translationState.images]);
 
   // 监听来自background script的消息
   useEffect(() => {
@@ -55,7 +117,9 @@ function App() {
           setTranslationState((prev: TranslationState) => ({
             ...prev,
             isTranslating: false,
-            translatedText: `错误: ${request.error}`,
+            showResult: true,
+            errorMessage: request.error,
+            translatedText: prev.translatedText,
           }));
         } else {
           logger.log("✅ [Popup App] 更新翻译状态", {
@@ -71,6 +135,7 @@ function App() {
             hasReasoning: request.hasReasoning || false,
             showResult: true,
             isTranslating: !request.done,
+            errorMessage: "",
           }));
         }
 
@@ -154,9 +219,15 @@ function App() {
   // 处理滚动事件（空函数，现在滚动在TranslationArea内部处理）
   const handleScroll = () => {};
 
+  const isApiKeyConfigured = (apiKey?: string) =>
+    Boolean(apiKey && apiKey.trim() && apiKey !== DEFAULT_SETTINGS.apiKey);
+
+  const getErrorMessage = (error: any) =>
+    error?.message || "翻译失败，请稍后重试";
+
   // 发送翻译请求
-  const handleTranslate = async () => {
-    const text = translationState.sourceText.trim();
+  const handleTranslate = async (textOverride?: string) => {
+    const text = (textOverride ?? translationState.sourceText).trim();
     logger.log("LHG:popup/App.tsx text:::", text);
     if (!text) {
       alert("请输入要翻译的文本");
@@ -187,30 +258,69 @@ function App() {
         hasApiKey: !!userSettings.apiKey,
       });
 
+      if (!isApiKeyConfigured(userSettings.apiKey)) {
+        setTranslationState((prev: TranslationState) => ({
+          ...prev,
+          isTranslating: false,
+          showResult: true,
+          errorMessage: "请先在设置中配置 API Key",
+          translatedText: "",
+        }));
+        return;
+      }
+
       // 先发送清理请求
       if (browser?.runtime) {
         await browser.runtime.sendMessage({ action: "cleanup" });
 
         // 开始新的翻译，传递完整设置
-        await browser.runtime.sendMessage({
+        const response = await browser.runtime.sendMessage({
           action: "translate",
           text,
-          images: translationState.images,
+          images: textOverride ? [] : translationState.images,
           thinkingEnabled: userSettings.thinkingEnabled,
           temperature: userSettings.temperature,
           promptTemplate: userSettings.promptTemplate,
           apiKey: userSettings.apiKey,
           source: "popup",
         });
+
+        if (response && response.success === false) {
+          throw new Error(response.error || "翻译失败，请稍后重试");
+        }
       }
     } catch (error: any) {
       if (!error.message?.includes("Receiving end does not exist")) {
         setTranslationState((prev: TranslationState) => ({
           ...prev,
           isTranslating: false,
-          translatedText: `发生错误：${error.message}`,
+          showResult: true,
+          errorMessage: getErrorMessage(error),
         }));
       }
+    }
+  };
+
+  const retryTranslate = () => {
+    if (!translationState.isTranslating) {
+      handleTranslate();
+    }
+  };
+
+  const cancelTranslate = async () => {
+    try {
+      if (browser?.runtime) {
+        await browser.runtime.sendMessage({ action: "cleanup" });
+      }
+    } catch (error) {
+      logger.error("取消翻译失败:", error);
+    } finally {
+      setTranslationState((prev: TranslationState) => ({
+        ...prev,
+        isTranslating: false,
+        errorMessage: prev.translatedText ? "已停止继续生成" : "已取消翻译",
+        showResult: true,
+      }));
     }
   };
 
@@ -248,6 +358,29 @@ function App() {
     setShowHistory(false);
   };
 
+  // 清空当前草稿和结果
+  const clearDraft = async () => {
+    setTranslationState((prev) => ({
+      ...prev,
+      sourceText: "",
+      translatedText: "",
+      reasoningText: "",
+      hasReasoning: false,
+      isTranslating: false,
+      showResult: false,
+      errorMessage: "",
+      images: [],
+    }));
+
+    try {
+      if (browser?.storage?.local) {
+        await browser.storage.local.remove(DRAFT_STORAGE_KEY);
+      }
+    } catch (error) {
+      logger.error("清空草稿失败:", error);
+    }
+  };
+
   // 恢复历史记录项
   const restoreHistoryItem = (item: HistoryItem) => {
     setTranslationState((prev) => ({
@@ -258,8 +391,34 @@ function App() {
       hasReasoning: item.hasReasoning || false,
       isTranslating: false,
       showResult: true,
+      errorMessage: "",
+      images: [],
     }));
     hideHistoryPanel();
+  };
+
+  const copyHistoryOriginal = (item: HistoryItem) => {
+    return copyToClipboard(item.original);
+  };
+
+  const copyHistoryTranslation = (item: HistoryItem) => {
+    return copyToClipboard(item.translated);
+  };
+
+  const retranslateHistoryItem = (item: HistoryItem) => {
+    setTranslationState((prev) => ({
+      ...prev,
+      sourceText: item.original,
+      translatedText: "",
+      reasoningText: "",
+      hasReasoning: false,
+      isTranslating: false,
+      showResult: true,
+      errorMessage: "",
+      images: [],
+    }));
+    hideHistoryPanel();
+    window.setTimeout(() => handleTranslate(item.original), 0);
   };
 
   // 删除历史记录项
@@ -393,6 +552,9 @@ function App() {
           onCopy={copyToClipboard}
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
+          onClearDraft={clearDraft}
+          onRetry={retryTranslate}
+          onCancel={cancelTranslate}
           onScroll={() => {}}
           history={history}
         />
@@ -403,6 +565,9 @@ function App() {
           onSearchChange={setSearchTerm}
           onBack={hideHistoryPanel}
           onRestore={restoreHistoryItem}
+          onCopyOriginal={copyHistoryOriginal}
+          onCopyTranslation={copyHistoryTranslation}
+          onRetranslate={retranslateHistoryItem}
           onDelete={deleteHistoryItem}
           onClear={clearHistory}
           onExport={exportHistory}
@@ -414,3 +579,6 @@ function App() {
 }
 
 export default App;
+
+
+

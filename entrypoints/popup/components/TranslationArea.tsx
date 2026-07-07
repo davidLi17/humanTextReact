@@ -20,6 +20,9 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onCopy,
   onShowHistory,
   onOpenSettings,
+  onClearDraft,
+  onRetry,
+  onCancel,
   history,
 }) => {
   // 使用 useAutoScrollToBottom hook 管理滚动
@@ -205,6 +208,26 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
           </div>
 
           <div className="translate-btn-wrapper">
+            {(translationState.sourceText.trim().length > 0 ||
+              translationState.images.length > 0) && (
+              <button
+                className="secondary-btn clear-draft-btn"
+                onClick={onClearDraft}
+                disabled={translationState.isTranslating}
+                title="清空当前输入和图片"
+              >
+                清空
+              </button>
+            )}
+            {translationState.isTranslating && (
+              <button
+                className="secondary-btn stop-translate-btn"
+                onClick={onCancel}
+                title="停止当前翻译"
+              >
+                停止
+              </button>
+            )}
             <button
               className="primary-btn"
               onClick={onTranslate}
@@ -227,6 +250,29 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
               </div>
 
               <div className="result-wrapper">
+                {translationState.errorMessage && (
+                  <div className="error-card">
+                    <div className="error-card-title">翻译没有完成</div>
+                    <div className="error-card-message">
+                      {translationState.errorMessage}
+                    </div>
+                    <div className="error-card-actions">
+                      <button
+                        className="secondary-btn"
+                        onClick={onRetry}
+                        disabled={translationState.isTranslating}
+                      >
+                        重试
+                      </button>
+                      {translationState.errorMessage.includes("API Key") && (
+                        <button className="secondary-btn" onClick={onOpenSettings}>
+                          去设置
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {translationState.hasReasoning &&
                   translationState.reasoningText && (
                     <CollapsibleThinkingChain
@@ -235,15 +281,17 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
                     />
                   )}
 
-                <div className="result-section">
-                  <div className="result-label">译文</div>
-                  <div
-                    className="result-content markdown-content"
-                    dangerouslySetInnerHTML={{
-                      __html: parseMarkdown(translationState.translatedText),
-                    }}
-                  />
-                </div>
+                {translationState.translatedText && (
+                  <div className="result-section">
+                    <div className="result-label">译文</div>
+                    <div
+                      className="result-content markdown-content"
+                      dangerouslySetInnerHTML={{
+                        __html: parseMarkdown(translationState.translatedText),
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -253,7 +301,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
       <CopyFooter
         onCopyOriginal={handleCopyInput}
         onCopyTranslation={handleCopyTranslation}
-        hasResult={translationState.showResult}
+        hasResult={translationState.translatedText.trim().length > 0}
         hasInput={translationState.sourceText.trim().length > 0}
       />
     </div>
@@ -261,3 +309,5 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
 };
 
 export default TranslationArea;
+
+
