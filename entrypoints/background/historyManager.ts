@@ -5,6 +5,10 @@ const logger = createLogger("history-manager", "📜");
 /**
  * 历史记录项的类型定义
  */
+interface HistoryStorage {
+  translationHistory?: HistoryItem[];
+}
+
 export interface HistoryItem {
   original: string;
   translated: string;
@@ -28,7 +32,9 @@ export class HistoryManager {
   ): Promise<void> {
     try {
       // 获取现有历史
-      const result = await browser.storage.local.get(["translationHistory"]);
+      const result = (await browser.storage.local.get([
+        "translationHistory",
+      ])) as HistoryStorage;
       let history: HistoryItem[] = result.translationHistory || [];
 
       // 创建新的历史记录项
@@ -62,7 +68,9 @@ export class HistoryManager {
    */
   static async getTranslationHistory(): Promise<HistoryItem[]> {
     try {
-      const result = await browser.storage.local.get(["translationHistory"]);
+      const result = (await browser.storage.local.get([
+        "translationHistory",
+      ])) as HistoryStorage;
       return result.translationHistory || [];
     } catch (error) {
       logger.error("获取翻译历史失败:", error);
@@ -75,7 +83,9 @@ export class HistoryManager {
    */
   static async deleteHistoryItem(original: string): Promise<boolean> {
     try {
-      const result = await browser.storage.local.get(["translationHistory"]);
+      const result = (await browser.storage.local.get([
+        "translationHistory",
+      ])) as HistoryStorage;
       let history: HistoryItem[] = result.translationHistory || [];
 
       history = history.filter((item) => item.original !== original);
@@ -123,7 +133,9 @@ export class HistoryManager {
       }
 
       // 获取现有历史
-      const result = await browser.storage.local.get(["translationHistory"]);
+      const result = (await browser.storage.local.get([
+        "translationHistory",
+      ])) as HistoryStorage;
       let existingHistory: HistoryItem[] = result.translationHistory || [];
 
       // 合并历史记录（新导入的在前面）
@@ -140,3 +152,4 @@ export class HistoryManager {
     }
   }
 }
+

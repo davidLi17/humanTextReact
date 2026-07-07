@@ -252,19 +252,56 @@ export class TranslationService {
         logger.log("连接已断开，可能是页面已关闭");
         return;
       }
-      // 只有真正需要用户知道的错误才抛出
-      if (
-        error.message.includes("API Key") ||
-        error.message.includes("API 请求失败") ||
-        error.message.includes("rate limit")
-      ) {
-        throw error;
-      }
-      // 其他错误只记录不抛出
+      const message = this.normalizeErrorMessage(error);
       logger.error("翻译过程中出现错误:", error);
+      await this.sendTranslationError(actualTabId, message);
+      RequestManager.completeRequest(actualTabId);
+      throw new Error(message);
     }
   }
 
+  /**
+   * 生成更适合展示给用户的错误信息
+   */
+  private static normalizeErrorMessage(error: any): string {
+    const rawMessage = error?.message || "翻译失败，请稍后重试";
+
+    if (rawMessage.includes("API Key")) return rawMessage;
+    if (rawMessage.includes("Failed to fetch")) return "网络连接失败，请检查 API 地址或网络代理";
+    if (rawMessage.includes("API 请求失败: 401")) return "API Key 无效或已过期，请到设置里更新";
+    if (rawMessage.includes("API 请求失败: 404")) return "API 地址或模型不存在，请检查设置";
+    if (rawMessage.includes("API 请求失败: 429") || rawMessage.includes("rate limit")) {
+      return "请求频率过高，请稍后重试";
+    }
+
+    return rawMessage;
+  }
+
+  /**
+   * 发送翻译错误消息
+   */
+  private static async sendTranslationError(
+    tabId: number | undefined,
+    error: string
+  ): Promise<void> {
+    const message = tabId
+      ? {
+          action: MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION,
+          error,
+          done: true,
+        }
+      : {
+          action: MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION,
+          error,
+          done: true,
+        };
+
+    if (tabId) {
+      await MessageUtils.safeSendMessage(tabId, message);
+    } else {
+      MessageUtils.sendRuntimeMessage(message);
+    }
+  }
   /**
    * 发送翻译更新消息
    */
@@ -334,3 +371,4 @@ export class TranslationService {
     }
   }
 }
+
