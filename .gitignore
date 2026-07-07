@@ -55,3 +55,7 @@ Desktop.ini
 *.ps1
 *.bat
 *.cmd
+
+# Local artifact exports
+artifacts/
+chrome-mv3.7z
