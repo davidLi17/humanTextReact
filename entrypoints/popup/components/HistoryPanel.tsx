@@ -9,6 +9,9 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
   onSearchChange,
   onBack,
   onRestore,
+  onCopyOriginal,
+  onCopyTranslation,
+  onRetranslate,
   onDelete,
   onClear,
   onExport,
@@ -16,6 +19,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isClearing, setIsClearing] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string>("");
 
   // 使用 fuse.js 进行智能搜索
   const { search, results } = useHistorySearch(history);
@@ -47,6 +51,29 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
         setIsClearing(false);
       }
     }
+  };
+
+  const handleCopy = async (
+    item: any,
+    type: "original" | "translation",
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+    const success =
+      type === "original"
+        ? await onCopyOriginal(item)
+        : await onCopyTranslation(item);
+
+    if (success) {
+      const nextKey = `${item.timestamp}-${type}`;
+      setCopiedKey(nextKey);
+      window.setTimeout(() => setCopiedKey(""), 1200);
+    }
+  };
+
+  const handleRetranslate = (item: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    onRetranslate(item);
   };
 
   // 确认删除单个历史记录
@@ -262,3 +289,4 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
 };
 
 export default HistoryPanel;
+

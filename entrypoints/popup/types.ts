@@ -37,6 +37,10 @@ export interface TranslationState {
    */
   isTranslating: boolean;
   /**
+   * @description 当前翻译错误信息。
+   */
+  errorMessage?: string;
+  /**
    * @description 翻译是否有推理过程。
    */
   hasReasoning: boolean;
@@ -109,6 +113,18 @@ export interface TranslationAreaProps {
    */
   onOpenSettings: () => void;
   /**
+   * @description 清空当前输入草稿。
+   */
+  onClearDraft: () => void;
+  /**
+   * @description 重试最近一次翻译。
+   */
+  onRetry: () => void;
+  /**
+   * @description 取消当前翻译。
+   */
+  onCancel: () => void;
+  /**
    * @description 处理滚动的函数。
    */
   onScroll: () => void;
@@ -142,6 +158,18 @@ export interface HistoryPanelProps {
    * @description 恢复历史项目的函数。
    */
   onRestore: (item: HistoryItem) => void;
+  /**
+   * @description 复制历史原文。
+   */
+  onCopyOriginal: (item: HistoryItem) => Promise<boolean>;
+  /**
+   * @description 复制历史译文。
+   */
+  onCopyTranslation: (item: HistoryItem) => Promise<boolean>;
+  /**
+   * @description 使用历史原文重新翻译。
+   */
+  onRetranslate: (item: HistoryItem) => void;
   /**
    * @description 删除历史项目的函数。
    */
@@ -215,3 +243,6 @@ export interface MessageResponse {
    */
   error?: string;
 }
+
+
+
