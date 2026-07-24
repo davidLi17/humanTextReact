@@ -5,7 +5,23 @@ import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import {
+  POPUP_TRANSLATION_TARGET,
+  createRequestId,
+  createSelectionTarget,
+  type TranslationTarget,
+} from "@/entrypoints/shared/requestProtocol";
 import { isNil } from "lodash-es";
+
+function getRequestTarget(
+  request: any,
+  sender: Browser.runtime.MessageSender
+): TranslationTarget {
+  const tabId = sender.tab?.id ?? request.tabId;
+  return typeof tabId === "number"
+    ? createSelectionTarget(tabId)
+    : POPUP_TRANSLATION_TARGET;
+}
 
 /**
  * 消息处理器类型定义
@@ -36,36 +52,55 @@ export class MessageHandler {
     },
     // 翻译
     [MESSAGE_TYPES.TRANSLATE]: async (request, sender) => {
-      console.log(
-        "🔍LHG:background/messageHandler[MESSAGE_TYPES.TRANSLATE] request:::",
-        request
-      );
-      console.log(
-        "🔍LHG:background/messageHandler[MESSAGE_TYPES.TRANSLATE] sender:::",
-        sender
-      );
-      const tabId = sender.tab?.id;
+      const target = getRequestTarget(request, sender);
+      let requestId =
+        typeof request.requestId === "string" && request.requestId
+          ? request.requestId
+          : undefined;
 
-      // 如果请求中没有传递 thinkingEnabled，则从设置中获取
-      let thinkingEnabled = request.thinkingEnabled;
-      if (isNil(thinkingEnabled)) {
-        const settings = await SettingsUtils.getSettings();
-        thinkingEnabled = settings.thinkingEnabled;
+      // 旧 Content Script 会在展示弹窗后再发一次无 ID 的 translate。
+      if (!requestId && target.kind === "tab") {
+        requestId = RequestManager.getActiveRequestId(target);
       }
 
-      // 构建翻译参数，支持新的多模态格式
-      const translationParams = {
-        text: request.text,
-        images: request.images || [],
-        thinkingEnabled,
-        temperature: request.temperature,
-        promptTemplate: request.promptTemplate,
-        apiKey: request.apiKey,
-        tabId,
-      };
+      requestId ||= createRequestId();
+      const pendingContext = RequestManager.createRequest(requestId, target);
+      const requestContext = RequestManager.claimRequest(requestId);
+      if (!requestContext) {
+        return {
+          success: true,
+          requestId: pendingContext.requestId,
+          deduplicated: true,
+        };
+      }
 
-      const result = await TranslationService.translateText(translationParams);
-      return { success: true, result };
+      try {
+        // 如果请求中没有传递 thinkingEnabled，则从设置中获取
+        let thinkingEnabled = request.thinkingEnabled;
+        if (isNil(thinkingEnabled)) {
+          const settings = await SettingsUtils.getSettings();
+          thinkingEnabled = settings.thinkingEnabled;
+        }
+
+        // 构建翻译参数，支持新的多模态格式
+        const translationParams = {
+          text: request.text,
+          images: request.images || [],
+          thinkingEnabled,
+          temperature: request.temperature,
+          promptTemplate: request.promptTemplate,
+          apiKey: request.apiKey,
+        };
+
+        const result = await TranslationService.translateText(
+          translationParams,
+          requestContext
+        );
+        return { success: true, requestId, result };
+      } finally {
+        // TranslationService 会正常完成自身；这里覆盖设置读取等前置失败。
+        RequestManager.completeRequest(requestId);
+      }
     },
     // 显示翻译弹窗（主要用于右键菜单）
     [MESSAGE_TYPES.SHOW_TRANSLATION_POPUP]: async () => {
@@ -73,9 +108,18 @@ export class MessageHandler {
     },
     // 清理请求
     [MESSAGE_TYPES.CLEANUP]: async (request, sender) => {
-      const tabId = request.tabId ?? sender.tab?.id;
-      RequestManager.cleanupRequest(tabId);
-      return { success: true };
+      if (
+        typeof request.requestId === "string" &&
+        RequestManager.cleanupRequest(request.requestId)
+      ) {
+        return { success: true, requestId: request.requestId };
+      }
+
+      // 兼容没有 requestId 的旧 Popup 和旧 Content Script。
+      if (!request.requestId) {
+        RequestManager.cleanupTarget(getRequestTarget(request, sender));
+      }
+      return { success: true, requestId: request.requestId };
     },
     // 删除历史记录项
     [MESSAGE_TYPES.DELETE_HISTORY_ITEM]: async (request) => {

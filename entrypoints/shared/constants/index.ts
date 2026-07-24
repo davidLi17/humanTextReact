@@ -105,6 +105,7 @@ export interface PopupState {
  */
 export interface TranslationRequest {
   action: MessageType;
+  requestId?: string;
   text?: string;
   content?: string;
   reasoningContent?: string;
