@@ -1,4 +1,9 @@
-# Request ID 完整重构计划
+# Request ID 完整重构实施记录
+
+## 实施状态
+
+该计划已于 2026-07-25 落地到工作区，当前尚未提交或推送。实现保持 Provider
+请求体、设置格式和历史记录格式不变，也没有升级依赖。
 
 ## 目标
 
@@ -6,7 +11,7 @@
 对应同一次翻译。重构后，迟到的旧消息不能覆盖新结果，不同标签页和不同入口也不会
 互相误取消。
 
-本计划只描述后续重构，不在当前 Bug 修复中实施。
+实现采用 `requestId` 主索引和展示目标索引的双索引结构。
 
 ## 消息协议
 
@@ -57,11 +62,15 @@ Map<string, string> // targetKey -> active requestId
 管理接口：
 
 - `createRequest(requestId, target)`：取消相同 `targetKey` 的旧活动请求，登记新请求。
+- `claimRequest(requestId)`：原子领取一次待执行请求，防止新后台与旧 Content Script
+  对同一个页面翻译重复调用 Provider。
 - `cleanupRequest(requestId)`：只取消指定请求。
-- `cleanupTarget(target)`：取消一个 Popup 或标签页上的全部请求，用于兼容和页面关闭。
+- `cleanupTarget(target)`：取消一个展示目标的全部请求，用于无 ID 旧消息兼容。
+- `cleanupTab(tabId)`：标签页关闭时清理该标签页所有 surface 的请求。
 - `completeRequest(requestId)`：删除请求；只有该 ID 仍是目标当前活动请求时，才清理
   `activeByTarget`。
-- `isActiveRequest(requestId, target)`：供发送更新前检查请求是否仍然有效。
+- `isActiveRequest(requestId)`：供发送更新前检查请求是否仍然有效。
+- `getActiveRequestId(target)`：查询展示目标当前活动的请求。
 
 任何旧请求完成或报错时，都不能删除后来创建的新请求。
 
@@ -86,15 +95,19 @@ Map<string, string> // targetKey -> active requestId
 
 ### 标签页关闭
 
-`tabs.onRemoved` 调用 `cleanupTarget({ kind: "tab", tabId })`，清理该标签页仍在运行的
-全部请求，不依赖某一个 ID。
+`tabs.onRemoved` 调用 `cleanupTab(tabId)`，清理该标签页仍在运行的全部 surface，
+不依赖某一个 ID。
 
 ## 兼容策略
 
 扩展更新时，旧 Content Script 可能继续存在于已打开的页面中，因此采用一版宽松
 兼容：
 
-- 后台收到没有 `requestId` 的 `translate` 时生成 ID，并按发送者推断目标。
+- 后台收到没有 `requestId` 的 Popup `translate` 时生成 ID，并按发送者推断目标。
+- 旧 Content Script 发出无 ID 的 `translate` 时，若同标签页已有预登记请求，则复用
+  当前 ID；`claimRequest` 保证后台入口和旧脚本最多只有一方实际调用 Provider。
+- 新 Content Script 在弹窗响应中回显 `requestId`；未回显 ID 的旧脚本会获得一个
+  短暂兼容消息窗口，让其旧 `cleanup/translate` 流程先完成，再由后台补启动。
 - 后台收到没有 `requestId` 的 `cleanup` 时，按发送者标签页或 Popup 目标取消当前
   活动请求。
 - 新 Popup 或 Content Script 收到没有 ID 的旧更新时，仅在当前恰好有一个活动请求
@@ -110,18 +123,19 @@ Map<string, string> // targetKey -> active requestId
 - 消息接收端关闭时，只取消对应 ID，不影响同一标签页未来可能存在的其他请求。
 - 后台发送每次更新前检查请求是否仍然活动，避免取消后的缓冲内容继续投递。
 
-## 测试计划
+## 测试与验证
 
-使用 Bun 内置测试能力，不增加测试框架依赖：
+已加入 Bun 单元测试，覆盖：
 
-1. `RequestManager`：创建、完成、按 ID 取消、按目标取消，以及旧请求完成不删除新请求。
-2. Popup：匹配 ID 的更新生效，不匹配 ID 的更新被忽略。
-3. Content Script：旧页面弹窗不接收新弹窗之外的迟到消息。
-4. 兼容：缺少 ID 的旧翻译和取消消息仍可工作。
-5. 并发：两个标签页同时翻译互不影响。
-6. 切换：同一标签页快速发起两次翻译，只显示第二次结果。
-7. 取消：停止一个请求不会取消另一个标签页请求。
-8. 回归：普通 Popup、历史重译、右键菜单和 `Alt+H` 均能完成。
+1. 同一目标的新请求只取消旧请求。
+2. Popup 与不同标签页请求互不影响。
+3. 旧请求完成不能删除同目标的新请求。
+4. 同一个预登记请求只能领取一次。
+5. 关闭标签页只清理该标签页请求。
+6. Request ID 唯一性、消息 ID 匹配和旧消息兼容规则。
+
+Popup 和 Content Script 在运行时过滤不匹配的 ID；页面弹窗结束后继续保留 ID
+用于精确关闭清理，并拒绝结束后的迟到更新。
 
 验证命令：
 
@@ -131,7 +145,7 @@ bun run compile
 bun run build
 ```
 
-## 实施顺序和提交
+## 实施模块
 
 1. `refactor: add request id protocol types`
    - 增加共享消息类型、目标类型和兼容字段。
@@ -144,7 +158,8 @@ bun run build
 5. `test: cover request id translation flows`
    - 补齐跨入口和兼容场景，运行完整构建验证。
 
-每个提交都必须通过相关测试和 `bun run compile`；最后统一运行 `bun run build`。
+本轮按用户要求保留未提交工作区差异，不创建提交或推送。最终统一运行上述 Bun
+验证命令。
 
 ## 验收标准
 
