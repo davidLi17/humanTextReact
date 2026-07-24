@@ -1,4 +1,7 @@
-import { DEFAULT_SETTINGS } from "@/entrypoints/shared/constants";
+import {
+  DEFAULT_SETTINGS,
+  MESSAGE_TYPES,
+} from "@/entrypoints/shared/constants";
 import { createLogger, initializeLogger } from "@/entrypoints/shared/logger";
 import {
   createRequestId,
@@ -42,7 +45,7 @@ function App() {
 
   // 初始化日志系统（确保 popup 遵循最新日志级别）
   useEffect(() => {
-    initializeLogger();
+    void initializeLogger("popup");
   }, []);
 
   // 恢复未提交草稿，避免 popup 关闭后丢失输入
@@ -104,6 +107,10 @@ function App() {
       sender: any,
       sendResponse: (response?: any) => void
     ) => {
+      if (request.action === MESSAGE_TYPES.APPEND_DIAGNOSTIC_LOGS) {
+        return false;
+      }
+
       logger.log("📨 [Popup App] 收到消息", {
         action: request.action,
         hasContent: !!request.content,
@@ -268,7 +275,7 @@ function App() {
   // 发送翻译请求
   const handleTranslate = async (textOverride?: string) => {
     const text = (textOverride ?? translationState.sourceText).trim();
-    logger.log("LHG:popup/App.tsx text:::", text);
+    logger.log("Popup 准备翻译", { textLength: text.length });
     if (!text) {
       alert("请输入要翻译的文本");
       return;

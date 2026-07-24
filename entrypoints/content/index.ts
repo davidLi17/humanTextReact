@@ -7,7 +7,7 @@ export default defineContentScript({
   matches: ["<all_urls>"],
   main() {
     // 初始化日志系统
-    initializeLogger();
+    void initializeLogger("content");
     contentLogger.info("人话翻译器 content script 启动");
 
     // 注入样式

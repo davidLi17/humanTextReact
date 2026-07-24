@@ -1,146 +1,336 @@
-import { LOG_LEVELS, LogLevel } from "@/entrypoints/shared/constants";
-import debugLib from "debug";
+import {
+  LOG_LEVELS,
+  MESSAGE_TYPES,
+  type LogLevel,
+} from "@/entrypoints/shared/constants";
+import {
+  DIAGNOSTIC_STATE_KEY,
+  appendDiagnosticRecords,
+  isDiagnosticSessionActive,
+  sanitizeLogValue,
+} from "./diagnostics";
+import type {
+  DiagnosticLogRecord,
+  DiagnosticSessionState,
+  LoggerContext,
+  LoggerMethod,
+} from "./types";
 
-/**
- * 日志命名空间前缀
- * 可通过环境变量 DEBUG_NAMESPACE_PREFIX 自定义
- */
 const DEBUG_NAMESPACE_PREFIX =
-  (typeof globalThis !== "undefined" && (globalThis as any).DEBUG_NAMESPACE_PREFIX) ||
+  (typeof globalThis !== "undefined" &&
+    (globalThis as any).DEBUG_NAMESPACE_PREFIX) ||
   "human-text";
+const MAX_PENDING_LOGS = 100;
+const DIAGNOSTIC_BATCH_DELAY_MS = 200;
 
 interface LogSettingsStorage {
   logLevel?: LogLevel;
   settings?: {
     logLevel?: LogLevel;
   };
+  [DIAGNOSTIC_STATE_KEY]?: DiagnosticSessionState;
 }
 
-/**
- * 专业的日志管理系统
- * 基于 debug 包，支持命名空间和条件日志输出
- *
- * @example
- * ```ts
- * const logger = new Logger("background", "🔙");
- * logger.info("启动消息");
- * ```
- */
+interface PendingLog {
+  namespace: string;
+  emoji: string;
+  prefix: string;
+  method: LoggerMethod;
+  args: unknown[];
+  timestamp: number;
+}
+
+let currentLogLevel: LogLevel = LOG_LEVELS.OFF;
+let currentContext: LoggerContext = detectLoggerContext();
+let currentDiagnosticState: DiagnosticSessionState | null = null;
+let initialized = false;
+let initializationPromise: Promise<void> | null = null;
+let storageListenerRegistered = false;
+let pendingLogs: PendingLog[] = [];
+let diagnosticBatch: DiagnosticLogRecord[] = [];
+let diagnosticBatchTimer: ReturnType<typeof setTimeout> | undefined;
+let diagnosticExpirationHandled = false;
+let recordSequence = 0;
+
+function getBrowserApi(): any {
+  return (globalThis as any).browser;
+}
+
+function detectLoggerContext(): LoggerContext {
+  if (typeof document === "undefined") return "background";
+
+  const protocol = globalThis.location?.protocol;
+  if (protocol !== "chrome-extension:" && protocol !== "moz-extension:") {
+    return "content";
+  }
+
+  const pathname = globalThis.location?.pathname || "";
+  return pathname.includes("options") ? "options" : "popup";
+}
+
+function isLogLevel(value: unknown): value is LogLevel {
+  return Object.values(LOG_LEVELS).includes(value as LogLevel);
+}
+
+function resolveStoredLogLevel(
+  storage: LogSettingsStorage | undefined
+): LogLevel | undefined {
+  const value = storage?.settings?.logLevel ?? storage?.logLevel;
+  return isLogLevel(value) ? value : undefined;
+}
+
+function consoleMethodFor(method: LoggerMethod): "debug" | "info" | "warn" | "error" {
+  switch (method) {
+    case "warn":
+      return "warn";
+    case "error":
+      return "error";
+    case "info":
+    case "success":
+      return "info";
+    default:
+      return "debug";
+  }
+}
+
+function findRequestId(args: unknown[]): string | undefined {
+  for (const arg of args) {
+    if (
+      arg &&
+      typeof arg === "object" &&
+      "requestId" in arg &&
+      typeof (arg as any).requestId === "string"
+    ) {
+      return (arg as any).requestId;
+    }
+  }
+  return undefined;
+}
+
+function createRecord(log: PendingLog): DiagnosticLogRecord {
+  const sanitizedArgs = log.args.map((arg) => sanitizeLogValue(arg));
+  const firstArg = sanitizedArgs[0];
+  const message =
+    typeof firstArg === "string" ? firstArg : `${log.emoji} ${log.namespace}`;
+  const extensionVersion = getBrowserApi()?.runtime?.getManifest?.()?.version;
+
+  recordSequence += 1;
+  return {
+    id: `${log.timestamp}-${recordSequence}`,
+    timestamp: log.timestamp,
+    level: log.method,
+    context: currentContext,
+    namespace: `${log.prefix}:${log.namespace}`,
+    message,
+    data: typeof firstArg === "string" ? sanitizedArgs.slice(1) : sanitizedArgs,
+    requestId: findRequestId(log.args),
+    extensionVersion,
+  };
+}
+
+function writeToConsole(log: PendingLog, record: DiagnosticLogRecord): void {
+  const method = consoleMethodFor(log.method);
+  const label = `[${record.namespace}][${record.context}][${log.method}]`;
+  const args = record.data.length > 0 ? record.data : [];
+  console[method](`${label} ${log.emoji} ${record.message}`, ...args);
+}
+
+function isDiagnosticsActive(): boolean {
+  const active = isDiagnosticSessionActive(currentDiagnosticState);
+  if (!active && currentDiagnosticState?.enabled && !diagnosticExpirationHandled) {
+    diagnosticExpirationHandled = true;
+    currentDiagnosticState = null;
+    void getBrowserApi()?.storage?.local
+      ?.remove(DIAGNOSTIC_STATE_KEY)
+      .catch(() => undefined);
+  }
+  return active;
+}
+
+async function flushDiagnosticBatch(): Promise<void> {
+  if (diagnosticBatchTimer) {
+    clearTimeout(diagnosticBatchTimer);
+    diagnosticBatchTimer = undefined;
+  }
+
+  const records = diagnosticBatch;
+  diagnosticBatch = [];
+  if (records.length === 0) return;
+
+  try {
+    if (currentContext === "background") {
+      await appendDiagnosticRecords(records);
+      return;
+    }
+
+    await getBrowserApi()?.runtime?.sendMessage({
+      action: MESSAGE_TYPES.APPEND_DIAGNOSTIC_LOGS,
+      records,
+    });
+  } catch (error) {
+    console.error("[human-text:logger] 诊断日志写入失败", error);
+  }
+}
+
+function queueDiagnosticRecord(
+  record: DiagnosticLogRecord,
+  flushImmediately = false
+): void {
+  diagnosticBatch.push(record);
+
+  if (flushImmediately) {
+    void flushDiagnosticBatch();
+    return;
+  }
+  if (!diagnosticBatchTimer) {
+    diagnosticBatchTimer = setTimeout(
+      () => void flushDiagnosticBatch(),
+      DIAGNOSTIC_BATCH_DELAY_MS
+    );
+  }
+}
+
+function processLog(log: PendingLog): void {
+  const diagnosticsActive = isDiagnosticsActive();
+  if (!diagnosticsActive && !shouldLog(log.method)) return;
+
+  const record = createRecord(log);
+  writeToConsole(log, record);
+  if (diagnosticsActive) {
+    queueDiagnosticRecord(record, log.method === "error");
+  }
+}
+
+function emitLog(log: PendingLog): void {
+  if (!initialized) {
+    pendingLogs.push(log);
+    if (pendingLogs.length > MAX_PENDING_LOGS) pendingLogs.shift();
+    return;
+  }
+  processLog(log);
+}
+
+function applyDiagnosticState(value: unknown): void {
+  currentDiagnosticState =
+    value && typeof value === "object"
+      ? (value as DiagnosticSessionState)
+      : null;
+  diagnosticExpirationHandled = false;
+}
+
+function registerStorageListener(): void {
+  if (storageListenerRegistered) return;
+
+  const browserApi = getBrowserApi();
+  if (!browserApi?.storage?.onChanged) return;
+
+  browserApi.storage.onChanged.addListener((changes: any, areaName: string) => {
+    if (areaName === "sync" || areaName === "local") {
+      const nextSettings = changes.settings?.newValue;
+      const nextLegacyLevel = changes.logLevel?.newValue;
+      const nextLevel = nextSettings?.logLevel ?? nextLegacyLevel;
+      if (isLogLevel(nextLevel)) currentLogLevel = nextLevel;
+    }
+
+    if (areaName === "local" && changes[DIAGNOSTIC_STATE_KEY]) {
+      applyDiagnosticState(changes[DIAGNOSTIC_STATE_KEY].newValue);
+    }
+  });
+  storageListenerRegistered = true;
+}
+
+async function loadRuntimeState(): Promise<void> {
+  const browserApi = getBrowserApi();
+  if (!browserApi?.storage) {
+    currentLogLevel = LOG_LEVELS.OFF;
+    currentDiagnosticState = null;
+    return;
+  }
+
+  const [syncResult, localResult] = (await Promise.all([
+    browserApi.storage.sync.get(["logLevel", "settings"]),
+    browserApi.storage.local.get([
+      "logLevel",
+      "settings",
+      DIAGNOSTIC_STATE_KEY,
+    ]),
+  ])) as [LogSettingsStorage, LogSettingsStorage];
+
+  currentLogLevel =
+    resolveStoredLogLevel(syncResult) ??
+    resolveStoredLogLevel(localResult) ??
+    LOG_LEVELS.OFF;
+  applyDiagnosticState(localResult?.[DIAGNOSTIC_STATE_KEY]);
+}
+
 export class Logger {
-  private debugger: debugLib.Debugger;
   private emoji: string;
   private namespace: string;
   private prefix: string;
 
-  constructor(namespace: string, emoji: string = "🔧", prefix?: string) {
+  constructor(namespace: string, emoji = "🔧", prefix?: string) {
     this.namespace = namespace;
     this.prefix = prefix || DEBUG_NAMESPACE_PREFIX;
-    this.debugger = debugLib(`${this.prefix}:${namespace}`);
     this.emoji = emoji;
   }
 
-  /**
-   * 普通日志 (debug 级别)
-   */
-  log(...args: any[]) {
-    if (shouldLog("log")) {
-      this.debugger(`${this.emoji}`, ...args);
-    }
+  private emit(method: LoggerMethod, args: unknown[]): void {
+    emitLog({
+      namespace: this.namespace,
+      emoji: this.emoji,
+      prefix: this.prefix,
+      method,
+      args,
+      timestamp: Date.now(),
+    });
   }
 
-  /**
-   * 信息日志 (info 级别)
-   */
-  info(...args: any[]) {
-    if (shouldLog("info")) {
-      this.debugger(`${this.emoji} ℹ️`, ...args);
-    }
+  log(...args: unknown[]) {
+    this.emit("log", args);
   }
 
-  /**
-   * 警告日志 (warn 级别)
-   */
-  warn(...args: any[]) {
-    if (shouldLog("warn")) {
-      this.debugger(`${this.emoji} ⚠️`, ...args);
-    }
+  info(...args: unknown[]) {
+    this.emit("info", args);
   }
 
-  /**
-   * 错误日志 (error 级别)
-   */
-  error(...args: any[]) {
-    if (shouldLog("error")) {
-      this.debugger(`${this.emoji} ❌`, ...args);
-    }
+  warn(...args: unknown[]) {
+    this.emit("warn", args);
   }
 
-  /**
-   * 成功日志 (info 级别)
-   */
-  success(...args: any[]) {
-    if (shouldLog("success")) {
-      this.debugger(`${this.emoji} ✅`, ...args);
-    }
+  error(...args: unknown[]) {
+    this.emit("error", args);
   }
 
-  /**
-   * 调试日志 (debug 级别)
-   */
-  trace(...args: any[]) {
-    if (shouldLog("trace")) {
-      this.debugger(`${this.emoji} 🐛`, ...args);
-    }
+  success(...args: unknown[]) {
+    this.emit("success", args);
   }
 
-  /**
-   * 获取命名空间
-   */
+  trace(...args: unknown[]) {
+    this.emit("trace", args);
+  }
+
   getNamespace(): string {
     return this.namespace;
   }
 
-  /**
-   * 获取完整的调试器命名空间
-   */
   getFullNamespace(): string {
     return `${this.prefix}:${this.namespace}`;
   }
 
-  /**
-   * 创建子日志器
-   * 继承父日志器的配置,但使用子命名空间
-   *
-   * @example
-   * ```ts
-   * const parentLogger = new Logger("api", "🌐");
-   * const childLogger = parentLogger.child("http"); // api:http
-   * ```
-   */
   child(childNamespace: string, childEmoji?: string): Logger {
-    const fullNamespace = `${this.namespace}:${childNamespace}`;
-    return new Logger(fullNamespace, childEmoji || this.emoji, this.prefix);
+    return new Logger(
+      `${this.namespace}:${childNamespace}`,
+      childEmoji || this.emoji,
+      this.prefix
+    );
   }
 
-  /**
-   * 更新配置 (动态修改 emoji 和 prefix)
-   */
   updateConfig(emoji?: string, prefix?: string): void {
     if (emoji) this.emoji = emoji;
-    if (prefix) {
-      this.prefix = prefix;
-      this.debugger = debugLib(`${this.prefix}:${this.namespace}`);
-    }
+    if (prefix) this.prefix = prefix;
   }
 }
 
-/**
- * 创建新的日志器实例
- *
- * @param namespace - 命名空间
- * @param emoji - 表情符号
- * @param prefix - 命名空间前缀 (可选,默认使用全局配置)
- */
 export function createLogger(
   namespace: string,
   emoji?: string,
@@ -149,121 +339,48 @@ export function createLogger(
   return new Logger(namespace, emoji, prefix);
 }
 
-/**
- * 检测 localStorage 是否可用
- * 在 Content Script 环境中 localStorage 可能未定义
- */
-function isLocalStorageAvailable(): boolean {
-  try {
-    return typeof localStorage !== "undefined" && localStorage !== null;
-  } catch (error) {
-    return false;
+export async function initializeLogger(
+  context: LoggerContext = detectLoggerContext()
+): Promise<void> {
+  currentContext = context;
+  registerStorageListener();
+
+  if (!initializationPromise) {
+    initializationPromise = loadRuntimeState()
+      .catch((error) => {
+        currentLogLevel = LOG_LEVELS.OFF;
+        currentDiagnosticState = null;
+        console.error("[human-text:logger] 初始化日志系统失败", error);
+      })
+      .finally(() => {
+        initialized = true;
+        const queuedLogs = pendingLogs;
+        pendingLogs = [];
+        queuedLogs.forEach(processLog);
+        initializationPromise = null;
+      });
   }
+
+  await initializationPromise;
 }
 
-/**
- * 初始化日志系统
- * 根据设置开启或关闭日志输出
- */
-export async function initializeLogger() {
-  try {
-    // 从存储中获取日志级别设置（兼容新老两种格式，并从 local 做兜底）
-    const syncResult = (await browser.storage.sync.get([
-      "logLevel",
-      "settings",
-    ])) as LogSettingsStorage;
-    let logLevel: LogLevel = LOG_LEVELS.OFF;
-
-    if (syncResult?.settings?.logLevel) {
-      logLevel = syncResult.settings.logLevel as LogLevel;
-    } else if (syncResult?.logLevel) {
-      logLevel = syncResult.logLevel as LogLevel;
-    } else {
-      // 兜底从 local 读取
-      const localResult = (await browser.storage.local.get([
-        "logLevel",
-        "settings",
-      ])) as LogSettingsStorage;
-      if (localResult?.settings?.logLevel) {
-        logLevel = localResult.settings.logLevel as LogLevel;
-      } else if (localResult?.logLevel) {
-        logLevel = localResult.logLevel as LogLevel;
-      }
-    }
-
-    // 设置当前日志级别
-    setCurrentLogLevel(logLevel);
-
-    // 根据日志级别设置 debug 包的启用状态
-    if (logLevel === LOG_LEVELS.OFF) {
-      debugLib.disable(); // 完全禁用 debug
-      // 只在 localStorage 可用时操作
-      if (isLocalStorageAvailable()) {
-        localStorage.removeItem("debug");
-      }
-    } else {
-      const patterns = getDebugPatterns(logLevel);
-      // 启用 debug 并设置模式
-      debugLib.enable(patterns);
-      // 只在 localStorage 可用时操作
-      if (isLocalStorageAvailable()) {
-        localStorage.setItem("debug", patterns);
-      }
-    }
-
-    // 调试输出当前日志级别
-    console.log(`[日志系统] 已初始化，级别: ${logLevel}`);
-  } catch (error) {
-    console.error("初始化日志系统失败:", error);
-  }
-}
-/**
- * 根据日志级别获取 debug 模式的启用模式
- * 注意：debug 包启用所有匹配的命名空间，实际的级别过滤通过 shouldLog 函数控制
- */
-function getDebugPatterns(logLevel: LogLevel): string {
-  const prefix = DEBUG_NAMESPACE_PREFIX;
-  switch (logLevel) {
-    case LOG_LEVELS.ERROR:
-    case LOG_LEVELS.WARN:
-    case LOG_LEVELS.INFO:
-    case LOG_LEVELS.DEBUG:
-      return `${prefix}:*`; // 启用所有配置前缀的命名空间，具体级别由 shouldLog 控制
-    default:
-      return "";
-  }
+export function shouldLog(logType: LoggerMethod): boolean {
+  return shouldLogAtLevel(currentLogLevel, logType);
 }
 
-/**
- * 获取当前日志级别
- */
-let currentLogLevel: LogLevel = LOG_LEVELS.OFF;
-
-function getCurrentLogLevel(): LogLevel {
-  return currentLogLevel;
-}
-
-/**
- * 检查当前日志级别是否应该显示特定类型的日志
- */
-export function shouldLog(
-  logType: "log" | "info" | "warn" | "error" | "success" | "trace"
+export function shouldLogAtLevel(
+  level: LogLevel,
+  logType: LoggerMethod
 ): boolean {
-  const currentLevel = getCurrentLogLevel();
-  if (currentLevel === LOG_LEVELS.OFF) return false;
+  if (level === LOG_LEVELS.OFF) return false;
 
-  switch (currentLevel) {
+  switch (level) {
     case LOG_LEVELS.ERROR:
       return logType === "error";
     case LOG_LEVELS.WARN:
       return logType === "error" || logType === "warn";
     case LOG_LEVELS.INFO:
-      return (
-        logType === "error" ||
-        logType === "warn" ||
-        logType === "info" ||
-        logType === "success"
-      );
+      return ["error", "warn", "info", "success"].includes(logType);
     case LOG_LEVELS.DEBUG:
       return true;
     default:
@@ -271,14 +388,6 @@ export function shouldLog(
   }
 }
 
-/**
- * 设置当前日志级别
- */
-function setCurrentLogLevel(level: LogLevel): void {
-  currentLogLevel = level;
-}
-
-// 预定义的日志器实例
 export const backgroundLogger = createLogger("background", "🔙");
 export const contentLogger = createLogger("content", "📄");
 export const popupLogger = createLogger("popup", "🔽");
@@ -287,3 +396,10 @@ export const translationLogger = createLogger("translation", "🌐");
 export const messageLogger = createLogger("message", "📨");
 export const settingsLogger = createLogger("settings", "⚙️");
 
+export type {
+  DiagnosticLogRecord,
+  DiagnosticLogSummary,
+  DiagnosticSessionState,
+  LoggerContext,
+  LoggerMethod,
+} from "./types";
