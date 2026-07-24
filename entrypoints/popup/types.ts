@@ -21,6 +21,10 @@ export interface ImageContent {
  */
 export interface TranslationState {
   /**
+   * @description 当前正在展示的翻译请求 ID。
+   */
+  activeRequestId?: string;
+  /**
    * @description 要翻译的文本。
    */
   sourceText: string;
@@ -196,6 +200,10 @@ export interface MessageRequest {
    * @description 要执行的操作。
    */
   action: string;
+  /**
+   * @description 翻译请求的唯一 ID。
+   */
+  requestId?: string;
   /**
    * @description 消息的文本内容。
    */

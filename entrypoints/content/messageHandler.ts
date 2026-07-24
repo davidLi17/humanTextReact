@@ -3,6 +3,7 @@ import {
   TranslationRequest,
 } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
+import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import { PopupManager } from "./popupManager";
 
 const logger = createLogger("content-message", "📨");
@@ -18,6 +19,7 @@ export class MessageHandler {
     logger.log("收到消息", {
       action: request.action,
       hasText: !!request.text,
+      requestId: request.requestId,
       hasContent: !!request.content,
       hasReasoning: !!request.reasoningContent,
       done: request.done,
@@ -68,9 +70,14 @@ export class MessageHandler {
     }
 
     logger.log("✅ [Content MessageHandler] 显示弹窗");
-    this.popupManager.showPopup(request.text);
+    const displayRequestId = request.requestId || createRequestId();
+    this.popupManager.showPopup(
+      request.text,
+      displayRequestId,
+      !request.requestId
+    );
 
-    sendResponse({ success: true });
+    sendResponse({ success: true, requestId: request.requestId });
     return true;
   }
 
