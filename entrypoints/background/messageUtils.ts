@@ -9,23 +9,29 @@ export class MessageUtils {
   /**
    * 安全发送消息到指定标签页
    */
-  static async safeSendMessage(tabId: number, message: any): Promise<void> {
+  static async safeSendMessage(
+    tabId: number,
+    message: any
+  ): Promise<boolean> {
     try {
       await browser.tabs.sendMessage(tabId, message);
+      return true;
     } catch (error) {
-      logger.log("发送消息失败（可能是popup已关闭）:", error);
+      logger.log("发送消息失败（可能是页面已关闭）:", error);
+      return false;
     }
   }
 
   /**
    * 发送消息到运行时（通常是popup）
    */
-  static sendRuntimeMessage(message: any, callback?: () => void): void {
-    browser.runtime.sendMessage(message, () => {
-      if (browser.runtime.lastError) {
-        logger.log("runtime消息发送失败:", browser.runtime.lastError);
-        callback?.();
-      }
-    });
+  static async sendRuntimeMessage(message: any): Promise<boolean> {
+    try {
+      await browser.runtime.sendMessage(message);
+      return true;
+    } catch (error) {
+      logger.log("runtime消息发送失败（可能是popup已关闭）:", error);
+      return false;
+    }
   }
 }
