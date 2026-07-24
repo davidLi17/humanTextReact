@@ -5,6 +5,7 @@ import {
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
 import { createLogger } from "@/entrypoints/shared/logger";
+import { shouldAcceptRequestUpdate } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown"; // Markdown解析工具
 import { PopupEventHandler } from "./popupEventHandler";
@@ -22,14 +23,25 @@ export class PopupManager {
   };
   // 当前显示的弹窗元素
   private currentPopup: HTMLElement | null = null;
+  // 当前弹窗对应的翻译请求
+  private currentRequestId: string | undefined;
+  // 旧后台不会发送 requestId，仅在该模式下接收无 ID 更新
+  private allowLegacyMessages = false;
+  // 完成后保留 requestId 供关闭操作精确清理，但不再接收迟到更新
+  private requestFinished = false;
   // 弹窗事件处理器实例
   private eventHandler: PopupEventHandler | null = null;
   // 标记用户是否手动滚动过弹窗内容
   private userHasScrolled = false;
 
   // 显示弹窗方法，接收用户选中的文本
-  public showPopup(selection: string): HTMLElement {
+  public showPopup(
+    selection: string,
+    requestId: string,
+    allowLegacyMessages = false
+  ): HTMLElement {
     logger.log("显示弹窗", {
+      requestId,
       textLength: selection?.length || 0,
       textPreview: selection?.substring(0, 50) + "...",
       hasCurrentPopup: !!this.currentPopup,
@@ -42,6 +54,9 @@ export class PopupManager {
     // 创建新的弹窗元素
     const popup = this.createPopupElement(selection);
     this.currentPopup = popup;
+    this.currentRequestId = requestId;
+    this.allowLegacyMessages = allowLegacyMessages;
+    this.requestFinished = false;
 
     // 将弹窗添加到页面中
     document.body.appendChild(popup);
@@ -66,6 +81,8 @@ export class PopupManager {
   public updateTranslation(request: TranslationRequest): boolean {
     logger.log("🔄 [PopupManager] 更新翻译", {
       hasPopup: !!this.currentPopup,
+      requestId: request.requestId,
+      currentRequestId: this.currentRequestId,
       hasContent: !!request.content,
       contentLength: request.content?.length || 0,
       hasReasoning: !!request.reasoningContent,
@@ -77,6 +94,28 @@ export class PopupManager {
     // 检查弹窗是否存在
     if (!this.currentPopup) {
       logger.log("❌ [PopupManager] 翻译弹窗不存在，可能已关闭");
+      return false;
+    }
+
+    if (this.requestFinished) {
+      logger.log("忽略已结束请求的迟到更新", {
+        incomingRequestId: request.requestId,
+        currentRequestId: this.currentRequestId,
+      });
+      return false;
+    }
+
+    if (
+      !shouldAcceptRequestUpdate(
+        request.requestId,
+        this.currentRequestId,
+        this.allowLegacyMessages
+      )
+    ) {
+      logger.log("忽略非当前请求的页面弹窗更新", {
+        incomingRequestId: request.requestId,
+        currentRequestId: this.currentRequestId,
+      });
       return false;
     }
 
@@ -105,6 +144,10 @@ export class PopupManager {
       this.handleTranslationUpdate(request, elements);
     }
 
+    if (request.done || request.error) {
+      this.requestFinished = true;
+    }
+
     return true;
   }
 
@@ -122,6 +165,9 @@ export class PopupManager {
       this.currentPopup.remove();
       this.currentPopup = null;
     }
+    this.currentRequestId = undefined;
+    this.allowLegacyMessages = false;
+    this.requestFinished = false;
   }
 
   // 创建弹窗元素方法，接收用户选中的文本
@@ -212,7 +258,12 @@ export class PopupManager {
       .querySelector(".translator-close-btn")
       ?.addEventListener("click", () => {
         // 发送清理消息给后台
-        browser.runtime.sendMessage({ action: MESSAGE_TYPES.CLEANUP });
+        browser.runtime.sendMessage({
+          action: MESSAGE_TYPES.CLEANUP,
+          requestId: this.allowLegacyMessages
+            ? undefined
+            : this.currentRequestId,
+        });
         // 移除当前弹窗
         this.removeCurrentPopup();
       });

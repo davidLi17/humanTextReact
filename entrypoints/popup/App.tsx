@@ -1,7 +1,11 @@
 import { DEFAULT_SETTINGS } from "@/entrypoints/shared/constants";
 import { createLogger, initializeLogger } from "@/entrypoints/shared/logger";
+import {
+  createRequestId,
+  shouldAcceptRequestUpdate,
+} from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.less";
 import HistoryPanel from "./components/HistoryPanel";
 import TranslationArea from "./components/TranslationArea";
@@ -18,7 +22,9 @@ interface PopupDraft {
 }
 
 function App() {
+  const activeRequestIdRef = useRef<string | undefined>(undefined);
   const [translationState, setTranslationState] = useState<TranslationState>({
+    activeRequestId: undefined,
     sourceText: "",
     translatedText: "",
     reasoningText: "",
@@ -112,10 +118,27 @@ function App() {
       if (request.action === "updatePopupTranslation") {
         logger.log("🔄 [Popup App] 处理popup翻译更新");
 
+        if (
+          !shouldAcceptRequestUpdate(
+            request.requestId,
+            activeRequestIdRef.current,
+            true
+          )
+        ) {
+          logger.log("忽略非当前请求的popup更新", {
+            incomingRequestId: request.requestId,
+            activeRequestId: activeRequestIdRef.current,
+          });
+          sendResponse({ success: true, ignored: true });
+          return false;
+        }
+
         if (request.error) {
           logger.log("❌ [Popup App] 翻译错误:", request.error);
+          activeRequestIdRef.current = undefined;
           setTranslationState((prev: TranslationState) => ({
             ...prev,
+            activeRequestId: undefined,
             isTranslating: false,
             showResult: true,
             errorMessage: request.error,
@@ -128,8 +151,14 @@ function App() {
             hasReasoning: request.hasReasoning,
             isComplete: request.done,
           });
+          if (request.done) {
+            activeRequestIdRef.current = undefined;
+          }
           setTranslationState((prev: TranslationState) => ({
             ...prev,
+            activeRequestId: request.done
+              ? undefined
+              : prev.activeRequestId,
             translatedText: request.content || prev.translatedText,
             reasoningText: request.reasoningContent || prev.reasoningText,
             hasReasoning: request.hasReasoning || false,
@@ -225,6 +254,17 @@ function App() {
   const getErrorMessage = (error: any) =>
     error?.message || "翻译失败，请稍后重试";
 
+  const cleanupActiveRequest = async (
+    requestId = activeRequestIdRef.current
+  ) => {
+    if (!requestId || !browser?.runtime) return;
+
+    await browser.runtime.sendMessage({
+      action: "cleanup",
+      requestId,
+    });
+  };
+
   // 发送翻译请求
   const handleTranslate = async (textOverride?: string) => {
     const text = (textOverride ?? translationState.sourceText).trim();
@@ -239,8 +279,11 @@ function App() {
       return;
     }
 
+    const requestId = createRequestId();
+    activeRequestIdRef.current = requestId;
     setTranslationState((prev: TranslationState) => ({
       ...prev,
+      activeRequestId: requestId,
       isTranslating: true,
       showResult: true,
       translatedText: "",
@@ -259,8 +302,10 @@ function App() {
       });
 
       if (!isApiKeyConfigured(userSettings.apiKey)) {
+        activeRequestIdRef.current = undefined;
         setTranslationState((prev: TranslationState) => ({
           ...prev,
+          activeRequestId: undefined,
           isTranslating: false,
           showResult: true,
           errorMessage: "请先在设置中配置 API Key",
@@ -269,13 +314,11 @@ function App() {
         return;
       }
 
-      // 先发送清理请求
       if (browser?.runtime) {
-        await browser.runtime.sendMessage({ action: "cleanup" });
-
         // 开始新的翻译，传递完整设置
         const response = await browser.runtime.sendMessage({
           action: "translate",
+          requestId,
           text,
           images: textOverride ? [] : translationState.images,
           thinkingEnabled: userSettings.thinkingEnabled,
@@ -291,12 +334,20 @@ function App() {
       }
     } catch (error: any) {
       if (!error.message?.includes("Receiving end does not exist")) {
-        setTranslationState((prev: TranslationState) => ({
-          ...prev,
-          isTranslating: false,
-          showResult: true,
-          errorMessage: getErrorMessage(error),
-        }));
+        if (activeRequestIdRef.current === requestId) {
+          activeRequestIdRef.current = undefined;
+        }
+        setTranslationState((prev: TranslationState) => {
+          if (prev.activeRequestId !== requestId) return prev;
+
+          return {
+            ...prev,
+            activeRequestId: undefined,
+            isTranslating: false,
+            showResult: true,
+            errorMessage: getErrorMessage(error),
+          };
+        });
       }
     }
   };
@@ -308,15 +359,21 @@ function App() {
   };
 
   const cancelTranslate = async () => {
+    const requestId = activeRequestIdRef.current;
     try {
-      if (browser?.runtime) {
-        await browser.runtime.sendMessage({ action: "cleanup" });
-      }
+      await cleanupActiveRequest(requestId);
     } catch (error) {
       logger.error("取消翻译失败:", error);
     } finally {
+      if (activeRequestIdRef.current === requestId) {
+        activeRequestIdRef.current = undefined;
+      }
       setTranslationState((prev: TranslationState) => ({
         ...prev,
+        activeRequestId:
+          prev.activeRequestId === requestId
+            ? undefined
+            : prev.activeRequestId,
         isTranslating: false,
         errorMessage: prev.translatedText ? "已停止继续生成" : "已取消翻译",
         showResult: true,
@@ -360,8 +417,15 @@ function App() {
 
   // 清空当前草稿和结果
   const clearDraft = async () => {
+    const activeRequestId = activeRequestIdRef.current;
+    activeRequestIdRef.current = undefined;
+    await cleanupActiveRequest(activeRequestId).catch((error) =>
+      logger.error("清理当前翻译失败:", error)
+    );
+
     setTranslationState((prev) => ({
       ...prev,
+      activeRequestId: undefined,
       sourceText: "",
       translatedText: "",
       reasoningText: "",
@@ -383,8 +447,15 @@ function App() {
 
   // 恢复历史记录项
   const restoreHistoryItem = (item: HistoryItem) => {
+    const activeRequestId = activeRequestIdRef.current;
+    activeRequestIdRef.current = undefined;
+    cleanupActiveRequest(activeRequestId).catch((error) =>
+      logger.error("恢复历史前清理翻译失败:", error)
+    );
+
     setTranslationState((prev) => ({
       ...prev,
+      activeRequestId: undefined,
       sourceText: item.original,
       translatedText: item.translated,
       reasoningText: item.reasoning || "",
@@ -406,8 +477,15 @@ function App() {
   };
 
   const retranslateHistoryItem = (item: HistoryItem) => {
+    const activeRequestId = activeRequestIdRef.current;
+    activeRequestIdRef.current = undefined;
+    cleanupActiveRequest(activeRequestId).catch((error) =>
+      logger.error("历史重译前清理翻译失败:", error)
+    );
+
     setTranslationState((prev) => ({
       ...prev,
+      activeRequestId: undefined,
       sourceText: item.original,
       translatedText: "",
       reasoningText: "",
@@ -528,16 +606,18 @@ function App() {
   // 窗口卸载时清理
   useEffect(() => {
     const handleUnload = () => {
-      if (browser?.runtime) {
-        browser.runtime.sendMessage({ action: "cleanup" });
+      const requestId = activeRequestIdRef.current;
+      if (requestId) {
+        cleanupActiveRequest(requestId);
       }
     };
 
     window.addEventListener("beforeunload", handleUnload);
     return () => {
       window.removeEventListener("beforeunload", handleUnload);
-      if (browser?.runtime) {
-        browser.runtime.sendMessage({ action: "cleanup" });
+      const requestId = activeRequestIdRef.current;
+      if (requestId) {
+        cleanupActiveRequest(requestId);
       }
     };
   }, []);
