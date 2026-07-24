@@ -4,7 +4,6 @@ import {
 } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { PopupManager } from "./popupManager";
-import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("content-message", "📨");
 
@@ -52,10 +51,10 @@ export class MessageHandler {
     }
   };
 
-  private handleShowTranslationPopup = async (
+  private handleShowTranslationPopup = (
     request: TranslationRequest,
     sendResponse: (response?: any) => void
-  ): Promise<boolean> => {
+  ): boolean => {
     logger.info("开始处理显示弹窗", {
       hasText: !!request.text,
       textLength: request.text?.length || 0,
@@ -68,41 +67,8 @@ export class MessageHandler {
       return true;
     }
 
-    // 获取用户设置，确保传递 thinkingEnabled 等参数
-    const userSettings = await SettingsUtils.getSettings();
-    logger.log("⚙️ [Content MessageHandler] 获取用户设置", {
-      thinkingEnabled: userSettings.thinkingEnabled,
-      hasApiKey: !!userSettings.apiKey,
-    });
-
-    const oldPopup = document.querySelector(".translator-popup");
-    if (oldPopup) {
-      logger.log("🔄 [Content MessageHandler] 发现旧的翻译弹窗，先移除");
-      browser.runtime.sendMessage({ action: MESSAGE_TYPES.CLEANUP }, () => {
-        oldPopup.remove();
-        logger.log("✅ [Content MessageHandler] 显示新弹窗");
-        this.popupManager.showPopup(request.text!);
-        browser.runtime.sendMessage({
-          action: MESSAGE_TYPES.TRANSLATE,
-          text: request.text,
-          thinkingEnabled: userSettings.thinkingEnabled,
-          temperature: userSettings.temperature,
-          promptTemplate: userSettings.promptTemplate,
-          apiKey: userSettings.apiKey,
-        });
-      });
-    } else {
-      logger.log("✅ [Content MessageHandler] 显示弹窗");
-      this.popupManager.showPopup(request.text);
-      browser.runtime.sendMessage({
-        action: MESSAGE_TYPES.TRANSLATE,
-        text: request.text,
-        thinkingEnabled: userSettings.thinkingEnabled,
-        temperature: userSettings.temperature,
-        promptTemplate: userSettings.promptTemplate,
-        apiKey: userSettings.apiKey,
-      });
-    }
+    logger.log("✅ [Content MessageHandler] 显示弹窗");
+    this.popupManager.showPopup(request.text);
 
     sendResponse({ success: true });
     return true;
