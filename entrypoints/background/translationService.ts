@@ -30,6 +30,12 @@ interface TranslationParams {
   tabId?: number;
 }
 
+interface StreamChunk {
+  content: string;
+  reasoningContent: string;
+  done: boolean;
+}
+
 /**
  * 翻译服务
  * 负责处理文本翻译的核心逻辑
@@ -55,7 +61,7 @@ export class TranslationService {
       typeof params === "string" ? { text: params, tabId } : params;
 
     const { text, images = [], thinkingEnabled = false } = translationParams;
-    const actualTabId = translationParams.tabId || tabId;
+    const actualTabId = translationParams.tabId ?? tabId;
 
     logger.log("📋 [TranslationService] 翻译参数处理", {
       text: text.substring(0, 50) + "...",
@@ -69,6 +75,7 @@ export class TranslationService {
 
     const controller = RequestManager.createRequest(actualTabId);
 
+    try {
     // 获取设置，优先从云端获取，失败时从本地获取
     const config = await SettingsUtils.getSettings();
 
@@ -122,7 +129,6 @@ export class TranslationService {
       requestBody.thinking = THINKING_CONFIG.DISABLED;
     }
 
-    try {
       const response = await fetch(config.baseUrl || DEFAULT_SETTINGS.baseUrl, {
         method: "POST",
         headers: {
@@ -137,65 +143,35 @@ export class TranslationService {
         throw new Error(`API 请求失败: ${response.status}`);
       }
 
-      const reader = response.body!.getReader();
+      if (!response.body) {
+        throw new Error("API 响应为空，请检查接口兼容性");
+      }
+
+      const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
       let result = "";
       let reasoningContent = "";
+      let streamFinished = false;
 
-      while (true) {
+      while (!streamFinished) {
         const { value, done } = await reader.read();
-        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        let currentChunk = "";
-        let currentReasoningChunk = "";
-
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-
-            try {
-              const parsed = JSON.parse(data);
-
-              // 检查delta内容是否存在
-              if (
-                parsed.choices &&
-                parsed.choices.length > 0 &&
-                parsed.choices[0].delta &&
-                parsed.choices[0].delta.content !== undefined
-              ) {
-                const content = parsed.choices[0].delta.content;
-
-                // 处理空内容和表情符号
-                if (content !== null && content !== undefined) {
-                  currentChunk += content;
-                }
-
-                // 添加解析的思维链内容（如果有）
-                const hasReasoning =
-                  parsed.choices[0].delta.reasoning_content !== undefined;
-                if (hasReasoning) {
-                  const reasoning = parsed.choices[0].delta.reasoning_content;
-                  if (reasoning !== null && reasoning !== undefined) {
-                    currentReasoningChunk += reasoning;
-                  }
-                }
-              }
-            } catch (e) {
-              logger.error("解析错误:", e, "原始数据:", line);
-            }
-          }
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+        }
+        if (done) {
+          buffer += decoder.decode();
         }
 
-        if (currentChunk || currentReasoningChunk) {
-          result += currentChunk;
-          reasoningContent += currentReasoningChunk;
+        const lines = buffer.split(/\r?\n/);
+        buffer = done ? "" : lines.pop() || "";
+
+        const currentChunk = this.parseStreamLines(lines);
+
+        if (currentChunk.content || currentChunk.reasoningContent) {
+          result += currentChunk.content;
+          reasoningContent += currentChunk.reasoningContent;
 
           logger.log("📤 [TranslationService] 发送流式更新", {
             actualTabId,
@@ -203,13 +179,31 @@ export class TranslationService {
             reasoningLength: reasoningContent.length,
           });
 
-          await this.sendTranslationUpdate(
+          const delivered = await this.sendTranslationUpdate(
             actualTabId,
             result,
             reasoningContent,
             false
           );
+          if (!delivered) {
+            logger.log("翻译接收端已关闭，停止当前请求");
+            RequestManager.cleanupRequest(actualTabId);
+            return;
+          }
         }
+
+        streamFinished = done || currentChunk.done;
+        if (currentChunk.done && !done) {
+          try {
+            await reader.cancel();
+          } catch (error) {
+            logger.warn("关闭已完成的响应流失败:", error);
+          }
+        }
+      }
+
+      if (!result.trim()) {
+        throw new Error("模型未返回可显示内容，请检查模型或接口兼容性");
       }
 
       logger.log("✅ [TranslationService] 翻译完成，发送最终结果", {
@@ -219,12 +213,16 @@ export class TranslationService {
       });
 
       // 发送完成信号
-      await this.sendTranslationUpdate(
+      const finalDelivered = await this.sendTranslationUpdate(
         actualTabId,
         result,
         reasoningContent,
         true
       );
+      if (!finalDelivered) {
+        RequestManager.cleanupRequest(actualTabId);
+        return;
+      }
 
       // 在成功翻译完成后，保存翻译历史
       if (result) {
@@ -248,7 +246,7 @@ export class TranslationService {
         logger.log("翻译请求已中止");
         return;
       }
-      if (error.message.includes("Receiving end does not exist")) {
+      if (error.message?.includes("Receiving end does not exist")) {
         logger.log("连接已断开，可能是页面已关闭");
         return;
       }
@@ -258,6 +256,46 @@ export class TranslationService {
       RequestManager.completeRequest(actualTabId);
       throw new Error(message);
     }
+  }
+
+  /**
+   * 解析一批 SSE 行，兼容 data: 后有无空格的响应格式
+   */
+  private static parseStreamLines(lines: string[]): StreamChunk {
+    const chunk: StreamChunk = {
+      content: "",
+      reasoningContent: "",
+      done: false,
+    };
+
+    for (const line of lines) {
+      const normalizedLine = line.trim();
+      if (!normalizedLine.startsWith("data:")) continue;
+
+      const data = normalizedLine.slice(5).trimStart();
+      if (!data) continue;
+      if (data === "[DONE]") {
+        chunk.done = true;
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed?.choices?.[0]?.delta;
+        if (!delta) continue;
+
+        if (typeof delta.content === "string") {
+          chunk.content += delta.content;
+        }
+        if (typeof delta.reasoning_content === "string") {
+          chunk.reasoningContent += delta.reasoning_content;
+        }
+      } catch (error) {
+        logger.error("解析流式响应失败:", error, "原始数据:", line);
+      }
+    }
+
+    return chunk;
   }
 
   /**
@@ -299,7 +337,7 @@ export class TranslationService {
     if (tabId) {
       await MessageUtils.safeSendMessage(tabId, message);
     } else {
-      MessageUtils.sendRuntimeMessage(message);
+      await MessageUtils.sendRuntimeMessage(message);
     }
   }
   /**
@@ -310,7 +348,7 @@ export class TranslationService {
     content: string,
     reasoningContent: string,
     done: boolean
-  ): Promise<void> {
+  ): Promise<boolean> {
     logger.log("🔄 [TranslationService] 发送翻译更新", {
       tabId,
       hasContent: !!content,
@@ -339,7 +377,7 @@ export class TranslationService {
           done: message.done,
         },
       });
-      await MessageUtils.safeSendMessage(tabId, message);
+      return MessageUtils.safeSendMessage(tabId, message);
     } else {
       // 无tabId：popup翻译，发送给popup页面
       const message = {
@@ -357,17 +395,7 @@ export class TranslationService {
           done: message.done,
         },
       });
-      let popupClosed = false;
-      MessageUtils.sendRuntimeMessage(message, () => {
-        popupClosed = true;
-      });
-
-      // 如果 popup 已关闭，中止翻译
-      if (popupClosed && !done) {
-        logger.log("⚠️ [TranslationService] popup已关闭，中止翻译");
-        RequestManager.cleanupRequest(tabId || 0);
-        return;
-      }
+      return MessageUtils.sendRuntimeMessage(message);
     }
   }
 }
