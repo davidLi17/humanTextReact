@@ -28,7 +28,7 @@ import { ShortcutManager } from "./shortcutManager";
 
 export default defineBackground(() => {
   // 初始化日志系统
-  initializeLogger();
+  void initializeLogger("background");
 
   backgroundLogger.info("人话翻译器 background script 启动", {
     id: browser.runtime.id,

@@ -223,7 +223,9 @@ export class TranslationService {
           chunk.reasoningContent += delta.reasoning_content;
         }
       } catch (error) {
-        logger.error("解析流式响应失败:", error, "原始数据:", line);
+        logger.error("解析流式响应失败:", error, {
+          rawDataLength: line.length,
+        });
       }
     }
 

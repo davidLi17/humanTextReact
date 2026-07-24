@@ -18,6 +18,9 @@ export const MESSAGE_TYPES = {
   UPDATE_POPUP_TRANSLATION: "updatePopupTranslation", // popup页面专用
   SHOW_TRANSLATION_POPUP: "showTranslationPopup",
   GET_SELECTED_TEXT: "getSelectedText",
+  APPEND_DIAGNOSTIC_LOGS: "appendDiagnosticLogs",
+  GET_DIAGNOSTIC_LOGS: "getDiagnosticLogs",
+  CLEAR_DIAGNOSTIC_LOGS: "clearDiagnosticLogs",
 } as const;
 
 export type MessageType = (typeof MESSAGE_TYPES)[keyof typeof MESSAGE_TYPES];
