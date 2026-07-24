@@ -1,13 +1,33 @@
 import {
   DEFAULT_SETTINGS,
   LOG_LEVELS,
+  MESSAGE_TYPES,
   LogLevel,
   THEME_MODES,
   ThemeMode,
 } from "@/entrypoints/shared/constants";
 import { initializeLogger, optionsLogger } from "@/entrypoints/shared/logger";
+import {
+  DIAGNOSTIC_STATE_KEY,
+  isDiagnosticSessionActive,
+  startDiagnosticSession,
+  stopDiagnosticSession,
+} from "@/entrypoints/shared/logger/diagnostics";
+import type {
+  DiagnosticLogRecord,
+  DiagnosticLogSummary,
+  DiagnosticSessionState,
+} from "@/entrypoints/shared/logger/types";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
-import { PreviewClose, PreviewCloseOne } from "@icon-park/react";
+import {
+  Bug,
+  Clear,
+  Copy,
+  Download,
+  PauseOne,
+  PreviewClose,
+  PreviewCloseOne,
+} from "@icon-park/react";
 import { useEffect, useState } from "react";
 import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
 import "./Options.less";
@@ -36,19 +56,65 @@ function Options() {
     "idle" | "testing" | "success" | "error"
   >("idle");
   const [testMessage, setTestMessage] = useState("");
+  const [diagnosticState, setDiagnosticState] =
+    useState<DiagnosticSessionState | null>(null);
+  const [diagnosticSummary, setDiagnosticSummary] =
+    useState<DiagnosticLogSummary>({
+      total: 0,
+      errors: 0,
+    });
+  const [diagnosticMessage, setDiagnosticMessage] = useState("");
+  const [diagnosticBusy, setDiagnosticBusy] = useState(false);
+  const [diagnosticNow, setDiagnosticNow] = useState(Date.now());
 
   // 加载设置
   useEffect(() => {
-    // 初始化日志系统
-    initializeLogger();
-    optionsLogger.info("设置页面加载");
+    void initializeLogger("options").then(() =>
+      optionsLogger.info("设置页面加载")
+    );
 
     loadSettings();
     loadShortcut();
-
-    // 显示当前日志级别状态
-    showCurrentLogLevelStatus();
+    void loadDiagnosticState();
+    void refreshDiagnosticSummary();
   }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setDiagnosticNow(Date.now());
+      if (
+        diagnosticState &&
+        !isDiagnosticSessionActive(diagnosticState, Date.now())
+      ) {
+        setDiagnosticState(null);
+      }
+    }, 1000);
+
+    const storageListener = (changes: any, areaName: string) => {
+      if (areaName !== "local" || !changes[DIAGNOSTIC_STATE_KEY]) return;
+      const nextState = changes[DIAGNOSTIC_STATE_KEY]
+        .newValue as DiagnosticSessionState | undefined;
+      setDiagnosticState(
+        isDiagnosticSessionActive(nextState) ? nextState : null
+      );
+    };
+    browser.storage.onChanged.addListener(storageListener);
+
+    return () => {
+      window.clearInterval(intervalId);
+      browser.storage.onChanged.removeListener(storageListener);
+    };
+  }, [diagnosticState]);
+
+  useEffect(() => {
+    if (!isDiagnosticSessionActive(diagnosticState)) return;
+
+    const intervalId = window.setInterval(
+      () => void refreshDiagnosticSummary(),
+      3000
+    );
+    return () => window.clearInterval(intervalId);
+  }, [diagnosticState?.expiresAt]);
 
   // 根据设置应用主题（支持系统跟随）
   useEffect(() => {
@@ -110,58 +176,162 @@ function Options() {
     if (saveStatus === "saving") return; // 防止重复提交
 
     setSaveStatus("saving");
-    // 使用 console.log 确保能看到日志
-    console.log("[Options] 开始保存设置:", settings);
 
     try {
       // 使用 SettingsUtils 统一保存
       await SettingsUtils.setSettings(settings as any);
 
       // 重新初始化日志系统以应用新的日志级别
-      console.log("[Options] 设置保存成功，重新初始化日志系统");
-      await initializeLogger();
-
-      // 测试新设置的日志级别
-      await testLogLevel(settings.logLevel);
+      await initializeLogger("options");
+      optionsLogger.info("设置保存成功", {
+        logLevel: settings.logLevel,
+        thinkingEnabled: settings.thinkingEnabled,
+      });
 
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (error) {
-      console.error("[Options] 保存设置失败:", error);
       optionsLogger.error("保存设置失败:", error);
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 2000);
     }
   };
 
-  // 测试日志级别设置
-  const testLogLevel = async (logLevel: LogLevel) => {
-    console.log(`[Options] 测试日志级别: ${logLevel}`);
-
-    // 测试不同级别的日志
-    optionsLogger.trace("这是一条 trace 日志");
-    optionsLogger.log("这是一条 log 日志");
-    optionsLogger.info("这是一条 info 日志");
-    optionsLogger.warn("这是一条 warn 日志");
-    optionsLogger.error("这是一条 error 日志");
-    optionsLogger.success("这是一条 success 日志");
-
-    console.log(`[Options] 日志级别测试完成，当前级别: ${logLevel}`);
+  const loadDiagnosticState = async () => {
+    try {
+      const stored = await browser.storage.local.get(DIAGNOSTIC_STATE_KEY);
+      const nextState = stored?.[
+        DIAGNOSTIC_STATE_KEY
+      ] as DiagnosticSessionState | undefined;
+      setDiagnosticState(
+        isDiagnosticSessionActive(nextState) ? nextState : null
+      );
+    } catch (error) {
+      optionsLogger.error("读取诊断状态失败:", error);
+    }
   };
 
-  // 显示当前日志级别状态
-  const showCurrentLogLevelStatus = async () => {
-    try {
-      const s = await SettingsUtils.getSettings();
-      console.log(`[Options] 当前日志级别: ${s.logLevel}`);
+  const getDiagnosticLogs = async (): Promise<DiagnosticLogRecord[]> => {
+    const response = await browser.runtime.sendMessage({
+      action: MESSAGE_TYPES.GET_DIAGNOSTIC_LOGS,
+    });
+    if (!response?.success) {
+      throw new Error(response?.error || "读取诊断日志失败");
+    }
+    if (response.summary) {
+      setDiagnosticSummary(response.summary);
+    }
+    return response.records || [];
+  };
 
-      // 检查 localStorage 中的 debug 设置
-      if (typeof localStorage !== "undefined") {
-        const debugSetting = localStorage.getItem("debug");
-        console.log(`[Options] localStorage debug 设置: ${debugSetting}`);
-      }
+  const refreshDiagnosticSummary = async () => {
+    try {
+      await getDiagnosticLogs();
     } catch (error) {
-      console.error("[Options] 获取日志级别状态失败:", error);
+      optionsLogger.error("刷新诊断日志摘要失败:", error);
+    }
+  };
+
+  const beginDiagnostics = async () => {
+    if (diagnosticBusy) return;
+    setDiagnosticBusy(true);
+    setDiagnosticMessage("");
+    try {
+      const state = await startDiagnosticSession();
+      setDiagnosticState(state);
+      setDiagnosticNow(Date.now());
+      setDiagnosticSummary({ total: 0, errors: 0 });
+      setDiagnosticMessage("诊断已开启");
+      await initializeLogger("options");
+      optionsLogger.info("诊断模式已开启", { expiresAt: state.expiresAt });
+    } catch (error) {
+      setDiagnosticMessage("开启诊断失败");
+      optionsLogger.error("开启诊断模式失败:", error);
+    } finally {
+      setDiagnosticBusy(false);
+    }
+  };
+
+  const endDiagnostics = async () => {
+    if (diagnosticBusy) return;
+    setDiagnosticBusy(true);
+    try {
+      await stopDiagnosticSession();
+      setDiagnosticState(null);
+      setDiagnosticMessage("诊断已停止，已有日志仍可导出");
+    } catch (error) {
+      setDiagnosticMessage("停止诊断失败");
+      optionsLogger.error("停止诊断模式失败:", error);
+    } finally {
+      setDiagnosticBusy(false);
+    }
+  };
+
+  const clearDiagnostics = async () => {
+    if (diagnosticBusy) return;
+    setDiagnosticBusy(true);
+    try {
+      const response = await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.CLEAR_DIAGNOSTIC_LOGS,
+      });
+      if (!response?.success) throw new Error(response?.error);
+      setDiagnosticSummary({ total: 0, errors: 0 });
+      setDiagnosticMessage("诊断日志已清空");
+    } catch (error) {
+      setDiagnosticMessage("清空日志失败");
+      optionsLogger.error("清空诊断日志失败:", error);
+    } finally {
+      setDiagnosticBusy(false);
+    }
+  };
+
+  const createDiagnosticExport = (records: DiagnosticLogRecord[]) => ({
+    exportedAt: new Date().toISOString(),
+    extension: browser.runtime.getManifest().name,
+    version: browser.runtime.getManifest().version,
+    records,
+  });
+
+  const copyDiagnostics = async () => {
+    if (diagnosticBusy) return;
+    setDiagnosticBusy(true);
+    try {
+      const records = await getDiagnosticLogs();
+      await navigator.clipboard.writeText(
+        JSON.stringify(createDiagnosticExport(records), null, 2)
+      );
+      setDiagnosticMessage(`已复制 ${records.length} 条诊断日志`);
+    } catch (error) {
+      setDiagnosticMessage("复制日志失败");
+      optionsLogger.error("复制诊断日志失败:", error);
+    } finally {
+      setDiagnosticBusy(false);
+    }
+  };
+
+  const downloadDiagnostics = async () => {
+    if (diagnosticBusy) return;
+    setDiagnosticBusy(true);
+    try {
+      const records = await getDiagnosticLogs();
+      const blob = new Blob(
+        [JSON.stringify(createDiagnosticExport(records), null, 2)],
+        { type: "application/json" }
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `human-text-diagnostics-${Date.now()}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setDiagnosticMessage(`已下载 ${records.length} 条诊断日志`);
+    } catch (error) {
+      setDiagnosticMessage("下载日志失败");
+      optionsLogger.error("下载诊断日志失败:", error);
+    } finally {
+      setDiagnosticBusy(false);
     }
   };
 
@@ -217,6 +387,24 @@ function Options() {
       setSettings(DEFAULT_SETTINGS);
     }
   };
+
+  const diagnosticsActive = isDiagnosticSessionActive(
+    diagnosticState,
+    diagnosticNow
+  );
+  const diagnosticRemainingSeconds = diagnosticsActive
+    ? Math.max(
+        0,
+        Math.ceil((diagnosticState.expiresAt - diagnosticNow) / 1000)
+      )
+    : 0;
+  const diagnosticRemainingLabel = `${Math.floor(
+    diagnosticRemainingSeconds / 60
+  )
+    .toString()
+    .padStart(2, "0")}:${(diagnosticRemainingSeconds % 60)
+    .toString()
+    .padStart(2, "0")}`;
 
   return (
     <div className="options-container">
@@ -445,6 +633,98 @@ function Options() {
             <div className="setting-hint">
               选择界面颜色风格；选择“跟随系统”将随系统设置自动切换
             </div>
+          </div>
+        </div>
+
+        <div className="settings-section diagnostics-section">
+          <h2>问题诊断</h2>
+
+          <div className="diagnostic-status-row">
+            <div>
+              <div
+                className={`diagnostic-status ${
+                  diagnosticsActive ? "active" : "inactive"
+                }`}
+              >
+                <span className="diagnostic-status-dot" />
+                {diagnosticsActive
+                  ? `正在记录 · ${diagnosticRemainingLabel}`
+                  : "诊断未开启"}
+              </div>
+              <div className="diagnostic-summary">
+                <span>记录 {diagnosticSummary.total}</span>
+                <span>错误 {diagnosticSummary.errors}</span>
+                <span>
+                  最近{" "}
+                  {diagnosticSummary.latestTimestamp
+                    ? new Date(
+                        diagnosticSummary.latestTimestamp
+                      ).toLocaleTimeString()
+                    : "暂无"}
+                </span>
+              </div>
+            </div>
+
+            {diagnosticsActive ? (
+              <button
+                type="button"
+                className="diagnostic-btn stop"
+                onClick={endDiagnostics}
+                disabled={diagnosticBusy}
+              >
+                <PauseOne theme="outline" size="18" />
+                停止诊断
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="diagnostic-btn start"
+                onClick={beginDiagnostics}
+                disabled={diagnosticBusy}
+              >
+                <Bug theme="outline" size="18" />
+                开启 30 分钟诊断
+              </button>
+            )}
+          </div>
+
+          <div className="diagnostic-actions">
+            <button
+              type="button"
+              className="diagnostic-btn secondary"
+              onClick={copyDiagnostics}
+              disabled={diagnosticBusy || diagnosticSummary.total === 0}
+            >
+              <Copy theme="outline" size="18" />
+              复制日志
+            </button>
+            <button
+              type="button"
+              className="diagnostic-btn secondary"
+              onClick={downloadDiagnostics}
+              disabled={diagnosticBusy || diagnosticSummary.total === 0}
+            >
+              <Download theme="outline" size="18" />
+              下载 JSON
+            </button>
+            <button
+              type="button"
+              className="diagnostic-btn clear"
+              onClick={clearDiagnostics}
+              disabled={diagnosticBusy || diagnosticSummary.total === 0}
+            >
+              <Clear theme="outline" size="18" />
+              清空日志
+            </button>
+          </div>
+
+          {diagnosticMessage && (
+            <div className="diagnostic-message" role="status">
+              {diagnosticMessage}
+            </div>
+          )}
+          <div className="setting-hint">
+            诊断记录仅保存在当前浏览器会话，API Key、原文、译文和图片会自动脱敏。
           </div>
         </div>
 
