@@ -67,7 +67,7 @@ export default defineBackground(() => {
   // 监听标签页关闭事件
   browser.tabs.onRemoved.addListener((tabId: number) => {
     backgroundLogger.info("标签页关闭，清理请求", { tabId });
-    RequestManager.cleanupRequest(tabId);
+    RequestManager.cleanupTab(tabId);
   });
 
   // 监听快捷键命令
