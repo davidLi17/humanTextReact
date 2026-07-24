@@ -6,6 +6,13 @@ import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import {
+  appendDiagnosticRecords,
+  clearDiagnosticRecords,
+  getDiagnosticRecords,
+  normalizeDiagnosticRecord,
+  summarizeDiagnosticRecords,
+} from "@/entrypoints/shared/logger/diagnostics";
+import {
   POPUP_TRANSLATION_TARGET,
   createRequestId,
   createSelectionTarget,
@@ -135,6 +142,25 @@ export class MessageHandler {
     [MESSAGE_TYPES.IMPORT_HISTORY]: async (request) => {
       const success = await HistoryManager.importHistory(request.history);
       return { success };
+    },
+    [MESSAGE_TYPES.APPEND_DIAGNOSTIC_LOGS]: async (request) => {
+      const records = Array.isArray(request.records)
+        ? request.records
+            .slice(0, 50)
+            .map(normalizeDiagnosticRecord)
+            .filter(Boolean)
+        : [];
+      await appendDiagnosticRecords(records);
+      return { success: true, accepted: records.length };
+    },
+    [MESSAGE_TYPES.GET_DIAGNOSTIC_LOGS]: async () => {
+      const records = await getDiagnosticRecords();
+      const summary = summarizeDiagnosticRecords(records);
+      return { success: true, records, summary };
+    },
+    [MESSAGE_TYPES.CLEAR_DIAGNOSTIC_LOGS]: async () => {
+      await clearDiagnosticRecords();
+      return { success: true };
     },
     // 测试 API 连接
     testApiConnection: async (request) => {
