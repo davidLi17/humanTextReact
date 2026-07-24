@@ -16,6 +16,10 @@ export class MessageHandler {
     sender: any,
     sendResponse: (response?: any) => void
   ): boolean => {
+    if (request.action === MESSAGE_TYPES.APPEND_DIAGNOSTIC_LOGS) {
+      return false;
+    }
+
     logger.log("收到消息", {
       action: request.action,
       hasText: !!request.text,
