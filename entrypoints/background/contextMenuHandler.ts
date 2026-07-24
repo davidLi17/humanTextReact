@@ -3,6 +3,7 @@ import { createLogger } from "@/entrypoints/shared/logger";
 import { MessageUtils } from "./messageUtils";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { TranslationService } from "./translationService";
+import { RequestManager } from "./requestManager";
 
 const logger = createLogger("context-menu", "🖱️");
 
@@ -38,14 +39,21 @@ export class ContextMenuHandler {
             hasApiKey: !!settings.apiKey,
           });
 
+          // 新操作开始前先停止当前标签页的旧请求，避免旧结果进入新弹窗
+          RequestManager.cleanupRequest(tab.id);
+
           // 先显示弹框
           logger.log("🔄 [ContextMenuHandler] 发送显示弹窗消息");
-          await MessageUtils.safeSendMessage(tab.id, {
+          const popupShown = await MessageUtils.safeSendMessage(tab.id, {
             action: MESSAGE_TYPES.SHOW_TRANSLATION_POPUP,
             text: selectedText,
           });
+          if (!popupShown) {
+            logger.warn("页面无法接收翻译弹窗消息，终止本次翻译");
+            return;
+          }
 
-          // 然后开始翻译，传递完整参数包括思维链设置
+          // 页面只负责显示弹窗，后台是选中文字翻译的唯一请求发起方
           logger.log("🚀 [ContextMenuHandler] 开始翻译", {
             textLength: selectedText.length,
             thinkingEnabled: settings.thinkingEnabled ?? false,
@@ -60,11 +68,6 @@ export class ContextMenuHandler {
         }
       } catch (error: any) {
         logger.error("❌ [ContextMenuHandler] 翻译失败:", error);
-        await MessageUtils.safeSendMessage(tab.id, {
-          action: MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION,
-          error: error.message,
-          done: true,
-        });
       }
     }
   }
