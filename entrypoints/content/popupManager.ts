@@ -2,11 +2,17 @@
 import {
   MESSAGE_TYPES,
   PopupState, // 消息类型常量
+  THEME_MODES,
+  ThemeMode,
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
 import { createLogger } from "@/entrypoints/shared/logger";
 import { shouldAcceptRequestUpdate } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import {
+  normalizeThemeMode,
+  watchSystemTheme,
+} from "@/entrypoints/shared/theme";
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown"; // Markdown解析工具
 import { PopupEventHandler } from "./popupEventHandler";
 import { applyPopupTheme } from "./styles";
@@ -33,6 +39,21 @@ export class PopupManager {
   private eventHandler: PopupEventHandler | null = null;
   // 标记用户是否手动滚动过弹窗内容
   private userHasScrolled = false;
+  // 当前全局主题偏好
+  private themeMode: ThemeMode = THEME_MODES.SYSTEM;
+  // 系统主题和菜单事件的清理函数
+  private systemThemeCleanup: (() => void) | null = null;
+  private themeMenuCleanup: (() => void) | null = null;
+
+  constructor() {
+    void SettingsUtils.getSettings().then((settings) => {
+      this.setThemeMode(normalizeThemeMode(settings.theme));
+    });
+
+    SettingsUtils.onSettingsChanged((settings) => {
+      this.setThemeMode(normalizeThemeMode(settings.theme));
+    });
+  }
 
   // 显示弹窗方法，接收用户选中的文本
   public showPopup(
@@ -165,6 +186,8 @@ export class PopupManager {
       this.currentPopup.remove();
       this.currentPopup = null;
     }
+    this.themeMenuCleanup?.();
+    this.themeMenuCleanup = null;
     this.currentRequestId = undefined;
     this.allowLegacyMessages = false;
     this.requestFinished = false;
@@ -179,7 +202,38 @@ export class PopupManager {
     popup.innerHTML = `
       <div class="translator-header">
         <div class="translator-title">人话翻译器</div>
-        <div class="translator-close-btn">✕</div>
+        <div class="translator-header-actions" data-no-drag="true">
+          <div class="translator-theme-selector">
+            <button
+              type="button"
+              class="translator-theme-trigger"
+              aria-label="切换外观"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              title="切换外观"
+            >
+              <span class="translator-theme-trigger-icon" aria-hidden="true">◐</span>
+            </button>
+            <div class="translator-theme-menu" role="menu" aria-label="外观模式" hidden>
+              <button type="button" role="menuitemradio" data-theme-option="system">
+                <span aria-hidden="true">◐</span>
+                <span>跟随系统</span>
+                <span class="translator-theme-check"></span>
+              </button>
+              <button type="button" role="menuitemradio" data-theme-option="light">
+                <span aria-hidden="true">☀</span>
+                <span>浅色</span>
+                <span class="translator-theme-check"></span>
+              </button>
+              <button type="button" role="menuitemradio" data-theme-option="dark">
+                <span aria-hidden="true">☾</span>
+                <span>深色</span>
+                <span class="translator-theme-check"></span>
+              </button>
+            </div>
+          </div>
+          <button type="button" class="translator-close-btn" aria-label="关闭">✕</button>
+        </div>
       </div>
       <div class="translator-content">
         <div class="translator-section">
@@ -199,14 +253,8 @@ export class PopupManager {
       </div>
       <button class="translator-copy-btn">复制译文</button>
     `;
-    // 读取设置并应用主题
-    SettingsUtils.getSettings()
-      .then((s) => {
-        try {
-          applyPopupTheme(popup, (s as any).theme || "system");
-        } catch {}
-      })
-      .catch(() => {});
+    applyPopupTheme(popup, this.themeMode);
+    this.updateThemeControls(popup);
 
     return popup;
   }
@@ -252,6 +300,7 @@ export class PopupManager {
       this.lastPopupState = state; // 保存弹窗状态
       logger.log("保存弹窗状态:", state);
     });
+    this.setupThemeControls(popup);
 
     // 关闭按钮点击事件
     popup
@@ -300,6 +349,133 @@ export class PopupManager {
           }
         }
       });
+  }
+
+  private setThemeMode(mode: ThemeMode) {
+    this.themeMode = normalizeThemeMode(mode);
+    this.systemThemeCleanup?.();
+    this.systemThemeCleanup = null;
+
+    if (this.currentPopup) {
+      applyPopupTheme(this.currentPopup, this.themeMode);
+      this.updateThemeControls(this.currentPopup);
+    }
+
+    this.systemThemeCleanup = watchSystemTheme(
+      this.themeMode,
+      (resolvedTheme) => {
+        if (!this.currentPopup) return;
+        applyPopupTheme(
+          this.currentPopup,
+          this.themeMode,
+          resolvedTheme === THEME_MODES.DARK
+        );
+      }
+    );
+  }
+
+  private updateThemeControls(popup: HTMLElement) {
+    const labels: Record<ThemeMode, string> = {
+      system: "跟随系统",
+      light: "浅色",
+      dark: "深色",
+    };
+    const icons: Record<ThemeMode, string> = {
+      system: "◐",
+      light: "☀",
+      dark: "☾",
+    };
+    const trigger = popup.querySelector(
+      ".translator-theme-trigger"
+    ) as HTMLButtonElement | null;
+    const triggerIcon = popup.querySelector(
+      ".translator-theme-trigger-icon"
+    ) as HTMLElement | null;
+
+    if (trigger) {
+      trigger.title = `外观：${labels[this.themeMode]}`;
+      trigger.setAttribute(
+        "aria-label",
+        `切换外观，当前为${labels[this.themeMode]}`
+      );
+    }
+    if (triggerIcon) triggerIcon.textContent = icons[this.themeMode];
+
+    popup
+      .querySelectorAll<HTMLButtonElement>("[data-theme-option]")
+      .forEach((button) => {
+        const optionMode = normalizeThemeMode(button.dataset.themeOption);
+        const active = optionMode === this.themeMode;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-checked", String(active));
+        const check = button.querySelector(".translator-theme-check");
+        if (check) check.textContent = active ? "✓" : "";
+      });
+  }
+
+  private setupThemeControls(popup: HTMLElement) {
+    const trigger = popup.querySelector(
+      ".translator-theme-trigger"
+    ) as HTMLButtonElement | null;
+    const menu = popup.querySelector(
+      ".translator-theme-menu"
+    ) as HTMLElement | null;
+    if (!trigger || !menu) return;
+
+    const closeMenu = () => {
+      menu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    };
+    const toggleMenu = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      menu.hidden = !menu.hidden;
+      trigger.setAttribute("aria-expanded", String(!menu.hidden));
+    };
+    const handleDocumentPointerDown = (event: PointerEvent) => {
+      if (!popup.querySelector(".translator-theme-selector")?.contains(
+        event.target as Node
+      )) {
+        closeMenu();
+      }
+    };
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMenu();
+    };
+
+    trigger.addEventListener("click", toggleMenu);
+    const optionListeners = Array.from(
+      popup.querySelectorAll<HTMLButtonElement>("[data-theme-option]")
+    ).map((button) => {
+      const listener = async (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const nextMode = normalizeThemeMode(button.dataset.themeOption);
+        const previousMode = this.themeMode;
+        this.setThemeMode(nextMode);
+        closeMenu();
+
+        try {
+          await SettingsUtils.setSetting("theme", nextMode);
+        } catch (error) {
+          this.setThemeMode(previousMode);
+          logger.error("保存主题设置失败:", error);
+        }
+      };
+      button.addEventListener("click", listener);
+      return { button, listener };
+    });
+
+    document.addEventListener("pointerdown", handleDocumentPointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    this.themeMenuCleanup = () => {
+      trigger.removeEventListener("click", toggleMenu);
+      optionListeners.forEach(({ button, listener }) =>
+        button.removeEventListener("click", listener)
+      );
+      document.removeEventListener("pointerdown", handleDocumentPointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
   }
 
   // 设置滚动检测方法

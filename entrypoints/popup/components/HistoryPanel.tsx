@@ -2,12 +2,15 @@ import React, { useRef, useState, useCallback } from "react";
 import { HistoryPanelProps } from "../types";
 import { formatDateTime, debounce } from "../utils/helpers";
 import { useHistorySearch } from "../hooks/useFuseSearch";
+import ThemeModeSelector from "./ThemeModeSelector";
 
 const HistoryPanel: React.FC<HistoryPanelProps> = ({
   history,
   searchTerm,
   onSearchChange,
   onBack,
+  themeMode,
+  onThemeChange,
   onRestore,
   onCopyOriginal,
   onCopyTranslation,
@@ -216,6 +219,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
             onChange={handleSearchInput}
           />
         </div>
+        <ThemeModeSelector value={themeMode} onChange={onThemeChange} />
       </div>
 
       <div className="history-panel-content">

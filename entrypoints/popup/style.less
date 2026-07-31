@@ -33,9 +33,9 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: @text-dark;
-  background-color: @bg-dark;
+  color-scheme: light;
+  color: @text-light;
+  background-color: @bg-light;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -61,7 +61,7 @@ h1 {
 
 button {
   .button-base();
-  background-color: @bg-button-dark;
+  background-color: @bg-button-light;
 
   &:hover {
     border-color: @primary-color;
@@ -73,18 +73,35 @@ button {
   }
 }
 
-// 响应式主题
-@media (prefers-color-scheme: light) {
-  :root {
-    color: @text-light;
-    background-color: @bg-light;
+// JavaScript 加载设置前使用系统主题，加载后由 data-theme 明确控制。
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    color: @text-dark;
+    background-color: @bg-dark;
   }
+
+  :root:not([data-theme]) button {
+    background-color: @bg-button-dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: @text-dark;
+  background-color: @bg-dark;
+
+  button {
+    background-color: @bg-button-dark;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  color: @text-light;
+  background-color: @bg-light;
 
   a:hover {
     color: @primary-hover-light;
-  }
-
-  button {
-    background-color: @bg-button-light;
   }
 }

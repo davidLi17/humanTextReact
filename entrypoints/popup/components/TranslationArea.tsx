@@ -10,6 +10,7 @@ import { useAutoScrollToBottom } from "../hooks/useAutoScrollToBottom";
 import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
+import ThemeModeSelector from "./ThemeModeSelector";
 
 const logger = createLogger("popup-translation-area", "📝");
 
@@ -20,6 +21,8 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onCopy,
   onShowHistory,
   onOpenSettings,
+  themeMode,
+  onThemeChange,
   onClearDraft,
   onRetry,
   onCancel,
@@ -160,6 +163,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
           <button className="text-btn" onClick={onOpenSettings}>
             设置
           </button>
+          <ThemeModeSelector value={themeMode} onChange={onThemeChange} />
         </div>
       </div>
 

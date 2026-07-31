@@ -1,4 +1,8 @@
 import { MARKDOWN_STYLES } from "../../shared/styles/markdown";
+import {
+  applyTheme,
+} from "@/entrypoints/shared/theme";
+import type { ThemeMode } from "@/entrypoints/shared/constants";
 
 export const POPUP_STYLES = /*css*/ `
   .translator-popup {
@@ -19,6 +23,7 @@ export const POPUP_STYLES = /*css*/ `
     overflow: hidden;
     border: 1px solid rgba(0, 0, 0, 0.08);
     backdrop-filter: blur(8px);
+    color-scheme: light;
   }
 
   .translator-popup::after {
@@ -46,7 +51,7 @@ export const POPUP_STYLES = /*css*/ `
   .translator-popup .translator-header {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 3;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -69,6 +74,13 @@ export const POPUP_STYLES = /*css*/ `
     font-size: 15px;
   }
 
+  .translator-popup .translator-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: default;
+  }
+
   .translator-popup .translator-close-btn {
     cursor: pointer;
     padding: 6px;
@@ -78,11 +90,89 @@ export const POPUP_STYLES = /*css*/ `
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 0;
+    background: transparent;
+    font-size: 14px;
   }
 
   .translator-popup .translator-close-btn:hover {
     background: rgba(0, 0, 0, 0.08);
     color: #333;
+  }
+
+  .translator-popup .translator-theme-selector {
+    position: relative;
+  }
+
+  .translator-popup .translator-theme-trigger {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.03);
+    color: #4b5563;
+    cursor: pointer;
+    font-size: 17px;
+  }
+
+  .translator-popup .translator-theme-trigger:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: #111827;
+  }
+
+  .translator-popup .translator-theme-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 142px;
+    padding: 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+    backdrop-filter: blur(12px);
+  }
+
+  .translator-popup .translator-theme-menu[hidden] {
+    display: none;
+  }
+
+  .translator-popup .translator-theme-menu button {
+    width: 100%;
+    min-height: 34px;
+    padding: 7px 8px;
+    display: grid;
+    grid-template-columns: 20px 1fr 16px;
+    align-items: center;
+    gap: 6px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #334155;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .translator-popup .translator-theme-menu button:hover {
+    background: #f1f5f9;
+  }
+
+  .translator-popup .translator-theme-menu button.active {
+    color: #4f46e5;
+    background: #eef2ff;
+    font-weight: 600;
+  }
+
+  .translator-popup .translator-theme-check {
+    text-align: center;
   }
 
   .translator-popup .translator-content {
@@ -230,54 +320,109 @@ export const POPUP_STYLES = /*css*/ `
   /* 集成共享 Markdown 样式，添加 .translator-popup 前缀 */
   ${MARKDOWN_STYLES.replace(/(\.[a-zA-Z])/g, ".translator-popup $1")}
 
-  /* 暗黑模式支持 */
-  @media (prefers-color-scheme: dark) {
-    .translator-popup {
-      background: #1a1a1a;
-      border-color: rgba(255, 255, 255, 0.1);
-      color: #e5e5e5;
-    }
-
-    .translator-popup .translator-header {
-      background: rgba(26, 26, 26, 0.95);
-      border-bottom-color: rgba(255, 255, 255, 0.1);
-    }
-
-    .translator-popup .translator-title {
-      color: #e5e5e5;
-    }
-
-    .translator-popup .translator-text,
-    .translator-popup .translator-translated-text {
-      color: #e5e5e5;
-    }
-
-    .translator-popup .translator-reasoning-text {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-      color: #b0b0b0;
-      border-left-color: #666;
-    }
-  }
-
-  /* 明确支持通过 data-theme=dark 触发暗色（优先于系统） */
   .translator-popup[data-theme="dark"] {
-    background: #1a1a1a;
+    color-scheme: dark;
+    background: #111827;
     border-color: rgba(255, 255, 255, 0.1);
-    color: #e5e5e5;
+    color: #e5e7eb;
   }
   .translator-popup[data-theme="dark"] .translator-header {
-    background: rgba(26, 26, 26, 0.95);
+    background: rgba(17, 24, 39, 0.96);
     border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  .translator-popup[data-theme="dark"] .translator-content {
+    background: #111827;
+  }
+  .translator-popup[data-theme="dark"] .translator-section {
+    background: #1f2937;
+    border-color: rgba(255, 255, 255, 0.08);
   }
   .translator-popup[data-theme="dark"] .translator-title,
   .translator-popup[data-theme="dark"] .translator-text,
   .translator-popup[data-theme="dark"] .translator-translated-text {
-    color: #e5e5e5;
+    color: #f3f4f6;
+  }
+  .translator-popup[data-theme="dark"] .translator-label,
+  .translator-popup[data-theme="dark"] .translator-loading {
+    color: #94a3b8;
   }
   .translator-popup[data-theme="dark"] .translator-reasoning-text {
-    background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-    color: #b0b0b0;
-    border-left-color: #666;
+    background: linear-gradient(135deg, #0f172a 0%, #172033 100%);
+    color: #cbd5e1;
+    border-left-color: #64748b;
+  }
+  .translator-popup[data-theme="dark"] .translator-close-btn,
+  .translator-popup[data-theme="dark"] .translator-theme-trigger {
+    color: #cbd5e1;
+  }
+  .translator-popup[data-theme="dark"] .translator-theme-trigger {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .translator-popup[data-theme="dark"] .translator-close-btn:hover,
+  .translator-popup[data-theme="dark"] .translator-theme-trigger:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f8fafc;
+  }
+  .translator-popup[data-theme="dark"] .translator-theme-menu {
+    background: rgba(15, 23, 42, 0.98);
+    border-color: #334155;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+  }
+  .translator-popup[data-theme="dark"] .translator-theme-menu button {
+    color: #e2e8f0;
+  }
+  .translator-popup[data-theme="dark"] .translator-theme-menu button:hover {
+    background: #1e293b;
+  }
+  .translator-popup[data-theme="dark"] .translator-theme-menu button.active {
+    color: #c7d2fe;
+    background: rgba(79, 70, 229, 0.24);
+  }
+  .translator-popup[data-theme="dark"] .translator-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .translator-popup[data-theme="dark"] .translator-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
+  }
+  .translator-popup[data-theme="dark"] .markdown-content,
+  .translator-popup[data-theme="dark"] .markdown-paragraph,
+  .translator-popup[data-theme="dark"] .markdown-content h1,
+  .translator-popup[data-theme="dark"] .markdown-content h2,
+  .translator-popup[data-theme="dark"] .markdown-content h3,
+  .translator-popup[data-theme="dark"] .markdown-content h4,
+  .translator-popup[data-theme="dark"] .markdown-content h5,
+  .translator-popup[data-theme="dark"] .markdown-content h6 {
+    color: #e5e7eb;
+  }
+  .translator-popup[data-theme="dark"] .code-block-container {
+    background: #0f172a;
+    border-color: #334155;
+  }
+  .translator-popup[data-theme="dark"] .code-block-header {
+    background: #1e293b;
+    border-bottom-color: #334155;
+  }
+  .translator-popup[data-theme="dark"] .code-block code {
+    color: #e2e8f0;
+  }
+  .translator-popup[data-theme="dark"] .markdown-table {
+    border-color: #334155;
+  }
+  .translator-popup[data-theme="dark"] .markdown-table th {
+    color: #f1f5f9;
+    background: #1e293b;
+    border-bottom-color: #475569;
+  }
+  .translator-popup[data-theme="dark"] .markdown-table td {
+    border-bottom-color: #334155;
+  }
+  .translator-popup[data-theme="dark"] .markdown-table tr:nth-child(even) {
+    background: rgba(51, 65, 85, 0.35);
+  }
+  .translator-popup[data-theme="dark"] .markdown-quote {
+    color: #fde68a;
+    background: rgba(146, 64, 14, 0.28);
   }
 
   /* 响应式设计 */
@@ -306,11 +451,8 @@ export function injectStyles() {
  */
 export function applyPopupTheme(
   rootEl: HTMLElement,
-  mode: "light" | "dark" | "system"
+  mode: ThemeMode,
+  systemPrefersDark?: boolean
 ) {
-  const media =
-    window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
-  const current =
-    mode === "system" ? (media?.matches ? "dark" : "light") : mode;
-  rootEl.setAttribute("data-theme", current);
+  return applyTheme(rootEl, mode, systemPrefersDark);
 }

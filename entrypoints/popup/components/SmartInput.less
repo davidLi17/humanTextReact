@@ -113,6 +113,49 @@
   background: #a8a8a8;
 }
 
+[data-theme="dark"] {
+  .smart-input {
+    color: #e5e7eb;
+    background: #0f172a;
+    border-color: #334155;
+
+    &:disabled {
+      background: #111827;
+    }
+  }
+
+  .suggestions-dropdown {
+    background: #111827;
+    border-color: #334155;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+  }
+
+  .suggestion-item {
+    border-bottom-color: #1e293b;
+
+    &:hover,
+    &.selected {
+      background: #1e293b;
+    }
+
+    &.selected {
+      background: rgba(59, 130, 246, 0.18);
+    }
+  }
+
+  .suggestion-text {
+    color: #e2e8f0;
+  }
+
+  .suggestions-dropdown::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+
+  .suggestions-dropdown::-webkit-scrollbar-thumb {
+    background: #475569;
+  }
+}
+
 /* 响应式适配 */
 @media (max-width: 480px) {
   .suggestion-text {
