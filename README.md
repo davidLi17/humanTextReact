@@ -1,225 +1,215 @@
-# 🗣️ 人话翻译器 - Chrome 扩展
+# 人话翻译器
 
-基于 React + WXT 框架开发的现代化 Chrome 扩展，提供智能文本翻译功能，将专业术语转化为通俗易懂的"人话"。
+人话翻译器是一个基于 WXT、React 和 Chrome Extension Manifest V3
+开发的浏览器扩展。它使用用户配置的 AI 接口，将行业黑话、专业术语和
+复杂表达解释成更容易理解的中文。
 
-## ✨ 核心特性
+## 功能
 
-### 🎯 智能翻译能力
-- **DeepSeek API 集成**: 支持最新的 AI 翻译模型
-- **流式响应**: 实时显示翻译过程，提升用户体验
-- **思维链模式**: 可选 `deepseek-reasoner` 模型展示推理过程
-- **智能错误处理**: 完善的错误处理和自动重试机制
+### 翻译入口
 
-### 🖱️ 多样化使用方式
-- **右键菜单翻译**: 选中文本右键即可快速翻译
-- **快捷键操作**: 默认 `Alt+H` 快捷键快速触发翻译
-- **弹窗界面**: 点击扩展图标打开完整翻译界面
-- **一键复制**: 支持源文本和翻译结果的快速复制
+- 在 Popup 中输入文字并翻译。
+- 在网页中选中文字，通过右键菜单翻译。
+- 选中文字后按 `Alt+H` 快速翻译。
+- 在 Popup 中粘贴剪贴板图片，交给支持视觉输入的模型处理。
 
-### 📚 历史记录管理
-- **自动保存**: 最多保存 100 条翻译历史
-- **智能搜索**: 支持历史记录的全文搜索和过滤
-- **数据持久化**: 本地存储 + 云端同步双重保障
-- **批量管理**: 支持单条删除和批量清空操作
+### 翻译体验
 
-### ⚙️ 灵活配置选项
-- **API 配置**: 自定义 API 密钥和接口地址
-- **模型选择**: 多模型支持（deepseek-reasoner/deepseek-chat）
-- **参数调优**: 可调节 Temperature 等模型参数
-- **提示词定制**: 支持自定义翻译提示词模板
-- **设置同步**: Chrome 账号云端同步配置
+- 流式显示正文和 Provider 返回的 reasoning 内容。
+- 支持 Markdown、代码块和代码复制。
+- 支持快速回复和深度思考模式。
+- 支持停止生成、失败后手动重试。
+- 空响应和 API 错误会显示明确提示。
+- Popup 关闭后自动恢复未提交的文字和图片草稿。
 
-## 🏗️ 技术架构
+### 历史记录
 
-### 🧩 模块化设计
-项目采用高度模块化的架构设计，遵循单一职责原则：
+- 历史记录保存在 `browser.storage.local`，最多保留最近 100 条。
+- 支持模糊搜索、恢复、重新翻译、复制原文和复制译文。
+- 支持删除单条记录、清空全部记录。
+- 支持 JSON 导入和导出。
 
-```
-background/
-├── apiService.ts        # API 交互服务
-├── constants.ts         # 常量定义
-├── contextMenuHandler.ts # 右键菜单事件处理
-├── contextMenuManager.ts # 右键菜单管理
-├── historyManager.ts    # 历史记录管理
-├── messageHandler.ts    # 消息路由处理
-├── messageUtils.ts      # 消息发送工具
-├── requestManager.ts    # 请求生命周期管理
-├── settingsManager.ts   # 设置管理
-├── shortcutManager.ts   # 快捷键管理
-└── translationService.ts # 翻译核心服务
-```
+### 设置
 
-### 🛠️ 技术栈
-- **React 19**: 现代化的 UI 框架
-- **TypeScript**: 类型安全的开发体验
-- **WXT 0.20.6**: 专业的浏览器扩展开发框架
-- **Vite**: 快速的构建工具
-- **Chrome Extension MV3**: 最新的扩展标准
-- **Less**: CSS 预处理器用于样式管理
+- 配置 API Key、API 地址和模型 ID。
+- 调整 Temperature 和提示词模板。
+- 测试当前 API 配置是否可用。
+- 设置深度思考、日志级别和界面主题。
+- 查看并打开 Chrome 扩展快捷键设置页面。
 
-## 🚀 快速开始
+### 稳定性与诊断
 
-### 环境要求
-- Node.js 16+
-- npm 或 yarn 包管理器
+- 每次翻译使用独立 `requestId` 管理生命周期。
+- 同一展示位置的新请求会取消旧请求，不影响其他标签页或 Popup。
+- Popup 和页面浮窗会忽略迟到的旧请求结果。
+- 设置页可以开启 30 分钟问题诊断。
+- 诊断日志覆盖 Background、Content Script、Popup 和 Options。
+- 支持复制日志、下载 JSON、清空日志和提前停止诊断。
+- API Key、Authorization、原文、译文和图片内容会自动脱敏。
 
-### 安装依赖
-```bash
-npm install
-```
-
-### 开发模式
-```bash
-npm run dev
-```
-开发模式支持热重载，修改代码后扩展会自动重新加载。
-
-### 生产构建
-```bash
-npm run build
-```
-构建产物输出到 `.output/chrome-mv3/` 目录。
-
-### 安装扩展
-1. 打开 Chrome 浏览器，访问 `chrome://extensions/`
-2. 开启右上角的"开发者模式"
-3. 点击"加载已解压的扩展程序"
-4. 选择 `.output/chrome-mv3/` 目录
-
-## 📖 使用指南
+## 使用方法
 
 ### 初次配置
-1. 安装扩展后点击工具栏图标
-2. 进入设置页面配置 API 密钥
-3. 根据需求选择合适的模型和参数
 
-### 翻译操作
-- **网页翻译**: 选中任意文本，右键选择"人话翻译"
-- **快捷键**: 选中文本后按 `Alt+H`
-- **弹窗翻译**: 点击扩展图标，在界面中输入文本
+1. 点击扩展图标打开 Popup。
+2. 进入设置页面。
+3. 填写 API Key、Chat Completions 接口地址和模型 ID。
+4. 点击“测试连接”。
+5. 保存设置。
 
-### 历史管理
-点击弹窗中的"历史记录"标签页，可以进行：
-- 查看所有翻译历史
-- 搜索特定翻译内容
-- 删除单条或批量记录
-- 导出/导入历史数据
+扩展直接请求用户配置的 AI Provider。模型需要兼容当前使用的
+Chat Completions 流式响应格式；图片翻译还要求模型支持图片输入。
 
-## 📁 项目结构
+### Popup 翻译
 
-```
-humanTextReact/
-├── entrypoints/
-│   ├── background/          # 后台服务模块
-│   │   ├── apiService.ts    # API 服务
-│   │   ├── constants.ts     # 常量定义
-│   │   ├── contextMenuHandler.ts # 菜单事件
-│   │   ├── contextMenuManager.ts # 菜单管理
-│   │   ├── historyManager.ts # 历史管理
-│   │   ├── messageHandler.ts # 消息处理
-│   │   ├── messageUtils.ts  # 消息工具
-│   │   ├── requestManager.ts # 请求管理
-│   │   ├── settingsManager.ts # 设置管理
-│   │   ├── shortcutManager.ts # 快捷键管理
-│   │   └── translationService.ts # 翻译服务
-│   ├── content/            # 内容脚本
-│   │   ├── index.ts        # 主入口
-│   │   ├── markdown.ts     # Markdown 处理
-│   │   ├── messageHandler.ts # 消息处理
-│   │   ├── popupEventHandler.ts # 弹窗事件
-│   │   ├── popupManager.ts # 弹窗管理
-│   │   └── styles.tsx      # 样式文件
-│   ├── options/            # 设置页面
-│   │   ├── Options.less    # 设置页面样式
-│   │   ├── Options.tsx     # 设置页面组件
-│   │   ├── config/         # 配置相关
-│   │   ├── index.html      # HTML 模板
-│   │   └── main.tsx        # 入口文件
-│   ├── popup/              # 弹窗界面
-│   │   ├── App.less        # 主应用样式
-│   │   ├── App.tsx         # 主应用组件
-│   │   ├── components/     # 子组件
-│   │   ├── index.html      # HTML 模板
-│   │   ├── main.tsx        # 入口文件
-│   │   ├── style.less      # 样式文件
-│   │   ├── types.ts        # 类型定义
-│   │   └── utils/          # 工具函数
-│   └── shared/             # 共享资源
-│       └── constants.ts    # 共享常量
-├── public/                 # 静态资源
-│   └── icon/              # 图标文件
-├── shared/                # 共享模块
-│   ├── styles/            # 共享样式
-│   └── utils/             # 共享工具
-├── wxt.config.ts          # WXT 配置
-└── package.json           # 项目配置
-```
+1. 输入需要解释的内容，或使用 `Ctrl+V` 粘贴图片。
+2. 根据需要选择快速回复或深度思考。
+3. 点击翻译。
+4. 生成过程中可以停止，失败后可以手动重试。
 
-## ⚙️ 配置说明
+未提交的输入会作为草稿保存在当前浏览器本地。使用“清空”可以同时清除
+当前输入、图片、结果和本地草稿。
 
-### API 配置
-- **API 地址**: DeepSeek API 的基础 URL
-- **API 密钥**: 从 DeepSeek 平台获取的有效密钥
-- **模型选项**: 
-  - `deepseek-reasoner`: 支持思维链推理，适合复杂文本
-  - `deepseek-chat`: 响应速度快，适合简单翻译
+### 网页划词翻译
 
-### 提示词模板
-支持自定义翻译提示词，使用 `{text}` 作为文本占位符：
-```
-请将以下专业文本翻译成通俗易懂的中文：{text}
+1. 在网页中选中文字。
+2. 右键选择“人话翻译”，或者按 `Alt+H`。
+3. 翻译结果会直接显示在页面浮窗中。
+
+快捷键可以在扩展设置页中查看和修改。
+
+### 历史复用
+
+在 Popup 中打开翻译历史后，可以：
+
+- 点击记录或“恢复”，恢复当时的原文、译文和 reasoning。
+- 点击“重译”，使用历史原文立即发起一次新翻译。
+- 分别复制原文或译文。
+- 搜索、删除、清空、导入或导出历史记录。
+
+历史记录只保存在当前浏览器本地，不通过 Chrome Sync 同步。
+
+### 排查问题
+
+遇到偶发问题时：
+
+1. 打开设置页的“问题诊断”。
+2. 点击“开启 30 分钟诊断”。
+3. 回到出现问题的页面并复现一次。
+4. 返回设置页，复制日志或下载 JSON。
+5. 完成后停止诊断。
+
+诊断数据只保存在当前浏览器会话中，并有数量和体积限制。
+
+## 开发
+
+### 环境
+
+- [Bun](https://bun.sh/)
+- Chrome 或其他 Chromium 浏览器
+
+本项目统一使用 Bun。不要混用 npm、pnpm 或 yarn。
+
+### 安装
+
+```bash
+bun install
 ```
 
-## 🎨 设计理念
+### 启动开发环境
 
-### 架构优势
-1. **可维护性**: 模块职责单一，修改影响范围小
-2. **可测试性**: 独立模块便于单元测试
-3. **可扩展性**: 新功能可以模块化添加
-4. **错误隔离**: 问题定位精确，调试简单
-5. **团队协作**: 并行开发不同模块
+```bash
+bun run dev
+```
 
-### 用户体验
-- 流式响应提供实时反馈
-- 错误处理保证功能稳定性
-- 历史管理增强实用性
-- 多操作方式满足不同场景
+Firefox 开发模式：
 
-## 🤝 参与贡献
+```bash
+bun run dev:firefox
+```
 
-欢迎提交 Issue 和 Pull Request！
+### 类型检查和测试
 
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add some amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建 Pull Request
+```bash
+bun run compile
+bun test
+```
 
-## 📄 开源协议
+### 构建
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+```bash
+bun run build
+```
 
-## 🔗 相关资源
+Chrome MV3 构建输出位于 `.output/chrome-mv3/`。
 
-- [WXT 官方文档](https://wxt.dev/)
-- [Chrome 扩展开发指南](https://developer.chrome.com/docs/extensions/)
-- [DeepSeek API 文档](https://platform.deepseek.com/api-docs/)
-- [React 官方文档](https://react.dev/)
+在 Chrome 中加载：
 
-## ❓ 常见问题
+1. 打开 `chrome://extensions/`。
+2. 开启“开发者模式”。
+3. 点击“加载已解压的扩展程序”。
+4. 选择 `.output/chrome-mv3/`。
 
-### Q: 翻译失败如何处理？
-A: 检查 API 密钥有效性、网络连接状态和 API 余额情况。
+### 打包
 
-### Q: 如何修改快捷键？
-A: 在设置页面点击"快捷键设置"，会跳转到 Chrome 扩展的快捷键管理页面。
+```bash
+bun run zip
+```
 
-### Q: 历史记录存储在哪里？
-A: 历史记录同时存储在本地和云端，登录 Chrome 账号后可跨设备同步。
+Firefox 构建和打包：
 
-### Q: 支持哪些浏览器？
-A: 主要支持 Chrome，也可通过 `npm run dev:firefox` 开发 Firefox 版本。
+```bash
+bun run build:firefox
+bun run zip:firefox
+```
 
----
+`.output/`、`artifacts/` 和生成的压缩包不应提交到 Git。
 
-如有其他问题，请提交 [Issue](https://github.com/your-repo/issues) 或查看详细文档。
+## 项目结构
+
+```text
+entrypoints/
+├── background/              # 请求、翻译、历史和浏览器事件
+├── content/                 # 页面浮窗与 Content Script
+├── options/                 # 设置和问题诊断页面
+├── popup/                   # Popup 翻译与历史界面
+└── shared/
+    ├── logger/              # 结构化日志与诊断存储
+    ├── requestProtocol.ts   # Request ID 和展示目标协议
+    ├── constants/           # 消息、设置和界面常量
+    └── settingsUtils.ts     # 设置读取、兼容和保存
+
+shared/
+├── styles/                  # Popup 与页面浮窗共享样式
+└── utils/                   # Markdown 等共享工具
+```
+
+核心请求链路：
+
+```text
+Popup / 右键菜单 / Alt+H
+        ↓
+Background MessageHandler
+        ↓
+RequestManager + TranslationService
+        ↓
+用户配置的 AI Provider
+        ↓
+带 requestId 的流式更新
+        ↓
+Popup 或页面翻译浮窗
+```
+
+## 技术栈
+
+- React 19
+- TypeScript
+- WXT 0.20
+- Vite 7
+- Bun
+- Less
+- Chrome Extension Manifest V3
+
+## License
+
+[MIT](LICENSE)
