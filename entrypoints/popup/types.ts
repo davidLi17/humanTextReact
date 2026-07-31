@@ -1,3 +1,5 @@
+import type { ThemeMode } from "@/entrypoints/shared/constants";
+
 /**
  * @description 图片内容接口
  */
@@ -117,6 +119,14 @@ export interface TranslationAreaProps {
    */
   onOpenSettings: () => void;
   /**
+   * @description 当前外观模式。
+   */
+  themeMode: ThemeMode;
+  /**
+   * @description 更新全局外观模式。
+   */
+  onThemeChange: (mode: ThemeMode) => void;
+  /**
    * @description 清空当前输入草稿。
    */
   onClearDraft: () => void;
@@ -158,6 +168,14 @@ export interface HistoryPanelProps {
    * @description 返回主视图的函数。
    */
   onBack: () => void;
+  /**
+   * @description 当前外观模式。
+   */
+  themeMode: ThemeMode;
+  /**
+   * @description 更新全局外观模式。
+   */
+  onThemeChange: (mode: ThemeMode) => void;
   /**
    * @description 恢复历史项目的函数。
    */

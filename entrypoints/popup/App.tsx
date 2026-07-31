@@ -1,6 +1,8 @@
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
+  THEME_MODES,
+  ThemeMode,
 } from "@/entrypoints/shared/constants";
 import { createLogger, initializeLogger } from "@/entrypoints/shared/logger";
 import {
@@ -8,6 +10,11 @@ import {
   shouldAcceptRequestUpdate,
 } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import {
+  applyTheme,
+  normalizeThemeMode,
+  watchSystemTheme,
+} from "@/entrypoints/shared/theme";
 import { useEffect, useRef, useState } from "react";
 import "./App.less";
 import HistoryPanel from "./components/HistoryPanel";
@@ -24,8 +31,15 @@ interface PopupDraft {
   updatedAt: number;
 }
 
-function App() {
+interface AppProps {
+  initialThemeMode?: ThemeMode;
+}
+
+function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
   const activeRequestIdRef = useRef<string | undefined>(undefined);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(
+    normalizeThemeMode(initialThemeMode)
+  );
   const [translationState, setTranslationState] = useState<TranslationState>({
     activeRequestId: undefined,
     sourceText: "",
@@ -47,6 +61,15 @@ function App() {
   useEffect(() => {
     void initializeLogger("popup");
   }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    applyTheme(root, themeMode);
+
+    return watchSystemTheme(themeMode, (resolvedTheme) => {
+      applyTheme(root, themeMode, resolvedTheme === THEME_MODES.DARK);
+    });
+  }, [themeMode]);
 
   // 恢复未提交草稿，避免 popup 关闭后丢失输入
   useEffect(() => {
@@ -208,21 +231,7 @@ function App() {
           ...prev,
           thinkingEnabled: settings.thinkingEnabled,
         }));
-
-        // 应用主题
-        try {
-          const root = document.documentElement;
-          const media =
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)");
-          const current =
-            (settings as any).theme === "system"
-              ? media?.matches
-                ? "dark"
-                : "light"
-              : (settings as any).theme;
-          root.setAttribute("data-theme", current);
-        } catch {}
+        setThemeMode(normalizeThemeMode(settings.theme));
       } catch (error) {
         logger.error("❌ [Popup App] 加载设置失败:", error);
       }
@@ -243,6 +252,7 @@ function App() {
           ...prev,
           thinkingEnabled: newSettings.thinkingEnabled,
         }));
+        setThemeMode(normalizeThemeMode(newSettings.theme));
       }
     );
 
@@ -608,6 +618,19 @@ function App() {
     }
   };
 
+  const handleThemeChange = async (nextMode: ThemeMode) => {
+    const normalizedMode = normalizeThemeMode(nextMode);
+    const previousMode = themeMode;
+    setThemeMode(normalizedMode);
+
+    try {
+      await SettingsUtils.setSetting("theme", normalizedMode);
+    } catch (error) {
+      setThemeMode(previousMode);
+      logger.error("保存主题设置失败:", error);
+    }
+  };
+
   // 窗口卸载时清理
   useEffect(() => {
     const handleUnload = () => {
@@ -637,6 +660,8 @@ function App() {
           onCopy={copyToClipboard}
           onShowHistory={showHistoryPanel}
           onOpenSettings={openSettings}
+          themeMode={themeMode}
+          onThemeChange={handleThemeChange}
           onClearDraft={clearDraft}
           onRetry={retryTranslate}
           onCancel={cancelTranslate}
@@ -649,6 +674,8 @@ function App() {
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           onBack={hideHistoryPanel}
+          themeMode={themeMode}
+          onThemeChange={handleThemeChange}
           onRestore={restoreHistoryItem}
           onCopyOriginal={copyHistoryOriginal}
           onCopyTranslation={copyHistoryTranslation}

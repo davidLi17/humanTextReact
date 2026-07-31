@@ -60,6 +60,14 @@ export class PopupEventHandler {
 
   // 处理头部鼠标按下事件（开始拖拽）
   private handleHeaderMouseDown = (e: MouseEvent) => {
+    if (
+      (e.target as HTMLElement).closest(
+        "button, [role='menu'], [data-no-drag='true']"
+      )
+    ) {
+      return;
+    }
+
     // 设置拖拽状态为true
     this.isDragging = true;
     // 记录当前鼠标位置

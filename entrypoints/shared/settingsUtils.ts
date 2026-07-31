@@ -47,30 +47,42 @@ export class SettingsUtils {
       logger.log("🔄 [SettingsUtils] 从 Chrome Storage 获取设置");
       const browserAPI = this.getBrowserAPI();
 
-      // 首先尝试新格式（'settings' 对象）
-      const { settings: newFormatSettings } = await browserAPI.storage.sync.get(
-        "settings"
-      );
+      try {
+        const { settings: syncSettings } =
+          await browserAPI.storage.sync.get("settings");
 
-      if (newFormatSettings && Object.keys(newFormatSettings).length > 0) {
-        // 使用 lodash.defaults 合并设置（右侧优先级低）
-        const mergedSettings = defaults(
-          {},
-          newFormatSettings,
-          DEFAULT_SETTINGS
-        ) as UserSettings;
+        if (syncSettings && Object.keys(syncSettings).length > 0) {
+          const mergedSettings = defaults(
+            {},
+            syncSettings,
+            DEFAULT_SETTINGS
+          ) as UserSettings;
 
-        logger.log("✅ [SettingsUtils] 新格式设置获取成功", {
-          hasApiKey: !!mergedSettings.apiKey,
-          thinkingEnabled: mergedSettings.thinkingEnabled,
-        });
+          logger.log("✅ [SettingsUtils] 同步设置获取成功", {
+            hasApiKey: !!mergedSettings.apiKey,
+            thinkingEnabled: mergedSettings.thinkingEnabled,
+          });
 
-        return mergedSettings;
-      } else {
-        // 回退到旧格式（直接存储的键值对）
-        logger.log("🔄 [SettingsUtils] 新格式无数据，尝试旧格式");
-        return this.getSettingsLegacyFormat(browserAPI);
+          return mergedSettings;
+        }
+      } catch (error) {
+        logger.warn("同步设置读取失败，尝试本地设置", error);
       }
+
+      try {
+        const { settings: localSettings } =
+          await browserAPI.storage.local.get("settings");
+
+        if (localSettings && Object.keys(localSettings).length > 0) {
+          logger.log("✅ [SettingsUtils] 本地设置获取成功");
+          return defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings;
+        }
+      } catch (error) {
+        logger.warn("本地设置读取失败，尝试旧格式", error);
+      }
+
+      logger.log("🔄 [SettingsUtils] 新格式无数据，尝试旧格式");
+      return this.getSettingsLegacyFormat(browserAPI);
     } catch (error) {
       logger.error("❌ [SettingsUtils] 获取设置失败:", error);
       // 返回默认设置
@@ -84,18 +96,20 @@ export class SettingsUtils {
   private static async getSettingsLegacyFormat(
     browserAPI: any
   ): Promise<UserSettings> {
-    try {
-      const keys = Object.keys(DEFAULT_SETTINGS);
+    const keys = Object.keys(DEFAULT_SETTINGS);
 
-      // 尝试从云端获取设置（旧格式）
+    try {
       const syncSettings = await browserAPI.storage.sync.get(keys);
 
       if (Object.keys(syncSettings).length > 0) {
         logger.success("从云端获取旧格式设置成功", syncSettings);
         return defaults({}, syncSettings, DEFAULT_SETTINGS) as UserSettings;
       }
+    } catch (error) {
+      logger.warn("云端旧格式设置读取失败", error);
+    }
 
-      // 如果云端没有设置，尝试从本地获取（旧格式）
+    try {
       logger.warn("云端没有旧格式设置，尝试从本地获取");
       const localSettings = await browserAPI.storage.local.get(keys);
 
@@ -104,12 +118,10 @@ export class SettingsUtils {
         return defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings;
       }
 
-      // 如果本地也没有，返回默认设置
       logger.info("使用默认设置", DEFAULT_SETTINGS);
       return { ...DEFAULT_SETTINGS };
     } catch (error) {
-      logger.error("获取旧格式设置失败:", error);
-      logger.warn("所有设置获取失败，使用默认设置", DEFAULT_SETTINGS);
+      logger.error("本地旧格式设置读取失败:", error);
       return { ...DEFAULT_SETTINGS };
     }
   }
@@ -145,10 +157,24 @@ export class SettingsUtils {
   static async setSettings(newSettings: Partial<UserSettings>): Promise<void> {
     try {
       const browserAPI = this.getBrowserAPI();
-      // 读取现有 settings
-      const { settings: existing = {} } = await browserAPI.storage.sync.get(
-        "settings"
-      );
+      let existing = {};
+
+      try {
+        const result = await browserAPI.storage.sync.get("settings");
+        existing = result.settings || {};
+      } catch (error) {
+        logger.warn("读取同步设置失败，使用本地设置合并", error);
+      }
+
+      if (Object.keys(existing).length === 0) {
+        try {
+          const result = await browserAPI.storage.local.get("settings");
+          existing = result.settings || {};
+        } catch (error) {
+          logger.warn("读取本地设置失败，使用默认设置合并", error);
+        }
+      }
+
       const merged = defaults(
         {},
         newSettings,
@@ -156,10 +182,23 @@ export class SettingsUtils {
         DEFAULT_SETTINGS
       ) as UserSettings;
 
-      await Promise.all([
+      const [syncResult, localResult] = await Promise.allSettled([
         browserAPI.storage.sync.set({ settings: merged }),
         browserAPI.storage.local.set({ settings: merged }),
       ]);
+
+      if (
+        syncResult.status === "rejected" &&
+        localResult.status === "rejected"
+      ) {
+        throw localResult.reason || syncResult.reason;
+      }
+      if (syncResult.status === "rejected") {
+        logger.warn("同步设置保存失败，已保存在本地", syncResult.reason);
+      }
+      if (localResult.status === "rejected") {
+        logger.warn("本地设置保存失败，已保存在同步存储", localResult.reason);
+      }
 
       logger.success("✅ [SettingsUtils] 设置已更新", {
         keys: Object.keys(newSettings),
@@ -191,7 +230,14 @@ export class SettingsUtils {
     const listener = (changes: any) => {
       if (changes.settings) {
         logger.log("🔄 [SettingsUtils] 检测到设置变化");
-        this.getSettings().then(callback);
+        const changedSettings = changes.settings.newValue;
+        if (changedSettings) {
+          callback(
+            defaults({}, changedSettings, DEFAULT_SETTINGS) as UserSettings
+          );
+        } else {
+          this.getSettings().then(callback);
+        }
       }
     };
 
