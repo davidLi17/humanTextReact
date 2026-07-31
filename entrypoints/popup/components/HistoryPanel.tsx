@@ -131,6 +131,28 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
               恢复
             </button>
             <button
+              className="history-action-btn history-retranslate"
+              onClick={(e) => handleRetranslate(item, e)}
+            >
+              重译
+            </button>
+            <button
+              className="history-action-btn history-copy"
+              onClick={(e) => handleCopy(item, "original", e)}
+            >
+              {copiedKey === `${item.timestamp}-original`
+                ? "已复制"
+                : "复制原文"}
+            </button>
+            <button
+              className="history-action-btn history-copy"
+              onClick={(e) => handleCopy(item, "translation", e)}
+            >
+              {copiedKey === `${item.timestamp}-translation`
+                ? "已复制"
+                : "复制译文"}
+            </button>
+            <button
               className="history-action-btn history-delete"
               onClick={(e) => handleDeleteConfirm(item.original, e)}
             >

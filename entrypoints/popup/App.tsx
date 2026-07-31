@@ -508,22 +508,20 @@ function App() {
 
   // 删除历史记录项
   const deleteHistoryItem = (original: string) => {
-    if (confirm("确定要删除这条历史记录吗？")) {
-      if (browser?.runtime) {
-        browser.runtime.sendMessage(
-          {
-            action: "deleteHistoryItem",
-            original,
-          },
-          (response: any) => {
-            if (response && response.success) {
-              loadHistory(); // 重新加载历史记录
-            } else {
-              alert("删除失败：" + (response?.error || "未知错误"));
-            }
+    if (browser?.runtime) {
+      browser.runtime.sendMessage(
+        {
+          action: "deleteHistoryItem",
+          original,
+        },
+        (response: any) => {
+          if (response && response.success) {
+            loadHistory(); // 重新加载历史记录
+          } else {
+            alert("删除失败：" + (response?.error || "未知错误"));
           }
-        );
-      }
+        }
+      );
     }
   };
 
