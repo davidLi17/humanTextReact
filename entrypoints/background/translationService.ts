@@ -20,6 +20,7 @@ export interface ImageContent {
 export interface ChatRoleMessage {
   role: "system" | "user" | "assistant";
   content: string | any[];
+  images?: ImageContent[];
 }
 
 export interface TranslationParams {
@@ -36,6 +37,115 @@ interface StreamChunk {
   content: string;
   reasoningContent: string;
   done: boolean;
+}
+
+/**
+ * 格式化单条消息内容为符合多模态 API 要求的结构
+ */
+export function formatMultimodalContent(
+  content: string | any[],
+  images?: ImageContent[]
+): string | any[] {
+  if (Array.isArray(content)) {
+    // 若已有数组结构且传入了额外的 images，则补充尚未包含的图片
+    if (images && images.length > 0) {
+      const existingUrls = new Set(
+        content
+          .filter((item) => item?.type === "image_url")
+          .map((item) => item?.image_url?.url)
+      );
+      const newImageItems = images
+        .filter((img) => !existingUrls.has(img.data))
+        .map((img) => ({
+          type: "image_url" as const,
+          image_url: { url: img.data },
+        }));
+      return [...newImageItems, ...content];
+    }
+    return content;
+  }
+
+  const text = typeof content === "string" ? content : "";
+  if (!images || images.length === 0) {
+    return text;
+  }
+
+  const userContent: any[] = [];
+  images.forEach((image) => {
+    userContent.push({
+      type: "image_url",
+      image_url: { url: image.data },
+    });
+  });
+  userContent.push({ type: "text", text });
+
+  return userContent;
+}
+
+/**
+ * 组装发送给 LLM 的 messages 数组
+ */
+export function buildMessagesPayload(
+  params: {
+    text?: string;
+    messages?: ChatRoleMessage[];
+    images?: ImageContent[];
+    promptTemplate?: string;
+  }
+): any[] {
+  const {
+    text = "",
+    messages: chatMessages,
+    images = [],
+    promptTemplate = DEFAULT_SETTINGS.promptTemplate,
+  } = params;
+
+  if (chatMessages && chatMessages.length > 0) {
+    const hasSystem = chatMessages.some((m) => m.role === "system");
+    const formattedMessages: any[] = [];
+
+    // 找到最后一条 user 消息的索引（用于注入 params.images）
+    let lastUserIndex = -1;
+    for (let i = chatMessages.length - 1; i >= 0; i--) {
+      if (chatMessages[i].role === "user") {
+        lastUserIndex = i;
+        break;
+      }
+    }
+
+    chatMessages.forEach((msg, idx) => {
+      const isLastUser = idx === lastUserIndex;
+      // 合并当前轮次自身的 msg.images 和顶层传入的 params.images（如果是最后一条 user 消息）
+      const combinedImages: ImageContent[] = [
+        ...(msg.images || []),
+        ...(isLastUser && images.length > 0 ? images : []),
+      ];
+
+      // 去重图片数据（避免同一图片被重复添加）
+      const uniqueImages = combinedImages.filter(
+        (img, index, self) =>
+          index === self.findIndex((t) => t.data === img.data)
+      );
+
+      formattedMessages.push({
+        role: msg.role,
+        content: formatMultimodalContent(msg.content, uniqueImages),
+      });
+    });
+
+    return hasSystem
+      ? formattedMessages
+      : [{ role: "system", content: promptTemplate }, ...formattedMessages];
+  }
+
+  const formattedUserContent = formatMultimodalContent(text, images);
+  return [
+    { role: "system", content: promptTemplate },
+    {
+      role: "user",
+      content: formattedUserContent,
+    },
+  ];
 }
 
 /**
@@ -76,31 +186,12 @@ export class TranslationService {
         config.promptTemplate ||
         DEFAULT_SETTINGS.promptTemplate;
 
-      let messagesPayload: any[] = [];
-
-      if (chatMessages && chatMessages.length > 0) {
-        const hasSystem = chatMessages.some((m) => m.role === "system");
-        messagesPayload = hasSystem
-          ? [...chatMessages]
-          : [{ role: "system", content: promptTemplate }, ...chatMessages];
-      } else {
-        const userContent: any[] = [];
-        images.forEach((image) => {
-          userContent.push({
-            type: "image_url",
-            image_url: { url: image.data },
-          });
-        });
-        userContent.push({ type: "text", text });
-
-        messagesPayload = [
-          { role: "system", content: promptTemplate },
-          {
-            role: "user",
-            content: userContent.length === 1 ? text : userContent,
-          },
-        ];
-      }
+      const messagesPayload = buildMessagesPayload({
+        text,
+        messages: chatMessages,
+        images,
+        promptTemplate,
+      });
 
       const requestBody: any = {
         model: config.model || DEFAULT_SETTINGS.model,
