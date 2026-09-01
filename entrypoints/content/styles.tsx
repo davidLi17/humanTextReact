@@ -102,6 +102,27 @@ export const POPUP_STYLES = /*css*/ `
     transform: translateY(-1px);
   }
 
+  .translator-popup .translator-vault-btn {
+    cursor: pointer;
+    padding: 3px 8px;
+    color: #d97706;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    background: rgba(245, 158, 11, 0.08);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .translator-popup .translator-vault-btn:hover {
+    background: rgba(245, 158, 11, 0.16);
+    border-color: rgba(245, 158, 11, 0.5);
+    transform: translateY(-1px);
+  }
+
   .translator-popup .translator-close-btn {
     cursor: pointer;
     padding: 6px;

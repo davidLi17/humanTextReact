@@ -2,6 +2,7 @@ import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationService } from "./translationService";
 import { HistoryManager } from "./historyManager";
+import { JargonVault } from "@/entrypoints/shared/jargonVault";
 import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
@@ -179,6 +180,51 @@ export class MessageHandler {
     [MESSAGE_TYPES.CLEAR_DIAGNOSTIC_LOGS]: async () => {
       await clearDiagnosticRecords();
       return { success: true };
+    },
+    // 保存/添加黑话生词条目
+    [MESSAGE_TYPES.SAVE_JARGON_ITEM]: async (request) => {
+      const item = await JargonVault.addJargon(request.item);
+      return { success: true, item };
+    },
+    // 获取生词列表
+    [MESSAGE_TYPES.GET_JARGON_LIST]: async (request) => {
+      const list = await JargonVault.getJargonList(
+        request.query,
+        request.category,
+        request.starredOnly
+      );
+      return { success: true, list };
+    },
+    // 更新生词条目
+    [MESSAGE_TYPES.UPDATE_JARGON_ITEM]: async (request) => {
+      const item = await JargonVault.updateJargon(request.id, request.updates);
+      return { success: true, item };
+    },
+    // 删除生词条目
+    [MESSAGE_TYPES.DELETE_JARGON_ITEM]: async (request) => {
+      const success = await JargonVault.deleteJargon(request.id);
+      return { success };
+    },
+    // 切换生词星标状态
+    [MESSAGE_TYPES.TOGGLE_JARGON_STAR]: async (request) => {
+      const item = await JargonVault.toggleStar(request.id);
+      return { success: true, item };
+    },
+    // 导出生词本
+    [MESSAGE_TYPES.EXPORT_JARGON]: async (request) => {
+      const format = request.format === "json" ? "json" : "markdown";
+      const data =
+        format === "json"
+          ? await JargonVault.exportJargonAsJson()
+          : await JargonVault.exportJargonAsMarkdown();
+      return { success: true, format, data };
+    },
+    // 导入生词本
+    [MESSAGE_TYPES.IMPORT_JARGON]: async (request) => {
+      const result = await JargonVault.importJargonFromJson(
+        request.jsonStr || request.data
+      );
+      return result;
     },
     // 测试 API 连接
     testApiConnection: async (request) => {
