@@ -25,6 +25,11 @@ export class ContextMenuManager {
           contexts: ["selection"],
         });
         browser.contextMenus.create({
+          id: "readPageInSidepanel",
+          title: "📄 通读当前网页 (人话速读)",
+          contexts: ["page"],
+        });
+        browser.contextMenus.create({
           id: "openSidepanel",
           title: "打开人话侧边栏",
           contexts: ["page", "action"],

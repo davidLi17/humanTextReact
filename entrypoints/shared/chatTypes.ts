@@ -13,6 +13,14 @@ export interface ChatMessage {
   reasoningContent?: string;
   hasReasoning?: boolean;
   images?: ChatImageContent[];
+  pageMeta?: {
+    title: string;
+    url: string;
+    wordCount?: number;
+    excerpt?: string;
+    isWebPageReading?: boolean;
+  };
+  suggestedQuestions?: string[];
   createdAt: number;
   status?: "pending" | "streaming" | "completed" | "error";
   errorMessage?: string;

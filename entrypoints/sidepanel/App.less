@@ -44,7 +44,7 @@
       .session-sub-title {
         font-size: 11px;
         color: var(--color-text-tertiary);
-        max-width: 140px;
+        max-width: 130px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -78,6 +78,40 @@
   }
 }
 
+/* 顶部通读网页按钮 */
+.web-read-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  border: 1px solid var(--color-primary);
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(99, 102, 241, 0.14) 100%);
+  color: var(--color-primary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.15) 0%, rgba(99, 102, 241, 0.22) 100%);
+    transform: translateY(-0.5px);
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.15);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.loading {
+    border-color: var(--color-border);
+    color: var(--color-text-tertiary);
+    background: var(--color-bg-secondary);
+  }
+}
+
 .thinking-toggle-btn {
   display: flex;
   align-items: center;
@@ -102,6 +136,42 @@
     color: var(--color-primary);
     border-color: var(--color-primary);
     font-weight: 500;
+  }
+}
+
+/* 顶部提示条 */
+.notification-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid transparent;
+  animation: fadeIn 0.2s ease;
+
+  &.error-banner {
+    background-color: #fef2f2;
+    color: #b91c1c;
+    border-bottom-color: #fecaca;
+  }
+
+  .banner-text {
+    flex: 1;
+    line-height: 1.4;
+  }
+
+  .banner-close-btn {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    opacity: 0.7;
+
+    &:hover {
+      opacity: 1;
+    }
   }
 }
 
@@ -233,33 +303,135 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  padding: 20px 8px;
+  padding: 16px 8px;
 
   .empty-icon {
-    width: 60px;
-    height: 60px;
-    border-radius: 30px;
+    width: 52px;
+    height: 52px;
+    border-radius: 26px;
     background: linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%);
     color: var(--color-primary);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
 
   .empty-title {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     color: var(--color-text-primary);
   }
 
   .empty-desc {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--color-text-tertiary);
-    max-width: 280px;
+    max-width: 300px;
     line-height: 1.5;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
+  }
+
+  /* 通读当前网页英雄卡片 */
+  .web-read-hero-card {
+    width: 100%;
+    max-width: 360px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(168, 85, 247, 0.08) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 12px;
+    padding: 14px 16px;
+    text-align: left;
+    box-sizing: border-box;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    margin-bottom: 16px;
+
+    .hero-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+
+      .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 10px;
+        background-color: var(--color-primary);
+        color: #fff;
+        font-weight: 500;
+      }
+
+      .hero-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+      }
+    }
+
+    .hero-desc {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--color-text-secondary);
+      margin: 0 0 12px;
+
+      strong {
+        color: var(--color-primary);
+        font-weight: 600;
+      }
+    }
+
+    .hero-action-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: none;
+      background-color: var(--color-primary);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
+      transition: all 0.15s ease;
+
+      &:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+      }
+
+      &:disabled {
+        opacity: 0.7;
+        cursor: not-allowed;
+      }
+    }
+  }
+
+  .quick-prompts-divider {
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+
+    &::before,
+    &::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background-color: var(--color-border-subtle);
+    }
+
+    span {
+      padding: 0 10px;
+      font-size: 11px;
+      color: var(--color-text-tertiary);
+    }
   }
 
   .quick-prompts-grid {
@@ -274,7 +446,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 9px 12px;
     border-radius: 8px;
     border: 1px solid var(--color-border-subtle);
     background-color: var(--color-bg-secondary);
@@ -293,6 +465,36 @@
   }
 }
 
+/* 提取正文中的反馈卡片 */
+.extract-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background-color: var(--color-primary-light);
+  border: 1px dashed var(--color-primary);
+  color: var(--color-primary);
+  margin-bottom: 10px;
+  animation: fadeIn 0.2s ease;
+
+  .loading-text-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .loading-title {
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .loading-sub {
+      font-size: 11px;
+      opacity: 0.85;
+    }
+  }
+}
+
 /* 消息气泡行 */
 .chat-bubble-row {
   display: flex;
@@ -304,7 +506,7 @@
 
     .bubble-content-wrapper {
       align-items: flex-end;
-      max-width: 85%;
+      max-width: 90%;
     }
   }
 
@@ -313,7 +515,7 @@
 
     .bubble-content-wrapper {
       align-items: flex-start;
-      max-width: 90%;
+      max-width: 95%;
     }
   }
 }
@@ -338,6 +540,7 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  width: 100%;
 }
 
 .bubble-card {
@@ -346,6 +549,7 @@
   font-size: 14px;
   line-height: 1.6;
   word-break: break-word;
+  box-sizing: border-box;
 
   &.user-card {
     background-color: var(--color-primary);
@@ -362,6 +566,7 @@
     border: 1px solid var(--color-border-subtle);
     color: var(--color-text-primary);
     border-bottom-left-radius: 2px;
+    width: 100%;
   }
 
   &.error-card {
@@ -371,10 +576,112 @@
   }
 }
 
+/* 网页速读专有 User 卡片 */
+.webpage-user-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .webpage-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.2);
+    width: fit-content;
+  }
+
+  .webpage-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .webpage-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    opacity: 0.9;
+
+    .webpage-url-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      color: #fff;
+      text-decoration: underline;
+      max-width: 160px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .webpage-words-tag {
+      background-color: rgba(255, 255, 255, 0.15);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+  }
+}
+
+/* 深度追问指引 Pills */
+.suggested-questions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  width: 100%;
+  animation: fadeIn 0.3s ease;
+
+  .suggested-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--color-text-tertiary);
+    font-weight: 500;
+  }
+
+  .suggested-pills-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .suggested-pill-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 14px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+      background-color: var(--color-primary-light);
+      transform: translateY(-0.5px);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+  }
+}
+
 .streaming-dots {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   color: var(--color-text-tertiary);
   font-size: 13px;
 
@@ -524,6 +831,19 @@
     &:hover {
       background-color: #fef2f2;
     }
+  }
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 

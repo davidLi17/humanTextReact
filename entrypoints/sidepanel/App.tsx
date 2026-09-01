@@ -19,10 +19,19 @@ import {
   ChatMessage,
   ChatSession,
 } from "@/entrypoints/shared/chatTypes";
+import {
+  buildWebReadingUserPrompt,
+  extractSuggestedQuestions,
+  WEB_READING_SYSTEM_PROMPT,
+  WebPageMetadata,
+} from "@/entrypoints/shared/webReadingPrompt";
+import {
+  extractActiveTabContent,
+  getActiveTab,
+} from "@/entrypoints/shared/sidepanelUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import {
-  copyCode,
   initializeCodeCopy,
   parseMarkdown,
 } from "@/shared/utils/markdown";
@@ -38,6 +47,12 @@ import {
   SettingTwo,
   Thunderbolt,
   Brain,
+  LinkOne,
+  Topic,
+  BookOne,
+  Tips,
+  LoadingOne,
+  CheckOne,
 } from "@icon-park/react";
 import React, { useEffect, useRef, useState } from "react";
 import "./App.less";
@@ -71,6 +86,9 @@ export default function SidePanelApp() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [inputText, setInputText] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [isExtractingPage, setIsExtractingPage] = useState<boolean>(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(false);
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
 
@@ -189,28 +207,39 @@ export default function SidePanelApp() {
     }
   };
 
-  // 检查是否有来自右键菜单的待翻译文本
+  // 检查是否有待翻译文本或通读请求
   useEffect(() => {
-    const checkPendingText = async () => {
+    const checkPendingActions = async () => {
       try {
         if (!browser?.storage?.local) return;
-        const stored = await browser.storage.local.get("pendingSidepanelText");
-        const pending = stored.pendingSidepanelText as
+        const stored = await browser.storage.local.get([
+          "pendingSidepanelText",
+          "pendingWebPageRead",
+        ]);
+
+        const pendingText = stored.pendingSidepanelText as
           | { text: string; timestamp: number }
           | undefined;
-
-        if (pending && Date.now() - pending.timestamp < 10000) {
-          setInputText(pending.text);
+        if (pendingText && Date.now() - pendingText.timestamp < 10000) {
+          setInputText(pendingText.text);
           await browser.storage.local.remove("pendingSidepanelText");
           inputRef.current?.focus();
         }
+
+        const pendingRead = stored.pendingWebPageRead as
+          | { timestamp: number; tabId?: number }
+          | undefined;
+        if (pendingRead && Date.now() - pendingRead.timestamp < 10000) {
+          await browser.storage.local.remove("pendingWebPageRead");
+          void handleReadCurrentPage();
+        }
       } catch (error) {
-        logger.error("检查待翻译文本失败:", error);
+        logger.error("检查待处理操作失败:", error);
       }
     };
 
-    void checkPendingText();
-  }, []);
+    void checkPendingActions();
+  }, [sessions, activeSessionId]);
 
   // 监听后台消息与流式更新
   useEffect(() => {
@@ -218,6 +247,11 @@ export default function SidePanelApp() {
       if (message.action === "sendToSidepanel" && message.text) {
         setInputText(message.text);
         inputRef.current?.focus();
+        return;
+      }
+
+      if (message.action === MESSAGE_TYPES.READ_WEB_PAGE) {
+        void handleReadCurrentPage();
         return;
       }
 
@@ -240,13 +274,20 @@ export default function SidePanelApp() {
             const lastMsg = messages[messages.length - 1];
 
             if (lastMsg && lastMsg.role === "assistant") {
+              const updatedContent = content ?? lastMsg.content;
+              const suggestedQuestions =
+                done && updatedContent
+                  ? extractSuggestedQuestions(updatedContent)
+                  : lastMsg.suggestedQuestions;
+
               const updatedMsg: ChatMessage = {
                 ...lastMsg,
-                content: content ?? lastMsg.content,
+                content: updatedContent,
                 reasoningContent:
                   reasoningContent ?? lastMsg.reasoningContent,
                 hasReasoning:
                   Boolean(reasoningContent) || lastMsg.hasReasoning,
+                suggestedQuestions,
                 status: error
                   ? "error"
                   : done
@@ -286,12 +327,128 @@ export default function SidePanelApp() {
   // 自动滚动到消息流底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.messages, isStreaming]);
+  }, [activeSession?.messages, isStreaming, isExtractingPage]);
 
-  // 发送消息处理
+  // 通读当前网页核心逻辑
+  const handleReadCurrentPage = async () => {
+    if (isStreaming || isExtractingPage) return;
+
+    setExtractError(null);
+    setIsExtractingPage(true);
+
+    try {
+      const activeTab = await getActiveTab();
+      logger.info("开始提取当前网页正文", { tabId: activeTab?.id, url: activeTab?.url });
+
+      const extractResult = await extractActiveTabContent();
+
+      if (!extractResult.success || !extractResult.data) {
+        setExtractError(
+          extractResult.error || "无法提取当前网页正文，请确保网页已加载并重试。"
+        );
+        setIsExtractingPage(false);
+        return;
+      }
+
+      const pageData: WebPageMetadata = extractResult.data;
+      if (!pageData.content || pageData.content.trim().length < 15) {
+        setExtractError(
+          "当前网页正文内容过少或受到防盗链限制，未能提取到有效长文。"
+        );
+        setIsExtractingPage(false);
+        return;
+      }
+
+      // 如果当前会话已有消息，为网页通读创建一个干净的新会话
+      let targetSession = activeSession;
+      if (activeSession && activeSession.messages.length > 0) {
+        targetSession = createNewSession(`速读: ${pageData.title.slice(0, 12)}...`);
+        const updatedSessions = [targetSession, ...sessions];
+        setSessions(updatedSessions);
+        setActiveSessionId(targetSession.id);
+        void saveSessionsToStorage(updatedSessions);
+        void saveActiveSessionId(targetSession.id);
+      } else if (targetSession) {
+        targetSession.title = `速读: ${pageData.title.slice(0, 12)}...`;
+      }
+
+      const userMessageId = createRequestId();
+      const assistantMessageId = createRequestId();
+      const currentRequestId = createRequestId();
+      activeRequestIdRef.current = currentRequestId;
+
+      // 组装代表“通读网页”的用户消息卡片
+      const userMessage: ChatMessage = {
+        id: userMessageId,
+        role: "user",
+        content: `通读网页: 《${pageData.title}》`,
+        pageMeta: {
+          title: pageData.title,
+          url: pageData.url,
+          wordCount: pageData.wordCount,
+          isWebPageReading: true,
+        },
+        createdAt: Date.now(),
+        status: "completed",
+      };
+
+      const assistantMessage: ChatMessage = {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        reasoningContent: "",
+        hasReasoning: false,
+        createdAt: Date.now(),
+        status: "streaming",
+      };
+
+      const updatedSession: ChatSession = {
+        ...targetSession,
+        title: `速读: ${pageData.title.slice(0, 12)}...`,
+        messages: [...targetSession.messages, userMessage, assistantMessage],
+        updatedAt: Date.now(),
+      };
+
+      const nextSessions = sessions.map((s) =>
+        s.id === targetSession.id ? updatedSession : s
+      );
+      if (!nextSessions.some((s) => s.id === targetSession.id)) {
+        nextSessions.unshift(updatedSession);
+      }
+      setSessions(nextSessions);
+      void saveSessionsToStorage(nextSessions);
+
+      setIsExtractingPage(false);
+      setIsStreaming(true);
+
+      // 构建针对网页长文通读的高质量结构化 Prompt
+      const userPrompt = buildWebReadingUserPrompt(pageData);
+      const messagesPayload = [
+        { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
+        { role: "user" as const, content: userPrompt },
+      ];
+
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId: targetSession.id,
+        messages: messagesPayload,
+        thinkingEnabled,
+      });
+    } catch (error: any) {
+      logger.error("通读网页请求失败:", error);
+      setIsExtractingPage(false);
+      setIsStreaming(false);
+      setExtractError(error?.message || "通读网页请求失败，请检查网络或 API 设置");
+    }
+  };
+
+  // 发送常规消息或追问
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? inputText).trim();
-    if (!text || isStreaming || !activeSession) return;
+    if (!text || isStreaming || isExtractingPage || !activeSession) return;
 
     const userMessageId = createRequestId();
     const assistantMessageId = createRequestId();
@@ -316,12 +473,13 @@ export default function SidePanelApp() {
       status: "streaming",
     };
 
-    // 自动更新会话标题（若为第一条消息）
+    // 自动更新会话标题（若为第一条消息且非网页速读）
     const isFirstUserMessage =
       activeSession.messages.filter((m) => m.role === "user").length === 0;
-    const newTitle = isFirstUserMessage
-      ? text.slice(0, 18) + (text.length > 18 ? "..." : "")
-      : activeSession.title;
+    const newTitle =
+      isFirstUserMessage && !activeSession.title.startsWith("速读:")
+        ? text.slice(0, 18) + (text.length > 18 ? "..." : "")
+        : activeSession.title;
 
     const updatedSession: ChatSession = {
       ...activeSession,
@@ -338,9 +496,10 @@ export default function SidePanelApp() {
 
     setInputText("");
     setIsStreaming(true);
+    setExtractError(null);
 
     try {
-      // 构建符合 OpenAI 标准的上下文 messages
+      // 构建多轮上下文：如果会话中有网页通读，保留其背景，传递完整历史
       const historyPayload = [
         ...activeSession.messages.map((m) => ({
           role: m.role,
@@ -408,6 +567,7 @@ export default function SidePanelApp() {
     void saveSessionsToStorage(updated);
     void saveActiveSessionId(fresh.id);
     setShowDrawer(false);
+    setExtractError(null);
     inputRef.current?.focus();
   };
 
@@ -432,9 +592,11 @@ export default function SidePanelApp() {
   };
 
   // 复制文本
-  const handleCopy = async (text: string) => {
+  const handleCopy = async (id: string, text: string) => {
     try {
       await navigator.clipboard.writeText(text);
+      setCopySuccessId(id);
+      setTimeout(() => setCopySuccessId(null), 2000);
       return true;
     } catch (err) {
       logger.error("复制失败:", err);
@@ -472,14 +634,30 @@ export default function SidePanelApp() {
         </div>
 
         <div className="header-right">
+          {/* 顶部一键通读网页按钮 */}
+          <button
+            type="button"
+            className={`web-read-btn ${isExtractingPage ? "loading" : ""}`}
+            title="一键提取并人话通读当前打开的网页"
+            disabled={isStreaming || isExtractingPage}
+            onClick={handleReadCurrentPage}
+          >
+            {isExtractingPage ? (
+              <LoadingOne theme="outline" size="15" className="spin-icon" />
+            ) : (
+              <BookOne theme="outline" size="15" />
+            )}
+            <span>通读网页</span>
+          </button>
+
           <button
             type="button"
             className={`thinking-toggle-btn ${thinkingEnabled ? "active" : ""}`}
             title={thinkingEnabled ? "深度思考已开启" : "开启深度思考 (思维链)"}
             onClick={() => setThinkingEnabled((prev) => !prev)}
           >
-            <Brain theme="outline" size="16" />
-            <span>深度思考</span>
+            <Brain theme="outline" size="15" />
+            <span>思考</span>
           </button>
 
           <button
@@ -506,6 +684,21 @@ export default function SidePanelApp() {
           </button>
         </div>
       </header>
+
+      {/* 提取网页错误提示条 */}
+      {extractError && (
+        <div className="notification-bar error-banner">
+          <Tips theme="outline" size="16" />
+          <span className="banner-text">{extractError}</span>
+          <button
+            type="button"
+            className="banner-close-btn"
+            onClick={() => setExtractError(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* 会话历史抽屉 */}
       {showDrawer && (
@@ -556,15 +749,52 @@ export default function SidePanelApp() {
 
       {/* 消息对话主区域 */}
       <main className="chat-content">
+        {/* 空状态展示 */}
         {(!activeSession || activeSession.messages.length === 0) && (
           <div className="empty-state">
             <div className="empty-icon">
-              <Thunderbolt theme="filled" size="36" />
+              <Thunderbolt theme="filled" size="32" />
             </div>
-            <h2 className="empty-title">有啥黑话看不懂？</h2>
+            <h2 className="empty-title">人话翻译与长文通读</h2>
             <p className="empty-desc">
-              在网页中划词或者直接输入，支持长难句解析、多轮追问与反向润色。
+              一键提取网页长文输出接地气速读报告，支持多轮深度追问与黑话翻译。
             </p>
+
+            {/* 突出展示的一键通读当前网页卡片 */}
+            <div className="web-read-hero-card">
+              <div className="hero-card-header">
+                <div className="hero-badge">
+                  <BookOne theme="filled" size="14" />
+                  <span>核心功能</span>
+                </div>
+                <h3 className="hero-title">📄 一键人话通读当前网页</h3>
+              </div>
+              <p className="hero-desc">
+                智能提取正文并一键输出：<strong>💡大白话总览</strong> + <strong>📖核心黑话速查表</strong> + <strong>🎯要点与行动项</strong> + <strong>💬深度追问指引</strong>。
+              </p>
+              <button
+                type="button"
+                className="hero-action-btn"
+                disabled={isStreaming || isExtractingPage}
+                onClick={handleReadCurrentPage}
+              >
+                {isExtractingPage ? (
+                  <>
+                    <LoadingOne theme="outline" size="16" className="spin-icon" />
+                    <span>正在提取网页正文并生成人话速读...</span>
+                  </>
+                ) : (
+                  <>
+                    <BookOne theme="outline" size="16" />
+                    <span>立即通读当前网页</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="quick-prompts-divider">
+              <span>或从常用黑话翻译开始</span>
+            </div>
 
             <div className="quick-prompts-grid">
               {QUICK_PROMPTS.map((prompt, index) => (
@@ -582,6 +812,18 @@ export default function SidePanelApp() {
           </div>
         )}
 
+        {/* 正在提取正文时的加载提示 */}
+        {isExtractingPage && (
+          <div className="extract-loading-card">
+            <LoadingOne theme="outline" size="20" className="spin-icon" />
+            <div className="loading-text-group">
+              <span className="loading-title">正在提取网页正文与元数据...</span>
+              <span className="loading-sub">已去除导航、侧边栏和广告干扰</span>
+            </div>
+          </div>
+        )}
+
+        {/* 对话消息流 */}
         {activeSession?.messages.map((message) => (
           <div
             key={message.id}
@@ -604,14 +846,46 @@ export default function SidePanelApp() {
                   />
                 )}
 
-              {/* 主内容 */}
+              {/* 主内容卡片 */}
               <div
                 className={`bubble-card ${
                   message.role === "user" ? "user-card" : "assistant-card"
                 } ${message.status === "error" ? "error-card" : ""}`}
               >
                 {message.role === "user" ? (
-                  <div className="user-text">{message.content}</div>
+                  message.pageMeta?.isWebPageReading ? (
+                    // 专门针对网页速读的 User 卡片展示
+                    <div className="webpage-user-card">
+                      <div className="webpage-badge">
+                        <BookOne theme="filled" size="13" />
+                        <span>网页通读</span>
+                      </div>
+                      <div className="webpage-title" title={message.pageMeta.title}>
+                        {message.pageMeta.title}
+                      </div>
+                      <div className="webpage-meta-row">
+                        {message.pageMeta.url && (
+                          <a
+                            href={message.pageMeta.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="webpage-url-link"
+                            title={message.pageMeta.url}
+                          >
+                            <LinkOne theme="outline" size="12" />
+                            <span>{new URL(message.pageMeta.url).hostname}</span>
+                          </a>
+                        )}
+                        {Boolean(message.pageMeta.wordCount) && (
+                          <span className="webpage-words-tag">
+                            约 {message.pageMeta.wordCount} 字
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="user-text">{message.content}</div>
+                  )
                 ) : (
                   <>
                     {message.content ? (
@@ -626,7 +900,7 @@ export default function SidePanelApp() {
                         <span></span>
                         <span></span>
                         <span></span>
-                        正在说人话...
+                        正在提炼人话速读报告...
                       </div>
                     ) : null}
 
@@ -639,20 +913,55 @@ export default function SidePanelApp() {
                 )}
 
                 {/* 卡片底部操作 */}
-                {message.content && (
+                {message.content && message.role === "assistant" && (
                   <div className="bubble-footer">
                     <button
                       type="button"
                       className="action-link-btn"
-                      title="复制内容"
-                      onClick={() => handleCopy(message.content)}
+                      title="复制通读报告"
+                      onClick={() => handleCopy(message.id, message.content)}
                     >
-                      <Copy theme="outline" size="13" />
-                      <span>复制</span>
+                      {copySuccessId === message.id ? (
+                        <>
+                          <CheckOne theme="filled" size="13" fill="#10b981" />
+                          <span style={{ color: "#10b981" }}>已复制</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy theme="outline" size="13" />
+                          <span>复制报告</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
               </div>
+
+              {/* 深度追问指引 Pills (可在通读或回答后一键追问) */}
+              {message.role === "assistant" &&
+                message.status === "completed" &&
+                message.suggestedQuestions &&
+                message.suggestedQuestions.length > 0 && (
+                  <div className="suggested-questions-container">
+                    <div className="suggested-header">
+                      <Topic theme="outline" size="13" />
+                      <span>继续深度追问：</span>
+                    </div>
+                    <div className="suggested-pills-list">
+                      {message.suggestedQuestions.map((question: string, qIdx: number) => (
+                        <button
+                          type="button"
+                          key={qIdx}
+                          className="suggested-pill-btn"
+                          disabled={isStreaming}
+                          onClick={() => handleSendMessage(question)}
+                        >
+                          <span>{question}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
             </div>
           </div>
         ))}
@@ -666,7 +975,7 @@ export default function SidePanelApp() {
           <textarea
             ref={inputRef}
             className="chat-textarea"
-            placeholder="输入术语、长难句或继续追问 (Enter 发送，Shift+Enter 换行)..."
+            placeholder="输入追问、黑话术语或指令 (Enter 发送，Shift+Enter 换行)..."
             value={inputText}
             rows={2}
             onChange={(e) => setInputText(e.target.value)}
