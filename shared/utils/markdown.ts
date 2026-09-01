@@ -137,12 +137,12 @@ function parseBlockquote(html: string): string {
   let quoteContent: string[] = [];
 
   for (const line of lines) {
-    if (line.match(/^>\s/)) {
+    if (line.match(/^(&gt;|>)\s/)) {
       if (!inQuote) {
         inQuote = true;
         quoteContent = [];
       }
-      quoteContent.push(line.replace(/^>\s?/, ""));
+      quoteContent.push(line.replace(/^(&gt;|>)\s?/, ""));
     } else {
       if (inQuote) {
         result.push(
