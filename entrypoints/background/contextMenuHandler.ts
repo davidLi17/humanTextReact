@@ -28,6 +28,25 @@ export class ContextMenuHandler {
       timestamp: new Date().toISOString(),
     });
 
+    if (info.menuItemId === "readPageInSidepanel" && tab?.windowId) {
+      try {
+        await openSidePanel({ windowId: tab.windowId });
+        await browser.storage.local.set({
+          pendingWebPageRead: {
+            timestamp: Date.now(),
+            tabId: tab.id,
+          },
+        });
+        void MessageUtils.sendRuntimeMessage({
+          action: "readCurrentWebPage",
+          tabId: tab.id,
+        });
+      } catch (error) {
+        logger.error("❌ [ContextMenuHandler] 触发侧边栏通读网页失败:", error);
+      }
+      return;
+    }
+
     if (
       (info.menuItemId === "openSidepanel" ||
         info.menuItemId === "openSidepanelTranslate") &&

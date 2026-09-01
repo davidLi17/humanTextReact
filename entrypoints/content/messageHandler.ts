@@ -5,6 +5,7 @@ import {
 import { createLogger } from "@/entrypoints/shared/logger";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import { PopupManager } from "./popupManager";
+import { extractPageData } from "./pageExtractor";
 
 const logger = createLogger("content-message", "📨");
 
@@ -45,6 +46,10 @@ export class MessageHandler {
           logger.info("处理获取选中文本");
           return this.handleGetSelectedText(sendResponse);
 
+        case MESSAGE_TYPES.EXTRACT_PAGE_CONTENT:
+          logger.info("处理提取网页正文请求");
+          return this.handleExtractPageContent(sendResponse);
+
         default:
           logger.warn("未知操作:", request.action);
           sendResponse({ success: false, error: "未知操作" });
@@ -56,6 +61,31 @@ export class MessageHandler {
       return true;
     }
   };
+
+  private handleExtractPageContent(
+    sendResponse: (response?: any) => void
+  ): boolean {
+    try {
+      const pageData = extractPageData(document, window);
+      logger.log("📄 [Content MessageHandler] 提取网页正文成功", {
+        title: pageData.title,
+        url: pageData.url,
+        wordCount: pageData.wordCount,
+        contentLength: pageData.content.length,
+      });
+      sendResponse({
+        success: true,
+        data: pageData,
+      });
+    } catch (err: any) {
+      logger.error("❌ [Content MessageHandler] 提取正文失败:", err);
+      sendResponse({
+        success: false,
+        error: err?.message || "提取网页内容失败",
+      });
+    }
+    return true;
+  }
 
   private handleShowTranslationPopup = (
     request: TranslationRequest,
