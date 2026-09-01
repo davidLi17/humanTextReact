@@ -29,8 +29,13 @@ import {
   extractActiveTabContent,
   getActiveTab,
 } from "@/entrypoints/shared/sidepanelUtils";
+import {
+  inferJargonDetails,
+  saveJargonItem,
+} from "@/entrypoints/shared/jargonStorage";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
+import JargonVaultPanel from "./components/JargonVaultPanel";
 import {
   initializeCodeCopy,
   parseMarkdown,
@@ -53,6 +58,7 @@ import {
   Tips,
   LoadingOne,
   CheckOne,
+  Star,
 } from "@icon-park/react";
 import React, { useEffect, useRef, useState } from "react";
 import "./App.less";
@@ -92,12 +98,28 @@ export default function SidePanelApp() {
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(false);
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
 
+  // 界面 Tab 切换："chat"（对话）与 "vault"（黑话生词本）
+  const [activeView, setActiveView] = useState<"chat" | "vault">("chat");
+  // 抽屉内部 Tab 切换
+  const [drawerTab, setDrawerTab] = useState<"history" | "vault">("history");
+  // 已存入生词本的消息 ID 集合
+  const [savedVaultMessageIds, setSavedVaultMessageIds] = useState<Set<string>>(
+    new Set()
+  );
+  // 全局 Toast 提示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   const activeRequestIdRef = useRef<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
 
   // 初始化代码复制与日志
   useEffect(() => {
@@ -221,6 +243,7 @@ export default function SidePanelApp() {
           | { text: string; timestamp: number }
           | undefined;
         if (pendingText && Date.now() - pendingText.timestamp < 10000) {
+          setActiveView("chat");
           setInputText(pendingText.text);
           await browser.storage.local.remove("pendingSidepanelText");
           inputRef.current?.focus();
@@ -230,6 +253,7 @@ export default function SidePanelApp() {
           | { timestamp: number; tabId?: number }
           | undefined;
         if (pendingRead && Date.now() - pendingRead.timestamp < 10000) {
+          setActiveView("chat");
           await browser.storage.local.remove("pendingWebPageRead");
           void handleReadCurrentPage();
         }
@@ -245,12 +269,14 @@ export default function SidePanelApp() {
   useEffect(() => {
     const messageListener = (message: any) => {
       if (message.action === "sendToSidepanel" && message.text) {
+        setActiveView("chat");
         setInputText(message.text);
         inputRef.current?.focus();
         return;
       }
 
       if (message.action === MESSAGE_TYPES.READ_WEB_PAGE) {
+        setActiveView("chat");
         void handleReadCurrentPage();
         return;
       }
@@ -326,19 +352,25 @@ export default function SidePanelApp() {
 
   // 自动滚动到消息流底部
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeSession?.messages, isStreaming, isExtractingPage]);
+    if (activeView === "chat") {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [activeSession?.messages, isStreaming, isExtractingPage, activeView]);
 
   // 通读当前网页核心逻辑
   const handleReadCurrentPage = async () => {
     if (isStreaming || isExtractingPage) return;
 
+    setActiveView("chat");
     setExtractError(null);
     setIsExtractingPage(true);
 
     try {
       const activeTab = await getActiveTab();
-      logger.info("开始提取当前网页正文", { tabId: activeTab?.id, url: activeTab?.url });
+      logger.info("开始提取当前网页正文", {
+        tabId: activeTab?.id,
+        url: activeTab?.url,
+      });
 
       const extractResult = await extractActiveTabContent();
 
@@ -362,7 +394,9 @@ export default function SidePanelApp() {
       // 如果当前会话已有消息，为网页通读创建一个干净的新会话
       let targetSession = activeSession;
       if (activeSession && activeSession.messages.length > 0) {
-        targetSession = createNewSession(`速读: ${pageData.title.slice(0, 12)}...`);
+        targetSession = createNewSession(
+          `速读: ${pageData.title.slice(0, 12)}...`
+        );
         const updatedSessions = [targetSession, ...sessions];
         setSessions(updatedSessions);
         setActiveSessionId(targetSession.id);
@@ -441,7 +475,9 @@ export default function SidePanelApp() {
       logger.error("通读网页请求失败:", error);
       setIsExtractingPage(false);
       setIsStreaming(false);
-      setExtractError(error?.message || "通读网页请求失败，请检查网络或 API 设置");
+      setExtractError(
+        error?.message || "通读网页请求失败，请检查网络或 API 设置"
+      );
     }
   };
 
@@ -450,6 +486,7 @@ export default function SidePanelApp() {
     const text = (textToSend ?? inputText).trim();
     if (!text || isStreaming || isExtractingPage || !activeSession) return;
 
+    setActiveView("chat");
     const userMessageId = createRequestId();
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
@@ -499,7 +536,6 @@ export default function SidePanelApp() {
     setExtractError(null);
 
     try {
-      // 构建多轮上下文：如果会话中有网页通读，保留其背景，传递完整历史
       const historyPayload = [
         ...activeSession.messages.map((m) => ({
           role: m.role,
@@ -529,7 +565,8 @@ export default function SidePanelApp() {
             msgs[msgs.length - 1] = {
               ...last,
               status: "error",
-              errorMessage: error?.message || "请求发送失败，请检查网络或设置",
+              errorMessage:
+                error?.message || "请求发送失败，请检查网络或设置",
             };
           }
           return { ...s, messages: msgs };
@@ -566,6 +603,7 @@ export default function SidePanelApp() {
     setActiveSessionId(fresh.id);
     void saveSessionsToStorage(updated);
     void saveActiveSessionId(fresh.id);
+    setActiveView("chat");
     setShowDrawer(false);
     setExtractError(null);
     inputRef.current?.focus();
@@ -604,6 +642,52 @@ export default function SidePanelApp() {
     }
   };
 
+  // 存入黑话生词本
+  const handleSaveMessageToVault = async (
+    message: ChatMessage,
+    session?: ChatSession
+  ) => {
+    if (!message.content) return;
+
+    // 寻找上一条 user 消息作为黑话术语
+    const msgIdx =
+      session?.messages.findIndex((m) => m.id === message.id) ?? -1;
+    let term = "黑话词条";
+    let sourceUrl: string | undefined;
+
+    if (msgIdx > 0 && session) {
+      const prevUserMsg = session.messages[msgIdx - 1];
+      if (prevUserMsg && prevUserMsg.role === "user") {
+        if (prevUserMsg.pageMeta?.title) {
+          term = prevUserMsg.pageMeta.title;
+          sourceUrl = prevUserMsg.pageMeta.url;
+        } else {
+          term = prevUserMsg.content;
+        }
+      }
+    }
+
+    const inferred = inferJargonDetails(term, message.content, sourceUrl);
+
+    try {
+      await saveJargonItem({
+        term: inferred.term,
+        explanation: inferred.explanation,
+        analogy: inferred.analogy,
+        category: inferred.category,
+        tags: inferred.tags,
+        isStarred: true,
+        sourceUrl,
+        sourceContext: term,
+      });
+
+      setSavedVaultMessageIds((prev) => new Set([...prev, message.id]));
+      showToast(`⭐ 已将 "${inferred.term}" 存入黑话生词本！`);
+    } catch (err) {
+      logger.error("存入生词本失败:", err);
+    }
+  };
+
   // 快捷按键处理
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -620,16 +704,47 @@ export default function SidePanelApp() {
           <button
             type="button"
             className="icon-btn"
-            title="会话列表"
+            title="会话与生词本抽屉"
             onClick={() => setShowDrawer((prev) => !prev)}
           >
             <History theme="outline" size="18" />
           </button>
           <div className="header-title-wrapper">
             <span className="header-title">人话翻译器</span>
-            <span className="session-sub-title" title={activeSession?.title}>
-              {activeSession?.title || "新对话"}
+            <span
+              className="session-sub-title"
+              title={
+                activeView === "vault"
+                  ? "黑话生词本"
+                  : activeSession?.title || "新对话"
+              }
+            >
+              {activeView === "vault"
+                ? "📚 黑话生词本"
+                : activeSession?.title || "新对话"}
             </span>
+          </div>
+        </div>
+
+        {/* 顶部 Tab 切换（对话 / 生词本） */}
+        <div className="header-center">
+          <div className="view-switch-pills">
+            <button
+              type="button"
+              className={`view-pill ${activeView === "chat" ? "active" : ""}`}
+              onClick={() => setActiveView("chat")}
+            >
+              <Message theme="outline" size="13" />
+              <span>对话</span>
+            </button>
+            <button
+              type="button"
+              className={`view-pill ${activeView === "vault" ? "active" : ""}`}
+              onClick={() => setActiveView("vault")}
+            >
+              <BookOne theme="outline" size="13" />
+              <span>生词本</span>
+            </button>
           </div>
         </div>
 
@@ -700,326 +815,447 @@ export default function SidePanelApp() {
         </div>
       )}
 
-      {/* 会话历史抽屉 */}
+      {/* 抽屉通知 Toast */}
+      {toastMessage && (
+        <div className="vault-toast-banner">
+          <Tips theme="outline" size="14" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* 顶部抽屉（包含对话历史与生词本双 Tab） */}
       {showDrawer && (
         <div className="drawer-overlay" onClick={() => setShowDrawer(false)}>
           <div className="drawer-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="drawer-header">
-              <span className="drawer-title">历史会话</span>
+            <div className="drawer-tabs-header">
               <button
                 type="button"
-                className="new-session-cta"
-                onClick={handleCreateNewSession}
+                className={`drawer-tab-btn ${
+                  drawerTab === "history" ? "active" : ""
+                }`}
+                onClick={() => setDrawerTab("history")}
               >
-                <Add theme="outline" size="16" />
-                <span>新建会话</span>
+                <Message theme="outline" size="14" />
+                <span>💬 对话历史</span>
+              </button>
+              <button
+                type="button"
+                className={`drawer-tab-btn ${
+                  drawerTab === "vault" ? "active" : ""
+                }`}
+                onClick={() => setDrawerTab("vault")}
+              >
+                <BookOne theme="outline" size="14" />
+                <span>📚 黑话生词本</span>
               </button>
             </div>
-            <div className="drawer-list">
-              {sessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`drawer-item ${
-                    session.id === activeSessionId ? "active" : ""
-                  }`}
+
+            {drawerTab === "history" ? (
+              <>
+                <div className="drawer-header">
+                  <span className="drawer-title">历史会话</span>
+                  <button
+                    type="button"
+                    className="new-session-cta"
+                    onClick={handleCreateNewSession}
+                  >
+                    <Add theme="outline" size="14" />
+                    <span>新建会话</span>
+                  </button>
+                </div>
+                <div className="drawer-list">
+                  {sessions.map((session) => (
+                    <div
+                      key={session.id}
+                      className={`drawer-item ${
+                        session.id === activeSessionId && activeView === "chat"
+                          ? "active"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        setActiveSessionId(session.id);
+                        void saveActiveSessionId(session.id);
+                        setActiveView("chat");
+                        setShowDrawer(false);
+                      }}
+                    >
+                      <Message
+                        theme="outline"
+                        size="16"
+                        className="item-icon"
+                      />
+                      <span className="item-title" title={session.title}>
+                        {session.title}
+                      </span>
+                      <button
+                        type="button"
+                        className="delete-item-btn"
+                        title="删除会话"
+                        onClick={(e) => handleDeleteSession(session.id, e)}
+                      >
+                        <Delete theme="outline" size="14" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="drawer-vault-shortcut">
+                <BookOne
+                  theme="two-tone"
+                  size="36"
+                  fill={["#6366f1", "#e0e7ff"]}
+                  className="vault-shortcut-icon"
+                />
+                <span className="vault-shortcut-desc">
+                  收录收藏的大厂黑话、AI技术与职场通俗人话解释。
+                </span>
+                <button
+                  type="button"
+                  className="vault-open-btn"
                   onClick={() => {
-                    setActiveSessionId(session.id);
-                    void saveActiveSessionId(session.id);
+                    setActiveView("vault");
                     setShowDrawer(false);
                   }}
                 >
-                  <Message theme="outline" size="16" className="item-icon" />
-                  <span className="item-title" title={session.title}>
-                    {session.title}
-                  </span>
-                  <button
-                    type="button"
-                    className="delete-item-btn"
-                    title="删除会话"
-                    onClick={(e) => handleDeleteSession(session.id, e)}
-                  >
-                    <Delete theme="outline" size="14" />
-                  </button>
-                </div>
-              ))}
-            </div>
+                  <BookOne theme="outline" size="14" />
+                  <span>打开完整生词本</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* 消息对话主区域 */}
-      <main className="chat-content">
-        {/* 空状态展示 */}
-        {(!activeSession || activeSession.messages.length === 0) && (
-          <div className="empty-state">
-            <div className="empty-icon">
-              <Thunderbolt theme="filled" size="32" />
-            </div>
-            <h2 className="empty-title">人话翻译与长文通读</h2>
-            <p className="empty-desc">
-              一键提取网页长文输出接地气速读报告，支持多轮深度追问与黑话翻译。
-            </p>
-
-            {/* 突出展示的一键通读当前网页卡片 */}
-            <div className="web-read-hero-card">
-              <div className="hero-card-header">
-                <div className="hero-badge">
-                  <BookOne theme="filled" size="14" />
-                  <span>核心功能</span>
+      {/* 主视图展示：如果处于生词本视图，渲染 JargonVaultPanel */}
+      {activeView === "vault" ? (
+        <JargonVaultPanel onSwitchToChat={() => setActiveView("chat")} />
+      ) : (
+        <>
+          {/* 消息对话主区域 */}
+          <main className="chat-content">
+            {/* 空状态展示 */}
+            {(!activeSession || activeSession.messages.length === 0) && (
+              <div className="empty-state">
+                <div className="empty-icon">
+                  <Thunderbolt theme="filled" size="32" />
                 </div>
-                <h3 className="hero-title">📄 一键人话通读当前网页</h3>
-              </div>
-              <p className="hero-desc">
-                智能提取正文并一键输出：<strong>💡大白话总览</strong> + <strong>📖核心黑话速查表</strong> + <strong>🎯要点与行动项</strong> + <strong>💬深度追问指引</strong>。
-              </p>
-              <button
-                type="button"
-                className="hero-action-btn"
-                disabled={isStreaming || isExtractingPage}
-                onClick={handleReadCurrentPage}
-              >
-                {isExtractingPage ? (
-                  <>
-                    <LoadingOne theme="outline" size="16" className="spin-icon" />
-                    <span>正在提取网页正文并生成人话速读...</span>
-                  </>
-                ) : (
-                  <>
-                    <BookOne theme="outline" size="16" />
-                    <span>立即通读当前网页</span>
-                  </>
-                )}
-              </button>
-            </div>
+                <h2 className="empty-title">人话翻译与长文通读</h2>
+                <p className="empty-desc">
+                  一键提取网页长文输出接地气速读报告，支持多轮深度追问与黑话生词沉淀。
+                </p>
 
-            <div className="quick-prompts-divider">
-              <span>或从常用黑话翻译开始</span>
-            </div>
-
-            <div className="quick-prompts-grid">
-              {QUICK_PROMPTS.map((prompt, index) => (
-                <button
-                  type="button"
-                  key={index}
-                  className="quick-prompt-card"
-                  onClick={() => handleSendMessage(prompt)}
-                >
-                  <DocDetail theme="outline" size="14" />
-                  <span>{prompt}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 正在提取正文时的加载提示 */}
-        {isExtractingPage && (
-          <div className="extract-loading-card">
-            <LoadingOne theme="outline" size="20" className="spin-icon" />
-            <div className="loading-text-group">
-              <span className="loading-title">正在提取网页正文与元数据...</span>
-              <span className="loading-sub">已去除导航、侧边栏和广告干扰</span>
-            </div>
-          </div>
-        )}
-
-        {/* 对话消息流 */}
-        {activeSession?.messages.map((message) => (
-          <div
-            key={message.id}
-            className={`chat-bubble-row ${
-              message.role === "user" ? "user-row" : "assistant-row"
-            }`}
-          >
-            {message.role === "assistant" && (
-              <div className="assistant-avatar">人</div>
-            )}
-
-            <div className="bubble-content-wrapper">
-              {/* 思维链展示 */}
-              {message.role === "assistant" &&
-                message.hasReasoning &&
-                Boolean(message.reasoningContent) && (
-                  <CollapsibleThinkingChain
-                    reasoningText={message.reasoningContent || ""}
-                    isTranslating={message.status === "streaming"}
-                  />
-                )}
-
-              {/* 主内容卡片 */}
-              <div
-                className={`bubble-card ${
-                  message.role === "user" ? "user-card" : "assistant-card"
-                } ${message.status === "error" ? "error-card" : ""}`}
-              >
-                {message.role === "user" ? (
-                  message.pageMeta?.isWebPageReading ? (
-                    // 专门针对网页速读的 User 卡片展示
-                    <div className="webpage-user-card">
-                      <div className="webpage-badge">
-                        <BookOne theme="filled" size="13" />
-                        <span>网页通读</span>
-                      </div>
-                      <div className="webpage-title" title={message.pageMeta.title}>
-                        {message.pageMeta.title}
-                      </div>
-                      <div className="webpage-meta-row">
-                        {message.pageMeta.url && (
-                          <a
-                            href={message.pageMeta.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="webpage-url-link"
-                            title={message.pageMeta.url}
-                          >
-                            <LinkOne theme="outline" size="12" />
-                            <span>{new URL(message.pageMeta.url).hostname}</span>
-                          </a>
-                        )}
-                        {Boolean(message.pageMeta.wordCount) && (
-                          <span className="webpage-words-tag">
-                            约 {message.pageMeta.wordCount} 字
-                          </span>
-                        )}
-                      </div>
+                {/* 突出展示的一键通读当前网页卡片 */}
+                <div className="web-read-hero-card">
+                  <div className="hero-card-header">
+                    <div className="hero-badge">
+                      <BookOne theme="filled" size="14" />
+                      <span>核心功能</span>
                     </div>
-                  ) : (
-                    <div className="user-text">{message.content}</div>
-                  )
-                ) : (
-                  <>
-                    {message.content ? (
-                      <div
-                        className="markdown-content"
-                        dangerouslySetInnerHTML={{
-                          __html: parseMarkdown(message.content),
-                        }}
-                      />
-                    ) : message.status === "streaming" ? (
-                      <div className="streaming-dots">
-                        <span></span>
-                        <span></span>
-                        <span></span>
-                        正在提炼人话速读报告...
-                      </div>
-                    ) : null}
-
-                    {message.status === "error" && (
-                      <div className="error-message">
-                        ⚠️ {message.errorMessage || "生成出现错误，请重试"}
-                      </div>
+                    <h3 className="hero-title">📄 一键人话通读当前网页</h3>
+                  </div>
+                  <p className="hero-desc">
+                    智能提取正文并一键输出：
+                    <strong>💡大白话总览</strong> +{" "}
+                    <strong>📖核心黑话速查表</strong> +{" "}
+                    <strong>🎯要点与行动项</strong> +{" "}
+                    <strong>💬深度追问指引</strong>。
+                  </p>
+                  <button
+                    type="button"
+                    className="hero-action-btn"
+                    disabled={isStreaming || isExtractingPage}
+                    onClick={handleReadCurrentPage}
+                  >
+                    {isExtractingPage ? (
+                      <>
+                        <LoadingOne
+                          theme="outline"
+                          size="16"
+                          className="spin-icon"
+                        />
+                        <span>正在提取网页正文并生成人话速读...</span>
+                      </>
+                    ) : (
+                      <>
+                        <BookOne theme="outline" size="16" />
+                        <span>立即通读当前网页</span>
+                      </>
                     )}
-                  </>
-                )}
+                  </button>
+                </div>
 
-                {/* 卡片底部操作 */}
-                {message.content && message.role === "assistant" && (
-                  <div className="bubble-footer">
+                <div className="quick-prompts-divider">
+                  <span>或从常用黑话翻译开始</span>
+                </div>
+
+                <div className="quick-prompts-grid">
+                  {QUICK_PROMPTS.map((prompt, index) => (
                     <button
                       type="button"
-                      className="action-link-btn"
-                      title="复制通读报告"
-                      onClick={() => handleCopy(message.id, message.content)}
+                      key={index}
+                      className="quick-prompt-card"
+                      onClick={() => handleSendMessage(prompt)}
                     >
-                      {copySuccessId === message.id ? (
-                        <>
-                          <CheckOne theme="filled" size="13" fill="#10b981" />
-                          <span style={{ color: "#10b981" }}>已复制</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy theme="outline" size="13" />
-                          <span>复制报告</span>
-                        </>
-                      )}
+                      <DocDetail theme="outline" size="14" />
+                      <span>{prompt}</span>
                     </button>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
+            )}
 
-              {/* 深度追问指引 Pills (可在通读或回答后一键追问) */}
-              {message.role === "assistant" &&
-                message.status === "completed" &&
-                message.suggestedQuestions &&
-                message.suggestedQuestions.length > 0 && (
-                  <div className="suggested-questions-container">
-                    <div className="suggested-header">
-                      <Topic theme="outline" size="13" />
-                      <span>继续深度追问：</span>
-                    </div>
-                    <div className="suggested-pills-list">
-                      {message.suggestedQuestions.map((question: string, qIdx: number) => (
+            {/* 正在提取正文时的加载提示 */}
+            {isExtractingPage && (
+              <div className="extract-loading-card">
+                <LoadingOne theme="outline" size="20" className="spin-icon" />
+                <div className="loading-text-group">
+                  <span className="loading-title">
+                    正在提取网页正文与元数据...
+                  </span>
+                  <span className="loading-sub">
+                    已去除导航、侧边栏和广告干扰
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* 对话消息流 */}
+            {activeSession?.messages.map((message) => (
+              <div
+                key={message.id}
+                className={`chat-bubble-row ${
+                  message.role === "user" ? "user-row" : "assistant-row"
+                }`}
+              >
+                {message.role === "assistant" && (
+                  <div className="assistant-avatar">人</div>
+                )}
+
+                <div className="bubble-content-wrapper">
+                  {/* 思维链展示 */}
+                  {message.role === "assistant" &&
+                    message.hasReasoning &&
+                    Boolean(message.reasoningContent) && (
+                      <CollapsibleThinkingChain
+                        reasoningText={message.reasoningContent || ""}
+                        isTranslating={message.status === "streaming"}
+                      />
+                    )}
+
+                  {/* 主内容卡片 */}
+                  <div
+                    className={`bubble-card ${
+                      message.role === "user" ? "user-card" : "assistant-card"
+                    } ${message.status === "error" ? "error-card" : ""}`}
+                  >
+                    {message.role === "user" ? (
+                      message.pageMeta?.isWebPageReading ? (
+                        <div className="webpage-user-card">
+                          <div className="webpage-badge">
+                            <BookOne theme="filled" size="13" />
+                            <span>网页通读</span>
+                          </div>
+                          <div
+                            className="webpage-title"
+                            title={message.pageMeta.title}
+                          >
+                            {message.pageMeta.title}
+                          </div>
+                          <div className="webpage-meta-row">
+                            {message.pageMeta.url && (
+                              <a
+                                href={message.pageMeta.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="webpage-url-link"
+                                title={message.pageMeta.url}
+                              >
+                                <LinkOne theme="outline" size="12" />
+                                <span>
+                                  {new URL(message.pageMeta.url).hostname}
+                                </span>
+                              </a>
+                            )}
+                            {Boolean(message.pageMeta.wordCount) && (
+                              <span className="webpage-words-tag">
+                                约 {message.pageMeta.wordCount} 字
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="user-text">{message.content}</div>
+                      )
+                    ) : (
+                      <>
+                        {message.content ? (
+                          <div
+                            className="markdown-content"
+                            dangerouslySetInnerHTML={{
+                              __html: parseMarkdown(message.content),
+                            }}
+                          />
+                        ) : message.status === "streaming" ? (
+                          <div className="streaming-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                            正在提炼人话速读报告...
+                          </div>
+                        ) : null}
+
+                        {message.status === "error" && (
+                          <div className="error-message">
+                            ⚠️ {message.errorMessage || "生成出现错误，请重试"}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* 卡片底部操作 */}
+                    {message.content && message.role === "assistant" && (
+                      <div className="bubble-footer">
                         <button
                           type="button"
-                          key={qIdx}
-                          className="suggested-pill-btn"
-                          disabled={isStreaming}
-                          onClick={() => handleSendMessage(question)}
+                          className="action-link-btn"
+                          title="存入黑话生词本"
+                          onClick={() =>
+                            handleSaveMessageToVault(message, activeSession)
+                          }
                         >
-                          <span>{question}</span>
+                          {savedVaultMessageIds.has(message.id) ? (
+                            <>
+                              <CheckOne
+                                theme="filled"
+                                size="13"
+                                fill="#10b981"
+                              />
+                              <span style={{ color: "#10b981" }}>
+                                已存入生词本
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <Star theme="outline" size="13" />
+                              <span>⭐ 存入生词本</span>
+                            </>
+                          )}
                         </button>
-                      ))}
-                    </div>
+
+                        <button
+                          type="button"
+                          className="action-link-btn"
+                          title="复制通读报告"
+                          onClick={() => handleCopy(message.id, message.content)}
+                        >
+                          {copySuccessId === message.id ? (
+                            <>
+                              <CheckOne
+                                theme="filled"
+                                size="13"
+                                fill="#10b981"
+                              />
+                              <span style={{ color: "#10b981" }}>已复制</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy theme="outline" size="13" />
+                              <span>复制报告</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {/* 深度追问指引 Pills */}
+                  {message.role === "assistant" &&
+                    message.status === "completed" &&
+                    message.suggestedQuestions &&
+                    message.suggestedQuestions.length > 0 && (
+                      <div className="suggested-questions-container">
+                        <div className="suggested-header">
+                          <Topic theme="outline" size="13" />
+                          <span>继续深度追问：</span>
+                        </div>
+                        <div className="suggested-pills-list">
+                          {message.suggestedQuestions.map(
+                            (question: string, qIdx: number) => (
+                              <button
+                                type="button"
+                                key={qIdx}
+                                className="suggested-pill-btn"
+                                disabled={isStreaming}
+                                onClick={() => handleSendMessage(question)}
+                              >
+                                <span>{question}</span>
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    )}
+                </div>
+              </div>
+            ))}
+
+            <div ref={messagesEndRef} />
+          </main>
+
+          {/* 底部输入控制台 */}
+          <footer className="chat-input-footer">
+            <div className="input-box-wrapper">
+              <textarea
+                ref={inputRef}
+                className="chat-textarea"
+                placeholder="输入追问、黑话术语或指令 (Enter 发送，Shift+Enter 换行)..."
+                value={inputText}
+                rows={2}
+                onChange={(e) => setInputText(e.target.value)}
+                onKeyDown={handleKeyDown}
+              />
+
+              <div className="input-controls-bar">
+                <div className="input-tip-left">
+                  {inputText.trim() && (
+                    <button
+                      type="button"
+                      className="clear-input-btn"
+                      onClick={() => setInputText("")}
+                    >
+                      <Clear theme="outline" size="14" />
+                      <span>清空</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="input-actions-right">
+                  {isStreaming ? (
+                    <button
+                      type="button"
+                      className="stop-btn"
+                      onClick={handleStopGenerating}
+                    >
+                      <span>停止生成</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="send-btn"
+                      disabled={!inputText.trim()}
+                      onClick={() => handleSendMessage()}
+                    >
+                      <Send theme="outline" size="16" />
+                      <span>发送</span>
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
-
-        <div ref={messagesEndRef} />
-      </main>
-
-      {/* 底部输入控制台 */}
-      <footer className="chat-input-footer">
-        <div className="input-box-wrapper">
-          <textarea
-            ref={inputRef}
-            className="chat-textarea"
-            placeholder="输入追问、黑话术语或指令 (Enter 发送，Shift+Enter 换行)..."
-            value={inputText}
-            rows={2}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
-
-          <div className="input-controls-bar">
-            <div className="input-tip-left">
-              {inputText.trim() && (
-                <button
-                  type="button"
-                  className="clear-input-btn"
-                  onClick={() => setInputText("")}
-                >
-                  <Clear theme="outline" size="14" />
-                  <span>清空</span>
-                </button>
-              )}
-            </div>
-
-            <div className="input-actions-right">
-              {isStreaming ? (
-                <button
-                  type="button"
-                  className="stop-btn"
-                  onClick={handleStopGenerating}
-                >
-                  <span>停止生成</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="send-btn"
-                  disabled={!inputText.trim()}
-                  onClick={() => handleSendMessage()}
-                >
-                  <Send theme="outline" size="16" />
-                  <span>发送</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </footer>
+          </footer>
+        </>
+      )}
     </div>
   );
 }

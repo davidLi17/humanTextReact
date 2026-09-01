@@ -329,6 +329,8 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
         onCopyTranslation={handleCopyTranslation}
         hasResult={translationState.translatedText.trim().length > 0}
         hasInput={translationState.sourceText.trim().length > 0}
+        originalText={translationState.sourceText}
+        translationText={translationState.translatedText}
       />
     </div>
   );
