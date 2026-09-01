@@ -16,6 +16,8 @@ export const MESSAGE_TYPES = {
   UPDATE_TRANSLATION: "updateTranslation", // 保留用于兼容
   UPDATE_CONTENT_TRANSLATION: "updateContentTranslation", // content弹窗专用
   UPDATE_POPUP_TRANSLATION: "updatePopupTranslation", // popup页面专用
+  UPDATE_SIDEPANEL_TRANSLATION: "updateSidepanelTranslation", // sidepanel页面专用
+  OPEN_SIDEPANEL: "openSidepanel", // 打开侧边栏
   SHOW_TRANSLATION_POPUP: "showTranslationPopup",
   GET_SELECTED_TEXT: "getSelectedText",
   APPEND_DIAGNOSTIC_LOGS: "appendDiagnosticLogs",

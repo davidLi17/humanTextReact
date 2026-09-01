@@ -1,8 +1,16 @@
 export type TranslationTarget =
   | { kind: "popup" }
+  | { kind: "sidepanel"; sessionId?: string }
   | { kind: "tab"; tabId: number; surface: "selection" };
 
 export const POPUP_TRANSLATION_TARGET: TranslationTarget = { kind: "popup" };
+export const SIDEPANEL_TRANSLATION_TARGET: TranslationTarget = {
+  kind: "sidepanel",
+};
+
+export function createSidepanelTarget(sessionId?: string): TranslationTarget {
+  return { kind: "sidepanel", sessionId };
+}
 
 export function createSelectionTarget(tabId: number): TranslationTarget {
   return { kind: "tab", tabId, surface: "selection" };
@@ -36,9 +44,13 @@ export function createRequestId(): string {
 }
 
 export function getTranslationTargetKey(target: TranslationTarget): string {
-  return target.kind === "popup"
-    ? "popup"
-    : `tab:${target.tabId}:${target.surface}`;
+  if (target.kind === "popup") {
+    return "popup";
+  }
+  if (target.kind === "sidepanel") {
+    return target.sessionId ? `sidepanel:${target.sessionId}` : "sidepanel";
+  }
+  return `tab:${target.tabId}:${target.surface}`;
 }
 
 export function isTranslationTargetForTab(

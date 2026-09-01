@@ -65,7 +65,9 @@ function detectLoggerContext(): LoggerContext {
   }
 
   const pathname = globalThis.location?.pathname || "";
-  return pathname.includes("options") ? "options" : "popup";
+  if (pathname.includes("options")) return "options";
+  if (pathname.includes("sidepanel")) return "sidepanel";
+  return "popup";
 }
 
 function isLogLevel(value: unknown): value is LogLevel {
