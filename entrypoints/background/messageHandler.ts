@@ -1,3 +1,4 @@
+import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationService } from "./translationService";
 import { HistoryManager } from "./historyManager";
@@ -14,8 +15,10 @@ import {
 } from "@/entrypoints/shared/logger/diagnostics";
 import {
   POPUP_TRANSLATION_TARGET,
+  SIDEPANEL_TRANSLATION_TARGET,
   createRequestId,
   createSelectionTarget,
+  createSidepanelTarget,
   type TranslationTarget,
 } from "@/entrypoints/shared/requestProtocol";
 import { isNil } from "lodash-es";
@@ -24,6 +27,9 @@ function getRequestTarget(
   request: any,
   sender: Browser.runtime.MessageSender
 ): TranslationTarget {
+  if (request.targetKind === "sidepanel" || request.source === "sidepanel") {
+    return createSidepanelTarget(request.sessionId);
+  }
   const tabId = sender.tab?.id ?? request.tabId;
   return typeof tabId === "number"
     ? createSelectionTarget(tabId)
@@ -89,9 +95,10 @@ export class MessageHandler {
           thinkingEnabled = settings.thinkingEnabled;
         }
 
-        // 构建翻译参数，支持新的多模态格式
+        // 构建翻译参数，支持新的多模态格式与多轮消息格式
         const translationParams = {
           text: request.text,
+          messages: request.messages,
           images: request.images || [],
           thinkingEnabled,
           temperature: request.temperature,
@@ -112,6 +119,17 @@ export class MessageHandler {
     // 显示翻译弹窗（主要用于右键菜单）
     [MESSAGE_TYPES.SHOW_TRANSLATION_POPUP]: async () => {
       return { success: true };
+    },
+    // 打开侧边栏
+    [MESSAGE_TYPES.OPEN_SIDEPANEL]: async (request, sender) => {
+      try {
+        const tabId = sender.tab?.id ?? request.tabId;
+        const windowId = sender.tab?.windowId ?? request.windowId;
+        const opened = await openSidePanel({ windowId, tabId });
+        return { success: opened };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
     },
     // 清理请求
     [MESSAGE_TYPES.CLEANUP]: async (request, sender) => {

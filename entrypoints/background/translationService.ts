@@ -11,16 +11,25 @@ import { RequestManager, type RequestContext } from "./requestManager";
 
 const logger = createLogger("translation-service", "🌐");
 
-interface ImageContent {
+export interface ImageContent {
   data: string;
   mimeType: string;
   fileName?: string;
 }
 
-interface TranslationParams {
-  text: string;
+export interface ChatRoleMessage {
+  role: "system" | "user" | "assistant";
+  content: string | any[];
+}
+
+export interface TranslationParams {
+  text?: string;
+  messages?: ChatRoleMessage[];
   images?: ImageContent[];
   thinkingEnabled?: boolean;
+  temperature?: number;
+  promptTemplate?: string;
+  apiKey?: string;
 }
 
 interface StreamChunk {
@@ -37,13 +46,19 @@ export class TranslationService {
     params: TranslationParams,
     requestContext: RequestContext
   ): Promise<string | void> {
-    const { text, images = [], thinkingEnabled = false } = params;
+    const {
+      text = "",
+      messages: chatMessages,
+      images = [],
+      thinkingEnabled = false,
+    } = params;
     const { requestId, target, controller } = requestContext;
 
     logger.log("🚀 [TranslationService] 开始翻译", {
       requestId,
       target,
       textLength: text.length,
+      chatMessagesCount: chatMessages?.length || 0,
       imagesCount: images.length,
       thinkingEnabled,
       timestamp: new Date().toISOString(),
@@ -51,32 +66,49 @@ export class TranslationService {
 
     try {
       const config = await SettingsUtils.getSettings();
-      if (!config.apiKey) {
+      const apiKey = params.apiKey || config.apiKey;
+      if (!apiKey) {
         throw new Error("请先在设置中配置 API Key");
       }
 
       const promptTemplate =
-        config.promptTemplate || DEFAULT_SETTINGS.promptTemplate;
-      const userContent: any[] = [];
+        params.promptTemplate ||
+        config.promptTemplate ||
+        DEFAULT_SETTINGS.promptTemplate;
 
-      images.forEach((image) => {
-        userContent.push({
-          type: "image_url",
-          image_url: { url: image.data },
+      let messagesPayload: any[] = [];
+
+      if (chatMessages && chatMessages.length > 0) {
+        const hasSystem = chatMessages.some((m) => m.role === "system");
+        messagesPayload = hasSystem
+          ? [...chatMessages]
+          : [{ role: "system", content: promptTemplate }, ...chatMessages];
+      } else {
+        const userContent: any[] = [];
+        images.forEach((image) => {
+          userContent.push({
+            type: "image_url",
+            image_url: { url: image.data },
+          });
         });
-      });
-      userContent.push({ type: "text", text });
+        userContent.push({ type: "text", text });
 
-      const requestBody: any = {
-        model: config.model || DEFAULT_SETTINGS.model,
-        messages: [
+        messagesPayload = [
           { role: "system", content: promptTemplate },
           {
             role: "user",
             content: userContent.length === 1 ? text : userContent,
           },
-        ],
-        temperature: config.temperature || DEFAULT_SETTINGS.temperature,
+        ];
+      }
+
+      const requestBody: any = {
+        model: config.model || DEFAULT_SETTINGS.model,
+        messages: messagesPayload,
+        temperature:
+          params.temperature ??
+          config.temperature ??
+          DEFAULT_SETTINGS.temperature,
         stream: true,
         thinking: thinkingEnabled
           ? THINKING_CONFIG.ENABLED
@@ -260,12 +292,19 @@ export class TranslationService {
     error: string
   ): Promise<boolean> {
     const { requestId, target } = requestContext;
+    let action: string;
+    if (target.kind === "tab") {
+      action = MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION;
+    } else if (target.kind === "sidepanel") {
+      action = MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION;
+    } else {
+      action = MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION;
+    }
+
     const message = {
-      action:
-        target.kind === "tab"
-          ? MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION
-          : MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION,
+      action,
       requestId,
+      sessionId: target.kind === "sidepanel" ? target.sessionId : undefined,
       error,
       done: true,
     };
@@ -286,12 +325,19 @@ export class TranslationService {
       return false;
     }
 
+    let action: string;
+    if (target.kind === "tab") {
+      action = MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION;
+    } else if (target.kind === "sidepanel") {
+      action = MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION;
+    } else {
+      action = MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION;
+    }
+
     const message = {
-      action:
-        target.kind === "tab"
-          ? MESSAGE_TYPES.UPDATE_CONTENT_TRANSLATION
-          : MESSAGE_TYPES.UPDATE_POPUP_TRANSLATION,
+      action,
       requestId,
+      sessionId: target.kind === "sidepanel" ? target.sessionId : undefined,
       content,
       hasReasoning: reasoningContent.length > 0,
       reasoningContent,
