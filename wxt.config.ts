@@ -18,12 +18,20 @@ export default defineConfig({
       "translate-selection": {
         suggested_key: {
           default: "Alt+H",
+          mac: "Alt+H",
+          windows: "Alt+H",
+          linux: "Alt+H",
+          chromeos: "Alt+H",
         },
         description: "翻译选中的文本",
       },
       "open-sidepanel": {
         suggested_key: {
           default: "Alt+S",
+          mac: "Alt+S",
+          windows: "Alt+S",
+          linux: "Alt+S",
+          chromeos: "Alt+S",
         },
         description: "打开人话翻译侧边栏",
       },
