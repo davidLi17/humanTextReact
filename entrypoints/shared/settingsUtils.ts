@@ -14,6 +14,7 @@ export interface UserSettings {
   promptTemplate: string;
   apiKey: string;
   thinkingEnabled: boolean;
+  showSelectionToolbar: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
 }
@@ -152,6 +153,14 @@ export class SettingsUtils {
   }
 
   /**
+   * 获取选词快捷操作条设置
+   */
+  static async getShowSelectionToolbar(): Promise<boolean> {
+    const setting = await this.getSetting("showSelectionToolbar");
+    return setting ?? DEFAULT_SETTINGS.showSelectionToolbar;
+  }
+
+  /**
    * 写入完整设置到 storage.sync 的 'settings' 对象，同时备份到 storage.local
    */
   static async setSettings(newSettings: Partial<UserSettings>): Promise<void> {
@@ -255,6 +264,13 @@ export class SettingsUtils {
  */
 export const getThinkingEnabled = (): Promise<boolean> => {
   return SettingsUtils.getThinkingEnabled();
+};
+
+/**
+ * 快捷方法：获取选词快捷操作条设置
+ */
+export const getShowSelectionToolbar = (): Promise<boolean> => {
+  return SettingsUtils.getShowSelectionToolbar();
 };
 
 /**

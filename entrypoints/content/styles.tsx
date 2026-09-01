@@ -467,6 +467,123 @@ export const POPUP_STYLES = /*css*/ `
     background: rgba(146, 64, 14, 0.28);
   }
 
+  /* 划选快捷操作条 (Selection Action Bar) 样式 */
+  .translator-action-bar {
+    position: fixed;
+    z-index: 2147483647;
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.96);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 3px 4px;
+    gap: 3px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1;
+    cursor: default;
+    user-select: none;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color-scheme: light;
+    animation: translatorActionBarFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    box-sizing: border-box;
+  }
+
+  .translator-action-bar * {
+    box-sizing: border-box;
+  }
+
+  @keyframes translatorActionBarFadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .translator-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    outline: none;
+  }
+
+  .translator-action-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #111827;
+    transform: translateY(-0.5px);
+  }
+
+  .translator-action-btn:active {
+    transform: translateY(0.5px);
+  }
+
+  .translator-action-btn-popup:hover {
+    background: rgba(79, 70, 229, 0.08);
+    color: #4f46e5;
+  }
+
+  .translator-action-btn-sidepanel:hover {
+    background: rgba(16, 185, 129, 0.08);
+    color: #059669;
+  }
+
+  .translator-action-divider {
+    width: 1px;
+    height: 14px;
+    background: rgba(0, 0, 0, 0.08);
+    margin: 0 1px;
+  }
+
+  /* 暗色主题适配 */
+  .translator-action-bar[data-theme="dark"] {
+    color-scheme: dark;
+    background: rgba(30, 41, 59, 0.95);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.2);
+    color: #f1f5f9;
+  }
+
+  .translator-action-bar[data-theme="dark"] .translator-action-btn {
+    color: #e2e8f0;
+  }
+
+  .translator-action-bar[data-theme="dark"] .translator-action-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+
+  .translator-action-bar[data-theme="dark"] .translator-action-btn-popup:hover {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+  }
+
+  .translator-action-bar[data-theme="dark"] .translator-action-btn-sidepanel:hover {
+    background: rgba(16, 185, 129, 0.2);
+    color: #6ee7b7;
+  }
+
+  .translator-action-bar[data-theme="dark"] .translator-action-divider {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
   /* 响应式设计 */
   @media (max-width: 480px) {
     .translator-popup {

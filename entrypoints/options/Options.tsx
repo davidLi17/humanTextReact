@@ -39,6 +39,7 @@ interface Settings {
   temperature: number;
   promptTemplate: string;
   thinkingEnabled: boolean;
+  showSelectionToolbar: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
 }
@@ -592,6 +593,25 @@ function Options() {
             </div>
             <div className="setting-hint">
               开启后将显示AI的思考过程，让你了解翻译背后的逻辑
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label htmlFor="showSelectionToolbar">划词快捷操作条</label>
+            <div className="switch-container">
+              <input
+                type="checkbox"
+                id="showSelectionToolbar"
+                checked={settings.showSelectionToolbar}
+                onChange={(e) =>
+                  handleInputChange("showSelectionToolbar", e.target.checked)
+                }
+                className="switch-input"
+              />
+              <label htmlFor="showSelectionToolbar" className="switch-label"></label>
+            </div>
+            <div className="setting-hint">
+              划选网页文本时，在选区附近显示快捷操作条（人话翻译、追问、收藏）
             </div>
           </div>
 
