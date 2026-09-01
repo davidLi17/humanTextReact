@@ -43,6 +43,14 @@ import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import JargonVaultPanel from "./components/JargonVaultPanel";
+import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
+import QuoteInputCapsule from "./components/QuoteInputCapsule";
+import {
+  calculateQuotePosition,
+  formatQuoteMarkdown,
+  isValidMessageSelection,
+  removeQuoteFromInputText,
+} from "./utils/quoteUtils";
 import {
   initializeCodeCopy,
   parseMarkdown,
@@ -129,6 +137,18 @@ export default function SidePanelApp() {
   const [editingText, setEditingText] = useState<string>("");
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
 
+  // 划词追问浮动胶囊状态
+  const [quoteBarVisible, setQuoteBarVisible] = useState<boolean>(false);
+  const [quoteBarPosition, setQuoteBarPosition] = useState<{
+    left: number;
+    top: number;
+    placement?: "top" | "bottom";
+  }>({ left: 0, top: 0, placement: "top" });
+  const [selectedQuoteText, setSelectedQuoteText] = useState<string>("");
+  const [activeQuotedText, setActiveQuotedText] = useState<string | null>(null);
+
+  const sidepanelContainerRef = useRef<HTMLDivElement>(null);
+  const chatContentRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -406,6 +426,95 @@ export default function SidePanelApp() {
     }
   }, [activeSession?.messages, isStreaming, isExtractingPage, activeView]);
 
+  // 划词浮动“追问”胶囊定位与监听
+  useEffect(() => {
+    if (activeView !== "chat") {
+      setQuoteBarVisible(false);
+      return;
+    }
+
+    const checkSelection = () => {
+      const selection = window.getSelection();
+      if (
+        !selection ||
+        !chatContentRef.current ||
+        !sidepanelContainerRef.current
+      ) {
+        setQuoteBarVisible(false);
+        return;
+      }
+
+      if (!isValidMessageSelection(selection, chatContentRef.current)) {
+        setQuoteBarVisible(false);
+        return;
+      }
+
+      const text = selection.toString().trim();
+      if (!text) {
+        setQuoteBarVisible(false);
+        return;
+      }
+
+      try {
+        const range = selection.getRangeAt(0);
+        const selectionRect = range.getBoundingClientRect();
+        const containerRect =
+          sidepanelContainerRef.current.getBoundingClientRect();
+
+        const pos = calculateQuotePosition({
+          selectionRect,
+          containerRect,
+        });
+
+        setSelectedQuoteText(text);
+        setQuoteBarPosition(pos);
+        setQuoteBarVisible(true);
+      } catch (err) {
+        logger.error("计算划词追问位置出错:", err);
+        setQuoteBarVisible(false);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setTimeout(checkSelection, 10);
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.shiftKey) {
+        setTimeout(checkSelection, 10);
+      }
+    };
+
+    const handleScroll = () => {
+      setQuoteBarVisible(false);
+    };
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target?.closest?.(".sidepanel-quote-action-bar")) {
+        return;
+      }
+      setQuoteBarVisible(false);
+    };
+
+    const chatEl = chatContentRef.current;
+    if (chatEl) {
+      chatEl.addEventListener("mouseup", handleMouseUp);
+      chatEl.addEventListener("keyup", handleKeyUp);
+      chatEl.addEventListener("scroll", handleScroll, { passive: true });
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+
+    return () => {
+      if (chatEl) {
+        chatEl.removeEventListener("mouseup", handleMouseUp);
+        chatEl.removeEventListener("keyup", handleKeyUp);
+        chatEl.removeEventListener("scroll", handleScroll);
+      }
+      document.removeEventListener("mousedown", handleMouseDown);
+    };
+  }, [activeView]);
+
   // 通读当前网页核心逻辑
   const handleReadCurrentPage = async () => {
     if (isStreaming || isExtractingPage) return;
@@ -583,6 +692,7 @@ export default function SidePanelApp() {
 
     const imagesToSend = images;
     setInputText("");
+    setActiveQuotedText(null);
     setImages([]);
     setIsStreaming(true);
     setExtractError(null);
@@ -1089,8 +1199,76 @@ export default function SidePanelApp() {
     setImages((prev) => (prev || []).filter((_, i) => i !== index));
   };
 
+  // 划词追问处理逻辑：格式化引用并注入输入框
+  const handleQuoteAction = (textToQuote: string) => {
+    const rawQuote = (textToQuote || selectedQuoteText || "").trim();
+    if (!rawQuote) return;
+
+    const formatted = formatQuoteMarkdown(rawQuote);
+
+    // 如果之前已有引用，先将旧引用前缀剥离
+    let baseText = inputText;
+    if (activeQuotedText) {
+      baseText = removeQuoteFromInputText(baseText, activeQuotedText);
+    } else {
+      baseText = removeQuoteFromInputText(baseText);
+    }
+
+    // 拼接成新引用
+    const nextInput = `${formatted}${baseText.trimStart()}`;
+
+    setInputText(nextInput);
+    setActiveQuotedText(rawQuote);
+    setQuoteBarVisible(false);
+
+    // 清除页面选区
+    window.getSelection()?.removeAllRanges();
+
+    // 自动聚焦输入框并将光标移至末尾，方便用户直接键入问题
+    setTimeout(() => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+        const len = inputRef.current.value.length;
+        inputRef.current.setSelectionRange(len, len);
+      }
+    }, 30);
+  };
+
+  // 取消或清除引用
+  const handleClearQuote = () => {
+    if (activeQuotedText) {
+      const stripped = removeQuoteFromInputText(inputText, activeQuotedText);
+      setInputText(stripped);
+      setActiveQuotedText(null);
+    } else {
+      const stripped = removeQuoteFromInputText(inputText);
+      setInputText(stripped);
+      setActiveQuotedText(null);
+    }
+    inputRef.current?.focus();
+  };
+
+  // 监听输入内容变化
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setInputText(val);
+
+    // 若用户手动删空文本，自动重置引用胶囊状态
+    if (!val.trim() && activeQuotedText) {
+      setActiveQuotedText(null);
+    }
+  };
+
   // 快捷按键处理
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Backspace" && activeQuotedText) {
+      const formatted = formatQuoteMarkdown(activeQuotedText);
+      if (inputText.trim() === formatted.trim() || !inputText.trim()) {
+        setActiveQuotedText(null);
+        setInputText("");
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void handleSendMessage();
@@ -1098,7 +1276,7 @@ export default function SidePanelApp() {
   };
 
   return (
-    <div className="sidepanel-container">
+    <div className="sidepanel-container" ref={sidepanelContainerRef}>
       {/* 顶部重构布局：第一层 核心顶栏 (Header Bar) */}
       <header className="sidepanel-header-bar">
         <div className="header-bar-left">
@@ -1399,7 +1577,15 @@ export default function SidePanelApp() {
       ) : (
         <>
           {/* 消息对话主区域 */}
-          <main className="chat-content">
+          <main className="chat-content" ref={chatContentRef}>
+            {/* 划词浮动“追问”胶囊按钮 */}
+            <SidepanelQuoteActionBar
+              visible={quoteBarVisible}
+              position={quoteBarPosition}
+              selectedText={selectedQuoteText}
+              onQuote={handleQuoteAction}
+            />
+
             {/* 空状态展示 */}
             {(!activeSession || activeSession.messages.length === 0) && (
               <div className="empty-state">
@@ -1784,6 +1970,14 @@ export default function SidePanelApp() {
 
           {/* 底部输入控制台 */}
           <footer className="chat-input-footer">
+            {/* 划词引用胶囊预览条 */}
+            {activeQuotedText && (
+              <QuoteInputCapsule
+                quotedText={activeQuotedText}
+                onClear={handleClearQuote}
+              />
+            )}
+
             {images && images.length > 0 && (
               <div className="input-images-preview">
                 {images.map((img, idx) => (
@@ -1808,7 +2002,7 @@ export default function SidePanelApp() {
                 placeholder="输入追问、黑话术语或指令，支持 Ctrl+V 粘贴图片 (Enter 发送，Shift+Enter 换行)..."
                 value={inputText}
                 rows={2}
-                onChange={(e) => setInputText(e.target.value)}
+                onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
               />
@@ -1819,7 +2013,7 @@ export default function SidePanelApp() {
                     <button
                       type="button"
                       className="clear-input-btn"
-                      onClick={() => setInputText("")}
+                      onClick={handleClearQuote}
                     >
                       <Clear theme="outline" size="14" />
                       <span>清空</span>
