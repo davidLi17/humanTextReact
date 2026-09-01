@@ -76,6 +76,8 @@ export default defineBackground(() => {
       backgroundLogger.info("快捷键触发", { command });
       if (command === "translate-selection") {
         ShortcutManager.executeTranslation();
+      } else if (command === "open-sidepanel") {
+        ShortcutManager.executeOpenSidepanel();
       }
     });
   }
