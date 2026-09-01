@@ -16,14 +16,29 @@ export class ContextMenuManager {
       browser.contextMenus.removeAll(() => {
         browser.contextMenus.create({
           id: "translateSelection",
-          title: "翻译成人话",
+          title: "翻译成人话 (浮窗)",
           contexts: ["selection"],
+        });
+        browser.contextMenus.create({
+          id: "openSidepanelTranslate",
+          title: "在侧边栏中人话对话",
+          contexts: ["selection"],
+        });
+        browser.contextMenus.create({
+          id: "readPageInSidepanel",
+          title: "📄 通读当前网页 (人话速读)",
+          contexts: ["page"],
+        });
+        browser.contextMenus.create({
+          id: "openSidepanel",
+          title: "打开人话侧边栏",
+          contexts: ["page", "action"],
         });
       });
     } catch (error) {
       logger.error("创建右键菜单时出错:", error);
 
-      // 出错时创建不带快捷键的菜单作为备用
+      // 出错时创建备用菜单
       browser.contextMenus.create({
         id: "translateSelection",
         title: "翻译成人话",

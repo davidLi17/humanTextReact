@@ -1,3 +1,5 @@
+import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
+import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationAreaProps } from "@/entrypoints/popup/types";
 import { useAutoScroll } from "@/entrypoints/popup/hooks/useAutoScroll";
 import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
@@ -160,6 +162,26 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
           <button className="text-btn" onClick={onShowHistory}>
             历史记录
           </button>
+          <button
+            className="text-btn"
+            onClick={async () => {
+              try {
+                const [tab] = await browser.tabs.query({
+                  active: true,
+                  currentWindow: true,
+                });
+                if (tab?.windowId) {
+                  await openSidePanel({ windowId: tab.windowId });
+                  window.close(); // 打开侧边栏后关闭 popup
+                }
+              } catch (e) {
+                logger.error("打开侧边栏失败:", e);
+              }
+            }}
+            title="打开侧边栏 (支持多轮追问)"
+          >
+            侧边栏
+          </button>
           <button className="text-btn" onClick={onOpenSettings}>
             设置
           </button>
@@ -307,6 +329,8 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
         onCopyTranslation={handleCopyTranslation}
         hasResult={translationState.translatedText.trim().length > 0}
         hasInput={translationState.sourceText.trim().length > 0}
+        originalText={translationState.sourceText}
+        translationText={translationState.translatedText}
       />
     </div>
   );

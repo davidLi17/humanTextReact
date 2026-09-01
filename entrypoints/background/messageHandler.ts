@@ -1,6 +1,8 @@
+import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationService } from "./translationService";
 import { HistoryManager } from "./historyManager";
+import { JargonVault } from "@/entrypoints/shared/jargonVault";
 import { RequestManager } from "./requestManager";
 import { ApiService } from "./apiService";
 import { ContextMenuManager } from "./contextMenuManager";
@@ -14,8 +16,10 @@ import {
 } from "@/entrypoints/shared/logger/diagnostics";
 import {
   POPUP_TRANSLATION_TARGET,
+  SIDEPANEL_TRANSLATION_TARGET,
   createRequestId,
   createSelectionTarget,
+  createSidepanelTarget,
   type TranslationTarget,
 } from "@/entrypoints/shared/requestProtocol";
 import { isNil } from "lodash-es";
@@ -24,6 +28,9 @@ function getRequestTarget(
   request: any,
   sender: Browser.runtime.MessageSender
 ): TranslationTarget {
+  if (request.targetKind === "sidepanel" || request.source === "sidepanel") {
+    return createSidepanelTarget(request.sessionId);
+  }
   const tabId = sender.tab?.id ?? request.tabId;
   return typeof tabId === "number"
     ? createSelectionTarget(tabId)
@@ -89,9 +96,10 @@ export class MessageHandler {
           thinkingEnabled = settings.thinkingEnabled;
         }
 
-        // 构建翻译参数，支持新的多模态格式
+        // 构建翻译参数，支持新的多模态格式与多轮消息格式
         const translationParams = {
           text: request.text,
+          messages: request.messages,
           images: request.images || [],
           thinkingEnabled,
           temperature: request.temperature,
@@ -112,6 +120,17 @@ export class MessageHandler {
     // 显示翻译弹窗（主要用于右键菜单）
     [MESSAGE_TYPES.SHOW_TRANSLATION_POPUP]: async () => {
       return { success: true };
+    },
+    // 打开侧边栏
+    [MESSAGE_TYPES.OPEN_SIDEPANEL]: async (request, sender) => {
+      try {
+        const tabId = sender.tab?.id ?? request.tabId;
+        const windowId = sender.tab?.windowId ?? request.windowId;
+        const opened = await openSidePanel({ windowId, tabId });
+        return { success: opened };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
     },
     // 清理请求
     [MESSAGE_TYPES.CLEANUP]: async (request, sender) => {
@@ -161,6 +180,51 @@ export class MessageHandler {
     [MESSAGE_TYPES.CLEAR_DIAGNOSTIC_LOGS]: async () => {
       await clearDiagnosticRecords();
       return { success: true };
+    },
+    // 保存/添加黑话生词条目
+    [MESSAGE_TYPES.SAVE_JARGON_ITEM]: async (request) => {
+      const item = await JargonVault.addJargon(request.item);
+      return { success: true, item };
+    },
+    // 获取生词列表
+    [MESSAGE_TYPES.GET_JARGON_LIST]: async (request) => {
+      const list = await JargonVault.getJargonList(
+        request.query,
+        request.category,
+        request.starredOnly
+      );
+      return { success: true, list };
+    },
+    // 更新生词条目
+    [MESSAGE_TYPES.UPDATE_JARGON_ITEM]: async (request) => {
+      const item = await JargonVault.updateJargon(request.id, request.updates);
+      return { success: true, item };
+    },
+    // 删除生词条目
+    [MESSAGE_TYPES.DELETE_JARGON_ITEM]: async (request) => {
+      const success = await JargonVault.deleteJargon(request.id);
+      return { success };
+    },
+    // 切换生词星标状态
+    [MESSAGE_TYPES.TOGGLE_JARGON_STAR]: async (request) => {
+      const item = await JargonVault.toggleStar(request.id);
+      return { success: true, item };
+    },
+    // 导出生词本
+    [MESSAGE_TYPES.EXPORT_JARGON]: async (request) => {
+      const format = request.format === "json" ? "json" : "markdown";
+      const data =
+        format === "json"
+          ? await JargonVault.exportJargonAsJson()
+          : await JargonVault.exportJargonAsMarkdown();
+      return { success: true, format, data };
+    },
+    // 导入生词本
+    [MESSAGE_TYPES.IMPORT_JARGON]: async (request) => {
+      const result = await JargonVault.importJargonFromJson(
+        request.jsonStr || request.data
+      );
+      return result;
     },
     // 测试 API 连接
     testApiConnection: async (request) => {
