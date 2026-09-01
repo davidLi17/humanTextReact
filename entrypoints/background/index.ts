@@ -34,12 +34,25 @@ export default defineBackground(() => {
     id: browser.runtime.id,
   });
 
-  // 创建右键菜单
+  // 1. 同步注册全局快捷键命令监听器（确保在 Service Worker 唤醒时不会漏掉任何事件）
+  ShortcutManager.registerCommandListeners();
+
+  // 2. 消息监听器
+  browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    return MessageHandler.handleRuntimeMessage(request, sender, sendResponse);
+  });
+
+  // 3. 右键菜单点击处理
+  browser.contextMenus.onClicked.addListener(
+    ContextMenuHandler.handleContextMenuClick
+  );
+
+  // 4. 监听扩展安装/更新事件
   browser.runtime.onInstalled.addListener(() => {
     backgroundLogger.info("扩展安装完成，开始初始化");
 
     // 初始化快捷键信息到存储
-    ShortcutManager.saveCurrentShortcut();
+    void ShortcutManager.saveCurrentShortcut();
 
     // 创建右键菜单
     ContextMenuManager.createContextMenu();
@@ -47,40 +60,20 @@ export default defineBackground(() => {
     backgroundLogger.success("扩展初始化完成");
   });
 
-  // 监听扩展启动事件，创建右键菜单
+  // 5. 监听扩展启动事件，创建右键菜单并同步快捷键
   browser.runtime.onStartup.addListener(() => {
     backgroundLogger.info("扩展启动");
+    // 同步快捷键信息
+    void ShortcutManager.saveCurrentShortcut();
     // 创建右键菜单
     ContextMenuManager.createContextMenu();
   });
 
-  // 右键菜单点击处理
-  browser.contextMenus.onClicked.addListener(
-    ContextMenuHandler.handleContextMenuClick
-  );
-
-  // 消息监听器
-  browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    return MessageHandler.handleRuntimeMessage(request, sender, sendResponse);
-  });
-
-  // 监听标签页关闭事件
+  // 6. 监听标签页关闭事件
   browser.tabs.onRemoved.addListener((tabId: number) => {
     backgroundLogger.info("标签页关闭，清理请求", { tabId });
     RequestManager.cleanupTab(tabId);
   });
-
-  // 监听快捷键命令
-  if (browser.commands?.onCommand) {
-    browser.commands.onCommand.addListener((command: string) => {
-      backgroundLogger.info("快捷键触发", { command });
-      if (command === "translate-selection") {
-        ShortcutManager.executeTranslation();
-      } else if (command === "open-sidepanel") {
-        ShortcutManager.executeOpenSidepanel();
-      }
-    });
-  }
 
   backgroundLogger.success("背景脚本所有监听器注册完成");
 });

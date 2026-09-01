@@ -73,6 +73,7 @@ export const DEFAULT_SETTINGS = {
     "2. 而且输出内容一定要带合乎情理的 Emoji 优化我的阅读体验。",
   apiKey: "your_api_key",
   thinkingEnabled: false,
+  showSelectionToolbar: true,
   logLevel: LOG_LEVELS.OFF as LogLevel,
   theme: THEME_MODES.SYSTEM as ThemeMode,
 } as const;
