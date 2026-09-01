@@ -69,6 +69,8 @@ import {
   LoadingOne,
   CheckOne,
   Star,
+  Edit,
+  Refresh,
 } from "@icon-park/react";
 import React, { useEffect, useRef, useState } from "react";
 import "./App.less";
@@ -122,9 +124,15 @@ export default function SidePanelApp() {
   // 全局 Toast 提示
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // 用户消息行内编辑状态
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState<string>("");
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+
   const activeRequestIdRef = useRef<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const activeSession =
@@ -140,6 +148,18 @@ export default function SidePanelApp() {
     void initializeLogger("sidepanel");
     initializeCodeCopy();
   }, []);
+
+  // 监听进入编辑状态，自动 focus textarea 并自适应高度
+  useEffect(() => {
+    if (editingMessageId && editingTextareaRef.current) {
+      const ta = editingTextareaRef.current;
+      ta.focus();
+      ta.selectionStart = ta.value.length;
+      ta.selectionEnd = ta.value.length;
+      ta.style.height = "auto";
+      ta.style.height = `${Math.max(68, ta.scrollHeight)}px`;
+    }
+  }, [editingMessageId]);
 
   // 监听点击外部关闭导出菜单
   useEffect(() => {
@@ -600,6 +620,269 @@ export default function SidePanelApp() {
               status: "error",
               errorMessage:
                 error?.message || "请求发送失败，请检查网络或设置",
+            };
+          }
+          return { ...s, messages: msgs };
+        })
+      );
+    }
+  };
+
+  // 开启用户消息行内编辑
+  const handleStartEditMessage = (message: ChatMessage) => {
+    if (isStreaming) return;
+    setEditingMessageId(message.id);
+    setEditingText(message.content);
+  };
+
+  // 取消行内编辑
+  const handleCancelEditMessage = () => {
+    setEditingMessageId(null);
+    setEditingText("");
+  };
+
+  // 编辑框内容变动自动调整高度
+  const handleEditingTextChange = (
+    e: React.ChangeEvent<HTMLTextAreaElement>
+  ) => {
+    setEditingText(e.target.value);
+    e.target.style.height = "auto";
+    e.target.style.height = `${Math.max(68, e.target.scrollHeight)}px`;
+  };
+
+  // 编辑框按键处理 (Enter 提交，Shift+Enter 换行，Esc 取消)
+  const handleEditKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>,
+    messageId: string
+  ) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      handleCancelEditMessage();
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (editingText.trim() && !isStreaming) {
+        void handleSaveAndResendMessage(messageId);
+      }
+    }
+  };
+
+  // 保存用户编辑后的内容并重新发起生成
+  const handleSaveAndResendMessage = async (messageId: string) => {
+    const text = editingText.trim();
+    if (!text || isStreaming || !activeSession) return;
+
+    const userMsgIndex = activeSession.messages.findIndex(
+      (m) => m.id === messageId
+    );
+    if (userMsgIndex === -1) return;
+
+    const oldUserMsg = activeSession.messages[userMsgIndex];
+    // 截断该消息之后的所有历史轮次
+    const preservedHistory = activeSession.messages.slice(0, userMsgIndex);
+
+    const assistantMessageId = createRequestId();
+    const currentRequestId = createRequestId();
+    activeRequestIdRef.current = currentRequestId;
+
+    const updatedUserMsg: ChatMessage = {
+      ...oldUserMsg,
+      content: text,
+      pageMeta: oldUserMsg.pageMeta,
+      createdAt: Date.now(),
+      status: "completed",
+    };
+
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
+      hasReasoning: false,
+      createdAt: Date.now(),
+      status: "streaming",
+    };
+
+    // 如果这是第一条用户消息且非网页速读，更新会话标题
+    const isFirstUserMessage =
+      preservedHistory.filter((m) => m.role === "user").length === 0;
+    const newTitle =
+      isFirstUserMessage && !activeSession.title.startsWith("速读:")
+        ? text.slice(0, 18) + (text.length > 18 ? "..." : "")
+        : activeSession.title;
+
+    const nextMessages = [
+      ...preservedHistory,
+      updatedUserMsg,
+      assistantMessage,
+    ];
+    const updatedSession: ChatSession = {
+      ...activeSession,
+      title: newTitle,
+      messages: nextMessages,
+      updatedAt: Date.now(),
+    };
+
+    const nextSessions = sessions.map((s) =>
+      s.id === activeSession.id ? updatedSession : s
+    );
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+
+    // 退出编辑状态并启动流式生成
+    setEditingMessageId(null);
+    setEditingText("");
+    setIsStreaming(true);
+    setExtractError(null);
+
+    try {
+      let messagesPayload: any[];
+      if (updatedUserMsg.pageMeta?.isWebPageReading) {
+        const userPrompt = buildWebReadingUserPrompt({
+          title: updatedUserMsg.pageMeta.title,
+          url: updatedUserMsg.pageMeta.url,
+          content: updatedUserMsg.pageMeta.excerpt || text,
+          wordCount: updatedUserMsg.pageMeta.wordCount,
+        });
+        messagesPayload = [
+          { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
+          { role: "user" as const, content: userPrompt },
+        ];
+      } else {
+        messagesPayload = [
+          ...preservedHistory.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          { role: "user" as const, content: text },
+        ];
+      }
+
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId: activeSession.id,
+        messages: messagesPayload,
+        images: updatedUserMsg.images,
+        thinkingEnabled,
+      });
+    } catch (error: any) {
+      logger.error("重新发送编辑消息失败:", error);
+      setIsStreaming(false);
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSession.id) return s;
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant") {
+            msgs[msgs.length - 1] = {
+              ...last,
+              status: "error",
+              errorMessage:
+                error?.message || "请求发送失败，请检查网络或设置",
+            };
+          }
+          return { ...s, messages: msgs };
+        })
+      );
+    }
+  };
+
+  // 重新生成助手回答 / 重试错误卡片
+  const handleRegenerateMessage = async (assistantMessageId: string) => {
+    if (isStreaming || !activeSession) return;
+
+    const assistantIndex = activeSession.messages.findIndex(
+      (m) => m.id === assistantMessageId
+    );
+    if (assistantIndex === -1) return;
+
+    // 截取该回答之前的所有上下文
+    const historyMessages = activeSession.messages.slice(0, assistantIndex);
+    if (historyMessages.length === 0) return;
+
+    const prevUserMsg = historyMessages[historyMessages.length - 1];
+    if (prevUserMsg.role !== "user") return;
+
+    setRegeneratingId(assistantMessageId);
+    setTimeout(() => setRegeneratingId(null), 800);
+
+    const currentRequestId = createRequestId();
+    activeRequestIdRef.current = currentRequestId;
+
+    const newAssistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
+      hasReasoning: false,
+      createdAt: Date.now(),
+      status: "streaming",
+    };
+
+    const nextMessages = [...historyMessages, newAssistantMessage];
+    const updatedSession: ChatSession = {
+      ...activeSession,
+      messages: nextMessages,
+      updatedAt: Date.now(),
+    };
+
+    const nextSessions = sessions.map((s) =>
+      s.id === activeSession.id ? updatedSession : s
+    );
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+
+    setIsStreaming(true);
+    setExtractError(null);
+
+    try {
+      let messagesPayload: any[];
+      if (prevUserMsg.pageMeta?.isWebPageReading) {
+        const userPrompt = buildWebReadingUserPrompt({
+          title: prevUserMsg.pageMeta.title,
+          url: prevUserMsg.pageMeta.url,
+          content: prevUserMsg.pageMeta.excerpt || prevUserMsg.content,
+          wordCount: prevUserMsg.pageMeta.wordCount,
+        });
+        messagesPayload = [
+          { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
+          { role: "user" as const, content: userPrompt },
+        ];
+      } else {
+        messagesPayload = historyMessages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+      }
+
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId: activeSession.id,
+        messages: messagesPayload,
+        images: prevUserMsg.images,
+        thinkingEnabled,
+      });
+    } catch (error: any) {
+      logger.error("重新生成回答失败:", error);
+      setIsStreaming(false);
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSession.id) return s;
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant") {
+            msgs[msgs.length - 1] = {
+              ...last,
+              status: "error",
+              errorMessage:
+                error?.message || "重新生成失败，请检查网络或设置",
             };
           }
           return { ...s, messages: msgs };
@@ -1230,58 +1513,116 @@ export default function SidePanelApp() {
                   <div
                     className={`bubble-card ${
                       message.role === "user" ? "user-card" : "assistant-card"
-                    } ${message.status === "error" ? "error-card" : ""}`}
+                    } ${message.status === "error" ? "error-card" : ""} ${
+                      message.role === "user" && editingMessageId === message.id
+                        ? "editing-card"
+                        : ""
+                    }`}
                   >
                     {message.role === "user" ? (
-                      message.pageMeta?.isWebPageReading ? (
-                        <div className="webpage-user-card">
-                          <div className="webpage-badge">
-                            <BookOne theme="filled" size="13" />
-                            <span>网页通读</span>
-                          </div>
-                          <div
-                            className="webpage-title"
-                            title={message.pageMeta.title}
-                          >
-                            {message.pageMeta.title}
-                          </div>
-                          <div className="webpage-meta-row">
-                            {message.pageMeta.url && (
-                              <a
-                                href={message.pageMeta.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="webpage-url-link"
-                                title={message.pageMeta.url}
+                      editingMessageId === message.id ? (
+                        <div className="user-inline-editor">
+                          <textarea
+                            ref={editingTextareaRef}
+                            className="inline-edit-textarea"
+                            value={editingText}
+                            rows={2}
+                            placeholder="输入修改后的消息..."
+                            onChange={handleEditingTextChange}
+                            onKeyDown={(e) => handleEditKeyDown(e, message.id)}
+                          />
+                          <div className="inline-edit-footer">
+                            <span className="inline-edit-hint">
+                              Esc 取消 · Enter 提交 · Shift+Enter 换行
+                            </span>
+                            <div className="inline-edit-actions">
+                              <button
+                                type="button"
+                                className="inline-edit-btn cancel-btn"
+                                onClick={handleCancelEditMessage}
                               >
-                                <LinkOne theme="outline" size="12" />
-                                <span>
-                                  {new URL(message.pageMeta.url).hostname}
-                                </span>
-                              </a>
-                            )}
-                            {Boolean(message.pageMeta.wordCount) && (
-                              <span className="webpage-words-tag">
-                                约 {message.pageMeta.wordCount} 字
-                              </span>
-                            )}
+                                取消
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-edit-btn submit-btn"
+                                disabled={!editingText.trim() || isStreaming}
+                                onClick={() =>
+                                  handleSaveAndResendMessage(message.id)
+                                }
+                              >
+                                <Send theme="outline" size="12" />
+                                <span>保存并重新发送</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <div className="user-message-body">
-                          {message.images && message.images.length > 0 && (
-                            <div className="message-images-grid">
-                              {message.images.map((img, imgIdx) => (
-                                <img
-                                  key={imgIdx}
-                                  src={img.data}
-                                  alt="用户上传图片"
-                                  className="message-attached-image"
-                                />
-                              ))}
+                        <div className="user-bubble-wrapper">
+                          {message.pageMeta?.isWebPageReading ? (
+                            <div className="webpage-user-card">
+                              <div className="webpage-badge">
+                                <BookOne theme="filled" size="13" />
+                                <span>网页通读</span>
+                              </div>
+                              <div
+                                className="webpage-title"
+                                title={message.pageMeta.title}
+                              >
+                                {message.pageMeta.title}
+                              </div>
+                              <div className="webpage-meta-row">
+                                {message.pageMeta.url && (
+                                  <a
+                                    href={message.pageMeta.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="webpage-url-link"
+                                    title={message.pageMeta.url}
+                                  >
+                                    <LinkOne theme="outline" size="12" />
+                                    <span>
+                                      {new URL(message.pageMeta.url).hostname}
+                                    </span>
+                                  </a>
+                                )}
+                                {Boolean(message.pageMeta.wordCount) && (
+                                  <span className="webpage-words-tag">
+                                    约 {message.pageMeta.wordCount} 字
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="user-message-body">
+                              {message.images && message.images.length > 0 && (
+                                <div className="message-images-grid">
+                                  {message.images.map((img, imgIdx) => (
+                                    <img
+                                      key={imgIdx}
+                                      src={img.data}
+                                      alt="用户上传图片"
+                                      className="message-attached-image"
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                              <div className="user-text">{message.content}</div>
                             </div>
                           )}
-                          <div className="user-text">{message.content}</div>
+
+                          {/* 悬浮操作区：编辑按钮 */}
+                          <div className="user-bubble-actions">
+                            <button
+                              type="button"
+                              className="user-action-btn edit-msg-btn"
+                              title="编辑消息"
+                              disabled={isStreaming}
+                              onClick={() => handleStartEditMessage(message)}
+                            >
+                              <Edit theme="outline" size="13" />
+                            </button>
+                          </div>
                         </div>
                       )
                     ) : (
@@ -1303,8 +1644,32 @@ export default function SidePanelApp() {
                         ) : null}
 
                         {message.status === "error" && (
-                          <div className="error-message">
-                            ⚠️ {message.errorMessage || "生成出现错误，请重试"}
+                          <div className="error-card-body">
+                            <div className="error-message">
+                              <Tips theme="outline" size="14" />
+                              <span>
+                                {message.errorMessage ||
+                                  "生成出现错误，请重试"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="error-retry-btn"
+                              title="重试生成"
+                              disabled={isStreaming}
+                              onClick={() => handleRegenerateMessage(message.id)}
+                            >
+                              <Refresh
+                                theme="outline"
+                                size="13"
+                                className={
+                                  regeneratingId === message.id
+                                    ? "spin-icon"
+                                    : ""
+                                }
+                              />
+                              <span>重试</span>
+                            </button>
                           </div>
                         )}
                       </>
@@ -1313,6 +1678,23 @@ export default function SidePanelApp() {
                     {/* 卡片底部操作 */}
                     {message.content && message.role === "assistant" && (
                       <div className="bubble-footer">
+                        <button
+                          type="button"
+                          className="action-link-btn regenerate-btn"
+                          title="重新生成回答"
+                          disabled={isStreaming}
+                          onClick={() => handleRegenerateMessage(message.id)}
+                        >
+                          <Refresh
+                            theme="outline"
+                            size="13"
+                            className={
+                              regeneratingId === message.id ? "spin-icon" : ""
+                            }
+                          />
+                          <span>重新生成</span>
+                        </button>
+
                         <button
                           type="button"
                           className="action-link-btn"
