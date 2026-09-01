@@ -33,6 +33,12 @@ import {
   inferJargonDetails,
   saveJargonItem,
 } from "@/entrypoints/shared/jargonStorage";
+import {
+  downloadSessionJsonFile,
+  downloadSessionMarkdownFile,
+  formatSessionAsMarkdown,
+  formatSessionAsPlainText,
+} from "@/entrypoints/shared/sessionExport";
 import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
@@ -47,6 +53,9 @@ import {
   Copy,
   Delete,
   DocDetail,
+  Export,
+  FileCode,
+  FileText,
   History,
   Message,
   Send,
@@ -97,8 +106,10 @@ export default function SidePanelApp() {
   const [isExtractingPage, setIsExtractingPage] = useState<boolean>(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
+  const [copyAllSuccess, setCopyAllSuccess] = useState<boolean>(false);
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(false);
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
 
   // 界面 Tab 切换："chat"（对话）与 "vault"（黑话生词本）
   const [activeView, setActiveView] = useState<"chat" | "vault">("chat");
@@ -114,6 +125,7 @@ export default function SidePanelApp() {
   const activeRequestIdRef = useRef<string | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
@@ -128,6 +140,21 @@ export default function SidePanelApp() {
     void initializeLogger("sidepanel");
     initializeCodeCopy();
   }, []);
+
+  // 监听点击外部关闭导出菜单
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (
+        exportMenuRef.current &&
+        !exportMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [showExportMenu]);
 
   // 主题管理
   useEffect(() => {
@@ -613,6 +640,7 @@ export default function SidePanelApp() {
     setShowDrawer(false);
     setExtractError(null);
     inputRef.current?.focus();
+    showToast("已新建对话");
   };
 
   // 删除会话
@@ -646,6 +674,48 @@ export default function SidePanelApp() {
       logger.error("复制失败:", err);
       return false;
     }
+  };
+
+  // 复制整场会话全文 (Markdown 格式)
+  const handleCopyAllSession = async () => {
+    if (!activeSession || activeSession.messages.length === 0) {
+      showToast("当前会话暂无对话内容");
+      return;
+    }
+    const fullText = formatSessionAsMarkdown(activeSession);
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopyAllSuccess(true);
+      showToast("📋 已复制整场会话全文 (Markdown 格式)");
+      setTimeout(() => setCopyAllSuccess(false), 2000);
+    } catch (err) {
+      logger.error("复制全文失败:", err);
+      showToast("复制失败，请重试");
+    }
+  };
+
+  // 导出 Markdown 文件
+  const handleExportSessionMarkdown = () => {
+    if (!activeSession || activeSession.messages.length === 0) {
+      showToast("当前会话暂无对话内容");
+      setShowExportMenu(false);
+      return;
+    }
+    downloadSessionMarkdownFile(activeSession);
+    showToast(`已导出《${activeSession.title}》Markdown 文件`);
+    setShowExportMenu(false);
+  };
+
+  // 导出 JSON 文件
+  const handleExportSessionJson = () => {
+    if (!activeSession || activeSession.messages.length === 0) {
+      showToast("当前会话暂无对话内容");
+      setShowExportMenu(false);
+      return;
+    }
+    downloadSessionJsonFile(activeSession);
+    showToast(`已导出《${activeSession.title}》JSON 会话数据`);
+    setShowExportMenu(false);
   };
 
   // 存入黑话生词本
@@ -687,7 +757,11 @@ export default function SidePanelApp() {
         sourceContext: term,
       });
 
-      setSavedVaultMessageIds((prev) => new Set([...prev, message.id]));
+      setSavedVaultMessageIds((prev) => {
+        const next = new Set(prev);
+        next.add(message.id);
+        return next;
+      });
       showToast(`⭐ 已将 "${inferred.term}" 存入黑话生词本！`);
     } catch (err) {
       logger.error("存入生词本失败:", err);
@@ -742,21 +816,22 @@ export default function SidePanelApp() {
 
   return (
     <div className="sidepanel-container">
-      {/* 顶部导航栏 */}
-      <header className="sidepanel-header">
-        <div className="header-left">
+      {/* 顶部重构布局：第一层 核心顶栏 (Header Bar) */}
+      <header className="sidepanel-header-bar">
+        <div className="header-bar-left">
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn drawer-toggle-btn"
             title="会话与生词本抽屉"
             onClick={() => setShowDrawer((prev) => !prev)}
           >
             <History theme="outline" size="18" />
           </button>
-          <div className="header-title-wrapper">
-            <span className="header-title">人话翻译器</span>
+
+          <div className="header-brand-group">
+            <span className="brand-title">人话翻译器</span>
             <span
-              className="session-sub-title"
+              className="brand-sub-title"
               title={
                 activeView === "vault"
                   ? "黑话生词本"
@@ -764,14 +839,12 @@ export default function SidePanelApp() {
               }
             >
               {activeView === "vault"
-                ? "📚 黑话生词本"
+                ? "黑话生词本"
                 : activeSession?.title || "新对话"}
             </span>
           </div>
-        </div>
 
-        {/* 顶部 Tab 切换（对话 / 生词本） */}
-        <div className="header-center">
+          {/* 顶栏视图切换药丸 (对话 / 生词本) */}
           <div className="view-switch-pills">
             <button
               type="button"
@@ -792,33 +865,7 @@ export default function SidePanelApp() {
           </div>
         </div>
 
-        <div className="header-right">
-          {/* 顶部一键通读网页按钮 */}
-          <button
-            type="button"
-            className={`web-read-btn ${isExtractingPage ? "loading" : ""}`}
-            title="一键提取并人话通读当前打开的网页"
-            disabled={isStreaming || isExtractingPage}
-            onClick={handleReadCurrentPage}
-          >
-            {isExtractingPage ? (
-              <LoadingOne theme="outline" size="15" className="spin-icon" />
-            ) : (
-              <BookOne theme="outline" size="15" />
-            )}
-            <span>通读网页</span>
-          </button>
-
-          <button
-            type="button"
-            className={`thinking-toggle-btn ${thinkingEnabled ? "active" : ""}`}
-            title={thinkingEnabled ? "深度思考已开启" : "开启深度思考 (思维链)"}
-            onClick={() => setThinkingEnabled((prev) => !prev)}
-          >
-            <Brain theme="outline" size="15" />
-            <span>思考</span>
-          </button>
-
+        <div className="header-bar-right">
           <button
             type="button"
             className="icon-btn new-chat-btn"
@@ -828,14 +875,67 @@ export default function SidePanelApp() {
             <Add theme="outline" size="18" />
           </button>
 
-          <ThemeModeSelector
-            value={themeMode}
-            onChange={(mode) => setThemeMode(mode)}
-          />
+          {/* 复制整场会话全文 */}
+          <button
+            type="button"
+            className={`icon-btn copy-all-btn ${copyAllSuccess ? "success" : ""}`}
+            title="复制整场会话全文 (Markdown)"
+            onClick={handleCopyAllSession}
+          >
+            {copyAllSuccess ? (
+              <CheckOne theme="filled" size="18" fill="#10b981" />
+            ) : (
+              <Copy theme="outline" size="18" />
+            )}
+          </button>
+
+          {/* 会话导出下拉菜单 */}
+          <div className="header-export-wrapper" ref={exportMenuRef}>
+            <button
+              type="button"
+              className={`icon-btn export-btn ${showExportMenu ? "active" : ""}`}
+              title="导出会话记录"
+              onClick={() => setShowExportMenu((prev) => !prev)}
+            >
+              <Export theme="outline" size="18" />
+            </button>
+
+            {showExportMenu && (
+              <div className="header-export-dropdown" role="menu">
+                <button
+                  type="button"
+                  className="dropdown-item"
+                  onClick={handleExportSessionMarkdown}
+                >
+                  <FileText theme="outline" size="14" />
+                  <span>导出为 Markdown 文件 (.md)</span>
+                </button>
+                <button
+                  type="button"
+                  className="dropdown-item"
+                  onClick={handleExportSessionJson}
+                >
+                  <FileCode theme="outline" size="14" />
+                  <span>导出为 JSON 会话数据 (.json)</span>
+                </button>
+                <button
+                  type="button"
+                  className="dropdown-item"
+                  onClick={() => {
+                    void handleCopyAllSession();
+                    setShowExportMenu(false);
+                  }}
+                >
+                  <Copy theme="outline" size="14" />
+                  <span>复制会话全文到剪贴板</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           <button
             type="button"
-            className="icon-btn"
+            className="icon-btn settings-btn"
             title="设置"
             onClick={() => browser.runtime.openOptionsPage()}
           >
@@ -843,6 +943,45 @@ export default function SidePanelApp() {
           </button>
         </div>
       </header>
+
+      {/* 顶部重构布局：第二层 二级快捷工具条 (Quick Bar - 仅在对话视图展示) */}
+      {activeView === "chat" && (
+        <div className="sidepanel-quick-bar">
+          <div className="quick-bar-left">
+            <button
+              type="button"
+              className={`web-read-btn ${isExtractingPage ? "loading" : ""}`}
+              title="一键提取并人话通读当前打开的网页正文"
+              disabled={isStreaming || isExtractingPage}
+              onClick={handleReadCurrentPage}
+            >
+              {isExtractingPage ? (
+                <LoadingOne theme="outline" size="14" className="spin-icon" />
+              ) : (
+                <BookOne theme="outline" size="14" />
+              )}
+              <span>通读当前网页</span>
+            </button>
+
+            <button
+              type="button"
+              className={`thinking-toggle-btn ${thinkingEnabled ? "active" : ""}`}
+              title={thinkingEnabled ? "深度思考已开启 (思维链模式)" : "开启深度思考 (思维链模式)"}
+              onClick={() => setThinkingEnabled((prev) => !prev)}
+            >
+              <Brain theme="outline" size="14" />
+              <span>深度思考</span>
+            </button>
+          </div>
+
+          <div className="quick-bar-right">
+            <ThemeModeSelector
+              value={themeMode}
+              onChange={(mode) => setThemeMode(mode)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 提取网页错误提示条 */}
       {extractError && (
