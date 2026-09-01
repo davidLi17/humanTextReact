@@ -203,6 +203,14 @@ export class PopupManager {
       <div class="translator-header">
         <div class="translator-title">人话翻译器</div>
         <div class="translator-header-actions" data-no-drag="true">
+          <button
+            type="button"
+            class="translator-sidepanel-btn"
+            title="在侧边栏中继续追问对话"
+            aria-label="在侧边栏中追问"
+          >
+            💬 追问
+          </button>
           <div class="translator-theme-selector">
             <button
               type="button"
@@ -315,6 +323,30 @@ export class PopupManager {
         });
         // 移除当前弹窗
         this.removeCurrentPopup();
+      });
+
+    // 侧边栏追问按钮点击事件
+    popup
+      .querySelector(".translator-sidepanel-btn")
+      ?.addEventListener("click", async () => {
+        const originalText =
+          popup.querySelector(".translator-text")?.textContent;
+        if (originalText) {
+          try {
+            await browser.storage.local.set({
+              pendingSidepanelText: {
+                text: originalText,
+                timestamp: Date.now(),
+              },
+            });
+            await browser.runtime.sendMessage({
+              action: MESSAGE_TYPES.OPEN_SIDEPANEL,
+            });
+            this.removeCurrentPopup();
+          } catch (error) {
+            logger.error("打开侧边栏失败:", error);
+          }
+        }
       });
 
     // 复制原文按钮
