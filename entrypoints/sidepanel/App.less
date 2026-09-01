@@ -900,6 +900,71 @@
       border-radius: 12px 12px 2px 12px;
       max-width: 88%;
       box-shadow: 0 1px 4px rgba(99, 102, 241, 0.2);
+      position: relative;
+      padding: 10px 14px;
+      transition: all 0.2s ease;
+
+      &.editing-card {
+        background-color: var(--color-bg-secondary);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-primary);
+        box-shadow: 0 0 0 2px var(--color-primary-light);
+        max-width: 96%;
+        width: 100%;
+        padding: 10px 12px;
+      }
+
+      .user-bubble-wrapper {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+
+      .user-bubble-actions {
+        position: absolute;
+        top: -6px;
+        right: -8px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease, transform 0.18s ease;
+        transform: translateY(2px);
+        z-index: 10;
+      }
+
+      &:hover .user-bubble-actions {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(0);
+      }
+
+      .user-action-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 11px;
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        background: rgba(17, 24, 39, 0.75);
+        backdrop-filter: blur(4px);
+        color: #ffffff;
+        cursor: pointer;
+        padding: 0;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        transition: all 0.15s ease;
+
+        &:hover:not(:disabled) {
+          background: rgba(17, 24, 39, 0.95);
+          transform: scale(1.1);
+          border-color: #ffffff;
+        }
+
+        &:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+      }
 
       .user-message-body {
         display: flex;
@@ -968,6 +1033,158 @@
         border-color: var(--color-error);
         background-color: #fef2f2;
       }
+    }
+  }
+}
+
+[data-theme="dark"] .chat-bubble-row.assistant-row .bubble-card.error-card {
+  background-color: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* 用户气泡行内编辑模式 */
+.user-inline-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+
+  .inline-edit-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 2px var(--color-primary-light);
+    }
+  }
+
+  .inline-edit-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+
+    .inline-edit-hint {
+      font-size: 10px;
+      color: var(--color-text-tertiary);
+      white-space: nowrap;
+    }
+
+    .inline-edit-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+
+      .inline-edit-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 5px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s ease;
+
+        span {
+          white-space: nowrap;
+        }
+
+        &.cancel-btn {
+          border: 1px solid var(--color-border);
+          background: transparent;
+          color: var(--color-text-secondary);
+
+          &:hover {
+            background-color: var(--color-bg-hover);
+            color: var(--color-text-primary);
+          }
+        }
+
+        &.submit-btn {
+          border: none;
+          background-color: var(--color-primary);
+          color: #ffffff;
+
+          &:hover:not(:disabled) {
+            opacity: 0.92;
+            transform: translateY(-0.5px);
+          }
+
+          &:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+          }
+        }
+      }
+    }
+  }
+}
+
+/* 错误卡片结构与重试按钮 */
+.error-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+
+  .error-message {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--color-error);
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-word;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .error-retry-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--color-error);
+    background-color: rgba(239, 68, 68, 0.08);
+    color: var(--color-error);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+
+    span {
+      white-space: nowrap;
+    }
+
+    &:hover:not(:disabled) {
+      background-color: var(--color-error);
+      color: #ffffff;
+      transform: translateY(-0.5px);
+      box-shadow: 0 2px 6px rgba(239, 68, 68, 0.25);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
   }
 }
@@ -1206,10 +1423,11 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 8px;
   margin-top: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--color-border-subtle);
+  flex-wrap: wrap;
 
   .action-link-btn {
     display: inline-flex;
@@ -1220,7 +1438,7 @@
     color: var(--color-text-tertiary);
     font-size: 11px;
     cursor: pointer;
-    padding: 2px 4px;
+    padding: 3px 6px;
     border-radius: 4px;
     white-space: nowrap;
     transition: all 0.15s ease;
@@ -1229,10 +1447,30 @@
       white-space: nowrap;
     }
 
-    &:hover {
+    &:hover:not(:disabled) {
       color: var(--color-text-primary);
       background-color: var(--color-bg-hover);
+      transform: translateY(-0.5px);
     }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    &.regenerate-btn:hover:not(:disabled) {
+      color: var(--color-primary);
+      background-color: var(--color-primary-light);
+    }
+  }
+}
+
+/* 窄屏或无 Hover 触摸屏设备优化 */
+@media (hover: none), (max-width: 480px) {
+  .chat-bubble-row.user-row .bubble-card .user-bubble-actions {
+    opacity: 0.85;
+    pointer-events: auto;
+    transform: translateY(0);
   }
 }
 
