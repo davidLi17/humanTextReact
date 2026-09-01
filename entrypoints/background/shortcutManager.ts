@@ -1,9 +1,9 @@
+import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { ContextMenuHandler } from "./contextMenuHandler";
 
 const logger = createLogger("shortcuts", "⌨️");
 
-2;
 /**
  * 快捷键管理器
  * 负责处理快捷键相关的功能
@@ -29,6 +29,25 @@ export class ShortcutManager {
       });
     } catch (error) {
       logger.error("保存快捷键信息失败:", error);
+    }
+  }
+
+  /**
+   * 快捷键打开侧边栏
+   */
+  static async executeOpenSidepanel() {
+    try {
+      logger.log("⌨️ [ShortcutManager] 快捷键打开侧边栏被触发");
+      const tabs = await browser.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      const tab = tabs[0];
+      if (tab?.windowId) {
+        await openSidePanel({ windowId: tab.windowId });
+      }
+    } catch (error) {
+      logger.error("❌ [ShortcutManager] 打开侧边栏快捷键失败:", error);
     }
   }
 

@@ -203,6 +203,22 @@ export class PopupManager {
       <div class="translator-header">
         <div class="translator-title">人话翻译器</div>
         <div class="translator-header-actions" data-no-drag="true">
+          <button
+            type="button"
+            class="translator-sidepanel-btn"
+            title="在侧边栏中继续追问对话"
+            aria-label="在侧边栏中追问"
+          >
+            💬 追问
+          </button>
+          <button
+            type="button"
+            class="translator-vault-btn"
+            title="存入黑话生词本"
+            aria-label="存入生词本"
+          >
+            ⭐ 收藏
+          </button>
           <div class="translator-theme-selector">
             <button
               type="button"
@@ -317,18 +333,61 @@ export class PopupManager {
         this.removeCurrentPopup();
       });
 
-    // 复制原文按钮
+    // 侧边栏追问按钮点击事件
     popup
-      .querySelector(".translator-copy-original-btn")
+      .querySelector(".translator-sidepanel-btn")
       ?.addEventListener("click", async () => {
         const originalText =
           popup.querySelector(".translator-text")?.textContent;
         if (originalText) {
           try {
-            await navigator.clipboard.writeText(originalText);
-            logger.log("原文已复制");
+            await browser.storage.local.set({
+              pendingSidepanelText: {
+                text: originalText,
+                timestamp: Date.now(),
+              },
+            });
+            await browser.runtime.sendMessage({
+              action: MESSAGE_TYPES.OPEN_SIDEPANEL,
+            });
+            this.removeCurrentPopup();
           } catch (error) {
-            logger.error("复制原文失败:", error);
+            logger.error("打开侧边栏失败:", error);
+          }
+        }
+      });
+
+    // 收藏到生词本按钮点击事件
+    popup
+      .querySelector(".translator-vault-btn")
+      ?.addEventListener("click", async () => {
+        const originalText =
+          popup.querySelector(".translator-text")?.textContent;
+        const translatedText = popup.querySelector(
+          ".translator-translated-text"
+        )?.textContent;
+        const vaultBtn = popup.querySelector(
+          ".translator-vault-btn"
+        ) as HTMLButtonElement | null;
+
+        if (originalText && translatedText && vaultBtn) {
+          try {
+            vaultBtn.textContent = "保存中...";
+            await browser.runtime.sendMessage({
+              action: MESSAGE_TYPES.SAVE_JARGON_ITEM,
+              item: {
+                term: originalText.slice(0, 30).trim(),
+                explanation: translatedText.trim(),
+                category: "通用",
+              },
+            });
+            vaultBtn.textContent = "已收藏 ✓";
+            setTimeout(() => {
+              if (vaultBtn) vaultBtn.textContent = "⭐ 收藏";
+            }, 2000);
+          } catch (error) {
+            logger.error("存入生词本失败:", error);
+            if (vaultBtn) vaultBtn.textContent = "⭐ 收藏";
           }
         }
       });

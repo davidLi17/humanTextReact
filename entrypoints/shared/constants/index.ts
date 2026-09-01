@@ -16,6 +16,18 @@ export const MESSAGE_TYPES = {
   UPDATE_TRANSLATION: "updateTranslation", // 保留用于兼容
   UPDATE_CONTENT_TRANSLATION: "updateContentTranslation", // content弹窗专用
   UPDATE_POPUP_TRANSLATION: "updatePopupTranslation", // popup页面专用
+  UPDATE_SIDEPANEL_TRANSLATION: "updateSidepanelTranslation", // sidepanel页面专用
+  OPEN_SIDEPANEL: "openSidepanel", // 打开侧边栏
+  EXTRACT_PAGE_CONTENT: "extractPageContent", // 提取网页正文
+  READ_PAGE_IN_SIDEPANEL: "readPageInSidepanel", // 侧边栏通读网页
+  READ_WEB_PAGE: "readWebPage", // 触发通读
+  SAVE_JARGON_ITEM: "saveJargonItem", // 保存黑话词条
+  GET_JARGON_LIST: "getJargonList", // 获取黑话列表
+  UPDATE_JARGON_ITEM: "updateJargonItem", // 更新黑话词条
+  DELETE_JARGON_ITEM: "deleteJargonItem", // 删除黑话词条
+  TOGGLE_JARGON_STAR: "toggleJargonStar", // 切换星标
+  EXPORT_JARGON: "exportJargon", // 导出黑话
+  IMPORT_JARGON: "importJargon", // 导入黑话
   SHOW_TRANSLATION_POPUP: "showTranslationPopup",
   GET_SELECTED_TEXT: "getSelectedText",
   APPEND_DIAGNOSTIC_LOGS: "appendDiagnosticLogs",

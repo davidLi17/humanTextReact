@@ -59,3 +59,7 @@ Desktop.ini
 # Local artifact exports
 artifacts/
 chrome-mv3.7z
+
+# Claude local configs and worktrees
+.claude/
+

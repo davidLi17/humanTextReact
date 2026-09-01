@@ -1,3 +1,4 @@
+import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { MessageUtils } from "./messageUtils";
@@ -26,6 +27,51 @@ export class ContextMenuHandler {
       selectionText: info.selectionText?.substring(0, 50) + "...",
       timestamp: new Date().toISOString(),
     });
+
+    if (info.menuItemId === "readPageInSidepanel" && tab?.windowId) {
+      try {
+        await openSidePanel({ windowId: tab.windowId });
+        await browser.storage.local.set({
+          pendingWebPageRead: {
+            timestamp: Date.now(),
+            tabId: tab.id,
+          },
+        });
+        void MessageUtils.sendRuntimeMessage({
+          action: "readCurrentWebPage",
+          tabId: tab.id,
+        });
+      } catch (error) {
+        logger.error("❌ [ContextMenuHandler] 触发侧边栏通读网页失败:", error);
+      }
+      return;
+    }
+
+    if (
+      (info.menuItemId === "openSidepanel" ||
+        info.menuItemId === "openSidepanelTranslate") &&
+      tab?.windowId
+    ) {
+      try {
+        await openSidePanel({ windowId: tab.windowId });
+        if (info.selectionText) {
+          await browser.storage.local.set({
+            pendingSidepanelText: {
+              text: info.selectionText,
+              timestamp: Date.now(),
+            },
+          });
+          // 也尝试直接通过 runtime 消息通知可能已经处于激活状态的 sidepanel
+          void MessageUtils.sendRuntimeMessage({
+            action: "sendToSidepanel",
+            text: info.selectionText,
+          });
+        }
+      } catch (error) {
+        logger.error("❌ [ContextMenuHandler] 打开侧边栏失败:", error);
+      }
+      return;
+    }
 
     if (info.menuItemId === "translateSelection" && tab?.id) {
       let requestId: string | undefined;

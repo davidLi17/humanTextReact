@@ -1,10 +1,13 @@
 import React, { useState } from "react";
+import { JargonVault } from "@/entrypoints/shared/jargonVault";
 
 interface CopyFooterProps {
   onCopyOriginal: () => Promise<boolean>;
   onCopyTranslation: () => Promise<boolean>;
   hasResult: boolean;
   hasInput: boolean;
+  originalText?: string;
+  translationText?: string;
 }
 
 const CopyFooter: React.FC<CopyFooterProps> = ({
@@ -12,11 +15,36 @@ const CopyFooter: React.FC<CopyFooterProps> = ({
   onCopyTranslation,
   hasResult,
   hasInput,
+  originalText = "",
+  translationText = "",
 }) => {
   const [copyOriginalText, setCopyOriginalText] = useState("复制原文");
   const [copyTranslationText, setCopyTranslationText] = useState("复制译文");
+  const [saveVaultText, setSaveVaultText] = useState("⭐ 存入生词本");
   const [isCopyingOriginal, setIsCopyingOriginal] = useState(false);
   const [isCopyingTranslation, setIsCopyingTranslation] = useState(false);
+  const [isSavingVault, setIsSavingVault] = useState(false);
+
+  const handleSaveToVault = async () => {
+    if (!hasResult || isSavingVault || !originalText.trim()) return;
+
+    setIsSavingVault(true);
+    setSaveVaultText("保存中...");
+    try {
+      await JargonVault.addJargon({
+        term: originalText.trim().slice(0, 30),
+        explanation: translationText.trim(),
+        category: "通用",
+      });
+      setSaveVaultText("已存入生词本 ✓");
+      setTimeout(() => setSaveVaultText("⭐ 存入生词本"), 2000);
+    } catch (error) {
+      setSaveVaultText("保存失败");
+      setTimeout(() => setSaveVaultText("⭐ 存入生词本"), 2000);
+    } finally {
+      setIsSavingVault(false);
+    }
+  };
 
   const handleCopyOriginal = async () => {
     if (isCopyingOriginal) return; // 防止重复点击
@@ -82,6 +110,16 @@ const CopyFooter: React.FC<CopyFooterProps> = ({
       >
         {copyTranslationText}
       </button>
+      {hasResult && (
+        <button
+          className="copy-footer-btn copy-vault-btn"
+          onClick={handleSaveToVault}
+          disabled={isSavingVault}
+          title="将本条黑话翻译存入生词本"
+        >
+          {saveVaultText}
+        </button>
+      )}
     </div>
   );
 };

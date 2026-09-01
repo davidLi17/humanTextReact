@@ -1,6 +1,11 @@
 import type { LogLevel } from "@/entrypoints/shared/constants";
 
-export type LoggerContext = "background" | "content" | "popup" | "options";
+export type LoggerContext =
+  | "background"
+  | "content"
+  | "popup"
+  | "options"
+  | "sidepanel";
 export type LoggerMethod =
   | "log"
   | "info"
