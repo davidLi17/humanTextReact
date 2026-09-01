@@ -94,21 +94,37 @@ export function extractSuggestedQuestions(markdownText: string): string[] {
   // 匹配行首是数字、破折号或问号的追问行
   const lines = targetText.split("\n");
   for (const line of lines) {
-    const trimmed = line.trim();
+    let trimmed = line.trim();
     if (!trimmed) continue;
 
-    // 匹配如: "1. 如果我是新手，该如何落地？" 或 "- 这篇文章的观点有什么局限？" 或 "• 怎么看待..."
-    const questionMatch = trimmed.match(
-      /^(?:\d+[\.、\)]|\-|\*|•|\?|❓|💬)\s*(?:[“"「]?)(.+?)(?:[”"」]?)$/
+    // 清洗掉行首的前缀（如数字序号、破折号、星号、问号、emoji 等）
+    trimmed = trimmed.replace(
+      /^(?:\d+[\.、\)]|\-|\*|•|\?|❓|💬|问题\s*\d*[:：]?)\s*/,
+      ""
     );
+    // 清除首尾残留的 Markdown 加粗符号、问号或引号
+    trimmed = trimmed.replace(/^[\*\#\_\s\?？“"「]+|[\*\#\_\s“"」]+$/g, "");
+    // 清除双星号加粗包裹
+    trimmed = trimmed
+      .replace(/^\*\*(.*?)\*\*$/, "$1")
+      .replace(/^__(.*?)__$/, "$1")
+      .trim();
 
-    if (questionMatch && questionMatch[1]) {
-      let q = questionMatch[1].trim();
-      // 移除尾部可能多余的标记
-      q = q.replace(/^[\*\#\_\s]+|[\*\#\_\s]+$/g, "");
-      if (q.length >= 4 && q.length <= 80 && (q.includes("？") || q.includes("?") || q.includes("如何") || q.includes("怎么") || q.includes("什么") || q.includes("为什么") || q.includes("建议") || q.includes("思考"))) {
-        questions.push(q);
-      }
+    if (
+      trimmed.length >= 4 &&
+      trimmed.length <= 80 &&
+      (trimmed.includes("？") ||
+        trimmed.includes("?") ||
+        trimmed.includes("如何") ||
+        trimmed.includes("怎么") ||
+        trimmed.includes("什么") ||
+        trimmed.includes("为什么") ||
+        trimmed.includes("建议") ||
+        trimmed.includes("思考") ||
+        trimmed.includes("是否") ||
+        trimmed.includes("局限"))
+    ) {
+      questions.push(trimmed);
     }
   }
 

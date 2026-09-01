@@ -33,6 +33,7 @@ import {
   inferJargonDetails,
   saveJargonItem,
 } from "@/entrypoints/shared/jargonStorage";
+import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import JargonVaultPanel from "./components/JargonVaultPanel";
@@ -91,6 +92,7 @@ export default function SidePanelApp() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [inputText, setInputText] = useState<string>("");
+  const [images, setImages] = useState<ChatMessage["images"]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isExtractingPage, setIsExtractingPage] = useState<boolean>(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -496,6 +498,7 @@ export default function SidePanelApp() {
       id: userMessageId,
       role: "user",
       content: text,
+      images: images && images.length > 0 ? images : undefined,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -531,7 +534,9 @@ export default function SidePanelApp() {
     setSessions(nextSessions);
     void saveSessionsToStorage(nextSessions);
 
+    const imagesToSend = images;
     setInputText("");
+    setImages([]);
     setIsStreaming(true);
     setExtractError(null);
 
@@ -551,6 +556,7 @@ export default function SidePanelApp() {
         source: "sidepanel",
         sessionId: activeSession.id,
         messages: historyPayload,
+        images: imagesToSend,
         thinkingEnabled,
       });
     } catch (error: any) {
@@ -686,6 +692,44 @@ export default function SidePanelApp() {
     } catch (err) {
       logger.error("存入生词本失败:", err);
     }
+  };
+
+  // 处理剪贴板图片粘贴
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    try {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf("image") !== -1) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            if (!ImageUtils.isValidImageSize(file.size)) {
+              alert("图片大小超过限制 (10MB)");
+              return;
+            }
+            const compressed = await ImageUtils.compressImage(file);
+            setImages((prev) => [
+              ...(prev || []),
+              {
+                data: compressed,
+                mimeType: file.type,
+                fileName: `paste-${Date.now()}`,
+              },
+            ]);
+            showToast("已添加图片 🖼️");
+          }
+        }
+      }
+    } catch (err: any) {
+      logger.error("粘贴图片失败:", err);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImages((prev) => (prev || []).filter((_, i) => i !== index));
   };
 
   // 快捷按键处理
@@ -1085,7 +1129,21 @@ export default function SidePanelApp() {
                           </div>
                         </div>
                       ) : (
-                        <div className="user-text">{message.content}</div>
+                        <div className="user-message-body">
+                          {message.images && message.images.length > 0 && (
+                            <div className="message-images-grid">
+                              {message.images.map((img, imgIdx) => (
+                                <img
+                                  key={imgIdx}
+                                  src={img.data}
+                                  alt="用户上传图片"
+                                  className="message-attached-image"
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <div className="user-text">{message.content}</div>
+                        </div>
                       )
                     ) : (
                       <>
@@ -1205,15 +1263,33 @@ export default function SidePanelApp() {
 
           {/* 底部输入控制台 */}
           <footer className="chat-input-footer">
+            {images && images.length > 0 && (
+              <div className="input-images-preview">
+                {images.map((img, idx) => (
+                  <div key={idx} className="preview-image-item">
+                    <img src={img.data} alt="待发送图片" />
+                    <button
+                      type="button"
+                      className="remove-img-btn"
+                      onClick={() => handleRemoveImage(idx)}
+                      title="移除图片"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="input-box-wrapper">
               <textarea
                 ref={inputRef}
                 className="chat-textarea"
-                placeholder="输入追问、黑话术语或指令 (Enter 发送，Shift+Enter 换行)..."
+                placeholder="输入追问、黑话术语或指令，支持 Ctrl+V 粘贴图片 (Enter 发送，Shift+Enter 换行)..."
                 value={inputText}
                 rows={2}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
               />
 
               <div className="input-controls-bar">
