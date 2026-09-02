@@ -1137,6 +1137,8 @@ export default function SidePanelApp() {
     }
 
     const inferred = inferJargonDetails(term, message.content, sourceUrl);
+    const sourceContext =
+      term.trim() !== inferred.term.trim() ? term.trim() : undefined;
 
     try {
       await saveJargonItem({
@@ -1147,7 +1149,7 @@ export default function SidePanelApp() {
         tags: inferred.tags,
         isStarred: true,
         sourceUrl,
-        sourceContext: term,
+        sourceContext,
       });
 
       setSavedVaultMessageIds((prev) => {

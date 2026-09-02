@@ -3,6 +3,11 @@ import { JargonVault } from "../entrypoints/shared/jargonVault.ts";
 import { JARGON_STORAGE_KEY } from "../entrypoints/shared/jargonTypes.ts";
 import { MessageHandler } from "../entrypoints/background/messageHandler.ts";
 import { MESSAGE_TYPES } from "../entrypoints/shared/constants/index.ts";
+import {
+  getJargonList,
+  importJargonItems,
+  inferJargonDetails,
+} from "../entrypoints/shared/jargonStorage.ts";
 
 // 模拟内存存储
 let mockStorage = {};
@@ -40,6 +45,86 @@ afterEach(() => {
 });
 
 describe("JargonVault 核心存储与管理", () => {
+  test("旧数据读取后自动迁移，所有入口共享规范模型", async () => {
+    mockStorage[JARGON_STORAGE_KEY] = [
+      {
+        id: "legacy-1",
+        term: "向上管理",
+        explanation: "主动帮助上级获得完整信息。",
+        metaphor: "像副驾驶及时提醒路线。",
+        category: "职场暗语",
+        tags: ["职场"],
+        starred: true,
+        createdAt: 100,
+        updatedAt: 200,
+      },
+    ];
+
+    const sidepanelList = await getJargonList();
+    expect(sidepanelList[0].analogy).toBe("像副驾驶及时提醒路线。");
+    expect(sidepanelList[0].isStarred).toBe(true);
+    expect(sidepanelList[0].category).toBe("职场");
+
+    const stored = mockStorage[JARGON_STORAGE_KEY][0];
+    expect(stored.metaphor).toBeUndefined();
+    expect(stored.starred).toBeUndefined();
+    expect(stored.analogy).toBe("像副驾驶及时提醒路线。");
+    expect(stored.isStarred).toBe(true);
+
+    await JargonVault.addJargon({
+      term: "现金流",
+      explanation: "持续进入和流出的钱。",
+      metaphor: "像水管里的水。",
+      starred: true,
+      category: "金融",
+    });
+    const sharedList = await getJargonList();
+    expect(sharedList.find((item) => item.term === "现金流")?.analogy).toBe(
+      "像水管里的水。"
+    );
+  });
+
+  test("规范 JSON 可回导，并兼容 jargonList 包装", async () => {
+    await JargonVault.addJargon({
+      term: "复利",
+      explanation: "收益继续参与下一轮增长。",
+      category: "金融",
+      starred: true,
+    });
+    const json = await JargonVault.exportJargonAsJson();
+    const exported = JSON.parse(json);
+    expect(exported.items[0].isStarred).toBe(true);
+    expect(exported.items[0].starred).toBeUndefined();
+
+    await JargonVault.clearAll();
+    const roundTrip = await importJargonItems(json);
+    expect(roundTrip.success).toBe(true);
+    expect((await getJargonList())[0].term).toBe("复利");
+
+    const legacyWrapper = await importJargonItems({
+      jargonList: [
+        {
+          term: "安全金",
+          explanation: "用于覆盖突发情况的现金储备。",
+          category: "金融",
+          starred: true,
+        },
+      ],
+    });
+    expect(legacyWrapper.success).toBe(true);
+    expect((await getJargonList()).find((item) => item.term === "安全金")?.isStarred).toBe(true);
+  });
+
+  test("侧边栏长问题提炼为短术语并保留原始上下文", () => {
+    const question =
+      "请解释为什么安全金能够在失业、身体问题和市场低点出现时，为普通人保留等待、拒绝和重新选择工作的权利，并说明应该准备多长时间的生活费";
+    const inferred = inferJargonDetails(question, "安全金的核心价值是购买决策时间。");
+    expect(inferred.term.length).toBeLessThanOrEqual(61);
+    expect(inferred.term.endsWith("…")).toBe(true);
+    expect(question).not.toBe(inferred.term);
+    expect(inferred.category).toBe("金融");
+  });
+
   test("添加新生词条目 (addJargon) 并验证默认属性与 UUID 生成", async () => {
     const item = await JargonVault.addJargon({
       term: "颗粒度",
@@ -56,10 +141,10 @@ describe("JargonVault 核心存储与管理", () => {
     expect(typeof item.id).toBe("string");
     expect(item.term).toBe("颗粒度");
     expect(item.explanation).toBe("指工作分工或讨论方案的详细/精细程度。");
-    expect(item.metaphor).toBe("像把整块豆腐切成大块还是碎粒。");
+    expect(item.analogy).toBe("像把整块豆腐切成大块还是碎粒。");
     expect(item.category).toBe("大厂黑话");
     expect(item.tags).toEqual(["管理", "效率"]);
-    expect(item.starred).toBe(true);
+    expect(item.isStarred).toBe(true);
     expect(item.createdAt).toBeGreaterThan(0);
     expect(item.updatedAt).toBeGreaterThan(0);
 
@@ -94,8 +179,8 @@ describe("JargonVault 核心存储与管理", () => {
     expect(merged.createdAt).toBe(initialCreatedAt);
     expect(merged.term).toBe("rag");
     expect(merged.explanation).toBe("检索增强生成：先查知识库再回答。");
-    expect(merged.metaphor).toBe("开卷考试，先翻书找资料再作答。");
-    expect(merged.starred).toBe(true);
+    expect(merged.analogy).toBe("开卷考试，先翻书找资料再作答。");
+    expect(merged.isStarred).toBe(true);
     // 标签应合并去重: ["AI", "LLM", "NLP"]
     expect(merged.tags).toContain("AI");
     expect(merged.tags).toContain("LLM");
@@ -146,9 +231,9 @@ describe("JargonVault 核心存储与管理", () => {
     // 1. 获取全量列表（默认星标置顶）
     const all = await JargonVault.getJargonList();
     expect(all).toHaveLength(3);
-    expect(all[0].starred).toBe(true);
-    expect(all[1].starred).toBe(true);
-    expect(all[2].starred).toBe(false);
+    expect(all[0].isStarred).toBe(true);
+    expect(all[1].isStarred).toBe(true);
+    expect(all[2].isStarred).toBe(false);
 
     // 2. 分类过滤
     const aiItems = await JargonVault.getJargonList(undefined, "AI技术");
@@ -158,7 +243,7 @@ describe("JargonVault 核心存储与管理", () => {
     // 3. 星标过滤
     const starredItems = await JargonVault.getJargonList(undefined, undefined, true);
     expect(starredItems).toHaveLength(2);
-    expect(starredItems.every((item) => item.starred)).toBe(true);
+    expect(starredItems.every((item) => item.isStarred)).toBe(true);
 
     // 4. 分类 + 星标联合过滤
     const filtered = await JargonVault.getJargonList(undefined, "大厂黑话", true);
@@ -216,14 +301,36 @@ describe("JargonVault 核心存储与管理", () => {
 
     expect(updated.id).toBe(item.id);
     expect(updated.explanation).toBe("具体的战术策略与执行套路。");
-    expect(updated.metaphor).toBe("打牌的出牌套路。");
-    expect(updated.category).toBe("职场暗语");
+    expect(updated.analogy).toBe("打牌的出牌套路。");
+    expect(updated.category).toBe("职场");
     expect(updated.tags).toEqual(["策略"]);
 
     // 不存在的 ID 应抛出异常
     expect(
       JargonVault.updateJargon("non-existent-id", { explanation: "test" })
     ).rejects.toThrow("未找到指定词条");
+  });
+
+  test("旧字段更新可以覆盖已有规范字段", async () => {
+    const item = await JargonVault.addJargon({
+      term: "抓重点",
+      explanation: "优先处理最关键的信息。",
+      analogy: "先抓主干。",
+      isStarred: true,
+    });
+
+    const updated = await JargonVault.updateJargon(item.id, {
+      metaphor: "先找到树干，再处理枝叶。",
+      starred: false,
+    });
+
+    expect(updated.analogy).toBe("先找到树干，再处理枝叶。");
+    expect(updated.isStarred).toBe(false);
+    const stored = mockStorage[JARGON_STORAGE_KEY][0];
+    expect(stored.analogy).toBe("先找到树干，再处理枝叶。");
+    expect(stored.isStarred).toBe(false);
+    expect(stored.metaphor).toBeUndefined();
+    expect(stored.starred).toBeUndefined();
   });
 
   test("删除词条 (deleteJargon)", async () => {
@@ -249,10 +356,10 @@ describe("JargonVault 核心存储与管理", () => {
     });
 
     const starred = await JargonVault.toggleStar(item.id);
-    expect(starred.starred).toBe(true);
+    expect(starred.isStarred).toBe(true);
 
     const unstarred = await JargonVault.toggleStar(item.id);
-    expect(unstarred.starred).toBe(false);
+    expect(unstarred.isStarred).toBe(false);
   });
 
   test("导出为美观的 Markdown 词典 (exportJargonAsMarkdown)", async () => {
@@ -268,13 +375,12 @@ describe("JargonVault 核心存储与管理", () => {
     });
 
     const md = await JargonVault.exportJargonAsMarkdown();
-    expect(md).toContain("# 黑话生词本与收藏 (Jargon Vault)");
-    expect(md).toContain("## 大厂黑话");
-    expect(md).toContain("⭐ 心智");
-    expect(md).toContain("- **人话释义**：用户对某种品牌或认知的既定印象。");
-    expect(md).toContain("- **生活比喻**：就像在用户脑子里占了个车位。");
+    expect(md).toContain("# 📚 人话翻译器 · 黑话生词本与收藏");
+    expect(md).toContain("心智 ⭐");
+    expect(md).toContain("用户对某种品牌或认知的既定印象。");
+    expect(md).toContain("就像在用户脑子里占了个车位。");
     expect(md).toContain("`#用户心理`");
-    expect(md).toContain("- **使用上下文**：*“我们要抢占用户心智。”*");
+    expect(md).toContain("- **使用上下文**: 我们要抢占用户心智。");
     expect(md).toContain("[https://example.com/growth](https://example.com/growth)");
   });
 
@@ -288,7 +394,7 @@ describe("JargonVault 核心存储与管理", () => {
     const jsonStr = await JargonVault.exportJargonAsJson();
     const parsed = JSON.parse(jsonStr);
 
-    expect(parsed.version).toBe("1.0");
+    expect(parsed.version).toBe("2.0");
     expect(parsed.count).toBe(1);
     expect(Array.isArray(parsed.items)).toBe(true);
     expect(parsed.items[0].term).toBe("链路");
@@ -338,7 +444,7 @@ describe("JargonVault 核心存储与管理", () => {
 
     const latong = list.find((i) => i.term === "拉通");
     expect(latong?.explanation).toBe("组织各方同步信息，消除信息差。");
-    expect(latong?.starred).toBe(true);
+    expect(latong?.isStarred).toBe(true);
     expect(latong?.tags).toContain("沟通");
     expect(latong?.tags).toContain("协作");
 
@@ -412,7 +518,7 @@ describe("后台消息处理通信 (MessageHandler Jargon Protocol)", () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(toggleResponse.success).toBe(true);
-    expect(toggleResponse.item.starred).toBe(true);
+    expect(toggleResponse.item.isStarred).toBe(true);
 
     // 4. 更新词条
     let updateResponse;
