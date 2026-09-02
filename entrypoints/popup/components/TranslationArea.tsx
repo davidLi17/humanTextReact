@@ -256,7 +256,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
             )}
             <button
               className="primary-btn"
-              onClick={onTranslate}
+              onClick={() => onTranslate()}
               disabled={translationState.isTranslating}
             >
               {translationState.isTranslating ? "翻译中..." : "翻译"}

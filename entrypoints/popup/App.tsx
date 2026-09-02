@@ -283,8 +283,10 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
   };
 
   // 发送翻译请求
-  const handleTranslate = async (textOverride?: string) => {
-    const text = (textOverride ?? translationState.sourceText).trim();
+  const handleTranslate = async (textOverride?: unknown) => {
+    const overrideText =
+      typeof textOverride === "string" ? textOverride : undefined;
+    const text = (overrideText ?? translationState.sourceText).trim();
     logger.log("Popup 准备翻译", { textLength: text.length });
     if (!text) {
       alert("请输入要翻译的文本");
@@ -337,7 +339,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
           action: "translate",
           requestId,
           text,
-          images: textOverride ? [] : translationState.images,
+          images: overrideText ? [] : translationState.images,
           thinkingEnabled: userSettings.thinkingEnabled,
           temperature: userSettings.temperature,
           promptTemplate: userSettings.promptTemplate,

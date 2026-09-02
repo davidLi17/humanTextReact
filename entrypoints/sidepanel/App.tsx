@@ -79,6 +79,7 @@ import {
   Star,
   Edit,
   Refresh,
+  Down,
 } from "@icon-park/react";
 import React, { useEffect, useRef, useState } from "react";
 import "./App.less";
@@ -146,6 +147,10 @@ export default function SidePanelApp() {
   }>({ left: 0, top: 0, placement: "top" });
   const [selectedQuoteText, setSelectedQuoteText] = useState<string>("");
   const [activeQuotedText, setActiveQuotedText] = useState<string | null>(null);
+
+  // 智能滚动与回到底部/流式指示器状态 (对标 GPT 交互)
+  const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
+  const userHasScrolledUpRef = useRef<boolean>(false);
 
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
@@ -419,9 +424,18 @@ export default function SidePanelApp() {
     };
   }, [activeSessionId]);
 
-  // 自动滚动到消息流底部
+  // 平滑滚动到底部
+  const scrollToBottom = (smooth = true) => {
+    userHasScrolledUpRef.current = false;
+    setIsAtBottom(true);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+    });
+  };
+
+  // 自动滚动到消息流底部 (遵循 GPT 交互: 仅在用户未主动往上滑时跟随，绝不跟用户抢夺滚动控制权)
   useEffect(() => {
-    if (activeView === "chat") {
+    if (activeView === "chat" && !userHasScrolledUpRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [activeSession?.messages, isStreaming, isExtractingPage, activeView]);
@@ -487,6 +501,13 @@ export default function SidePanelApp() {
 
     const handleScroll = () => {
       setQuoteBarVisible(false);
+      if (chatContentRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = chatContentRef.current;
+        // 距离底部 40px 以内视作在底部，否则视作用户主动往上查看
+        const atBottom = scrollHeight - scrollTop - clientHeight < 40;
+        setIsAtBottom(atBottom);
+        userHasScrolledUpRef.current = !atBottom;
+      }
     };
 
     const handleMouseDown = (e: MouseEvent) => {
@@ -612,6 +633,7 @@ export default function SidePanelApp() {
 
       setIsExtractingPage(false);
       setIsStreaming(true);
+      scrollToBottom(true);
 
       // 构建针对网页长文通读的高质量结构化 Prompt
       const userPrompt = buildWebReadingUserPrompt(pageData);
@@ -696,6 +718,7 @@ export default function SidePanelApp() {
     setImages([]);
     setIsStreaming(true);
     setExtractError(null);
+    scrollToBottom(true);
 
     try {
       const historyPayload = [
@@ -845,6 +868,7 @@ export default function SidePanelApp() {
     setEditingText("");
     setIsStreaming(true);
     setExtractError(null);
+    scrollToBottom(true);
 
     try {
       let messagesPayload: any[];
@@ -948,6 +972,7 @@ export default function SidePanelApp() {
 
     setIsStreaming(true);
     setExtractError(null);
+    scrollToBottom(true);
 
     try {
       let messagesPayload: any[];
@@ -1972,6 +1997,31 @@ export default function SidePanelApp() {
 
           {/* 底部输入控制台 */}
           <footer className="chat-input-footer">
+            {/* 浮动回到底部 / 正在生成指示器胶囊按钮 (对标 GPT 交互) */}
+            {activeView === "chat" &&
+              !isAtBottom &&
+              activeSession &&
+              activeSession.messages.length > 0 && (
+                <button
+                  type="button"
+                  className={`scroll-bottom-indicator-btn ${
+                    isStreaming ? "is-streaming" : ""
+                  }`}
+                  title={isStreaming ? "AI 正在生成中，点击直达底部" : "回到底部"}
+                  onClick={() => scrollToBottom(true)}
+                >
+                  {isStreaming ? (
+                    <div className="streaming-dots-indicator">
+                      <span className="indicator-dot" />
+                      <span className="indicator-dot" />
+                      <span className="indicator-dot" />
+                    </div>
+                  ) : (
+                    <Down theme="outline" size="14" />
+                  )}
+                </button>
+              )}
+
             {/* 划词引用胶囊预览条 */}
             {activeQuotedText && (
               <QuoteInputCapsule

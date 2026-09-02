@@ -1476,10 +1476,71 @@
 
 /* 底部输入框 */
 .chat-input-footer {
+  position: relative;
   padding: 10px 14px;
   background-color: var(--color-bg-primary);
   border-top: 1px solid var(--color-border-subtle);
   flex-shrink: 0;
+
+  /* GPT 交互：浮动在输入框上方的 回到底部 / 正在生成指示器胶囊 */
+  .scroll-bottom-indicator-btn {
+    position: absolute;
+    top: -38px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 16px;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-secondary);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+    cursor: pointer;
+    z-index: 10;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: fadeInSlideUp 0.2s ease-out;
+
+    &:hover {
+      background-color: var(--color-bg-hover);
+      color: var(--color-text-primary);
+      border-color: var(--color-primary);
+      transform: translateX(-50%) translateY(-2px);
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.2);
+    }
+
+    &.is-streaming {
+      background-color: var(--color-bg-secondary);
+      border-color: var(--color-primary);
+      padding: 0 12px;
+      height: 28px;
+      top: -34px;
+    }
+
+    .streaming-dots-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+
+      .indicator-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background-color: var(--color-primary);
+        animation: indicatorPulse 1.2s infinite ease-in-out both;
+
+        &:nth-child(1) {
+          animation-delay: -0.32s;
+        }
+        &:nth-child(2) {
+          animation-delay: -0.16s;
+        }
+      }
+    }
+  }
 
   .input-images-preview {
     display: flex;
@@ -1853,5 +1914,29 @@
   }
   40% {
     transform: scale(1);
+  }
+}
+
+@keyframes fadeInSlideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes indicatorPulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1.1);
+    opacity: 1;
   }
 }
