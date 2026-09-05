@@ -4,10 +4,18 @@ import type { WebPageMetadata } from "./webReadingPrompt";
 /**
  * 侧边栏工具函数
  */
-export async function openSidePanel(target: {
+export interface SidePanelTarget {
   windowId?: number;
   tabId?: number;
-}): Promise<boolean> {
+}
+
+const SIDE_PANEL_TOGGLE_DEDUPE_MS = 500;
+const recentSidePanelToggles = new Map<
+  string,
+  { startedAt: number; result: Promise<boolean> }
+>();
+
+export async function openSidePanel(target: SidePanelTarget): Promise<boolean> {
   try {
     const chromeApi = (globalThis as any).chrome;
     const browserApi = (globalThis as any).browser;
@@ -28,6 +36,79 @@ export async function openSidePanel(target: {
     console.error("打开侧边栏失败:", error);
     return false;
   }
+}
+
+function getSidePanelToggleKey(target: SidePanelTarget): string {
+  if (typeof target.windowId === "number") return `window:${target.windowId}`;
+  if (typeof target.tabId === "number") return `tab:${target.tabId}`;
+  return "unknown";
+}
+
+async function performSidePanelToggle(
+  target: SidePanelTarget
+): Promise<boolean> {
+  try {
+    const chromeApi = (globalThis as any).chrome;
+    const browserApi = (globalThis as any).browser;
+    const sidePanelApi = browserApi?.sidePanel || chromeApi?.sidePanel;
+    const runtimeApi = browserApi?.runtime || chromeApi?.runtime;
+
+    if (!sidePanelApi || !runtimeApi) return false;
+
+    let isOpen = false;
+    if (typeof runtimeApi.getContexts === "function") {
+      const filter: Record<string, unknown> = {
+        contextTypes: ["SIDE_PANEL"],
+      };
+      if (typeof target.windowId === "number") {
+        filter.windowIds = [target.windowId];
+      } else if (typeof target.tabId === "number") {
+        filter.tabIds = [target.tabId];
+      }
+
+      const contexts = await runtimeApi.getContexts(filter);
+      isOpen = Array.isArray(contexts) && contexts.length > 0;
+    }
+
+    if (isOpen) {
+      if (typeof sidePanelApi.close !== "function") {
+        console.warn("当前 Chrome 版本不支持通过快捷键关闭侧边栏");
+        return false;
+      }
+
+      if (typeof target.windowId === "number") {
+        await sidePanelApi.close({ windowId: target.windowId });
+        return true;
+      }
+      if (typeof target.tabId === "number") {
+        await sidePanelApi.close({ tabId: target.tabId });
+        return true;
+      }
+      return false;
+    }
+
+    return openSidePanel(target);
+  } catch (error) {
+    console.error("切换侧边栏失败:", error);
+    return false;
+  }
+}
+
+/**
+ * 快捷键专用的侧边栏开关。
+ * Content Script 与 commands API 可能同时收到一次按键，因此按窗口合并短时间内的重复请求。
+ */
+export function toggleSidePanel(target: SidePanelTarget): Promise<boolean> {
+  const key = getSidePanelToggleKey(target);
+  const now = Date.now();
+  const recent = recentSidePanelToggles.get(key);
+  if (recent && now - recent.startedAt < SIDE_PANEL_TOGGLE_DEDUPE_MS) {
+    return recent.result;
+  }
+
+  const result = performSidePanelToggle(target);
+  recentSidePanelToggles.set(key, { startedAt: now, result });
+  return result;
 }
 
 /**

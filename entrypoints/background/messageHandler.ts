@@ -1,4 +1,7 @@
-import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
+import {
+  openSidePanel,
+  toggleSidePanel,
+} from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { TranslationService } from "./translationService";
 import { HistoryManager } from "./historyManager";
@@ -128,6 +131,17 @@ export class MessageHandler {
         const windowId = sender.tab?.windowId ?? request.windowId;
         const opened = await openSidePanel({ windowId, tabId });
         return { success: opened };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+    },
+    // 快捷键切换侧边栏；普通按钮和右键菜单继续使用 OPEN_SIDEPANEL
+    [MESSAGE_TYPES.TOGGLE_SIDEPANEL]: async (request, sender) => {
+      try {
+        const tabId = sender.tab?.id ?? request.tabId;
+        const windowId = sender.tab?.windowId ?? request.windowId;
+        const toggled = await toggleSidePanel({ windowId, tabId });
+        return { success: toggled };
       } catch (error: any) {
         return { success: false, error: error.message };
       }

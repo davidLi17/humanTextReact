@@ -18,6 +18,7 @@ export const MESSAGE_TYPES = {
   UPDATE_POPUP_TRANSLATION: "updatePopupTranslation", // popup页面专用
   UPDATE_SIDEPANEL_TRANSLATION: "updateSidepanelTranslation", // sidepanel页面专用
   OPEN_SIDEPANEL: "openSidepanel", // 打开侧边栏
+  TOGGLE_SIDEPANEL: "toggleSidepanel", // 快捷键切换侧边栏显示状态
   EXTRACT_PAGE_CONTENT: "extractPageContent", // 提取网页正文
   READ_PAGE_IN_SIDEPANEL: "readPageInSidepanel", // 侧边栏通读网页
   READ_WEB_PAGE: "readWebPage", // 触发通读

@@ -1,6 +1,6 @@
 import {
   isRestrictedUrl,
-  openSidePanel,
+  toggleSidePanel,
 } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
@@ -78,7 +78,7 @@ export class ShortcutManager {
       if (command === "translate-selection") {
         void this.executeTranslation(tab);
       } else if (command === "open-sidepanel") {
-        void this.executeOpenSidepanel(tab);
+        void this.executeToggleSidepanel(tab);
       }
     };
 
@@ -132,28 +132,28 @@ export class ShortcutManager {
   }
 
   /**
-   * 快捷键打开侧边栏
+   * 快捷键切换侧边栏
    */
-  static async executeOpenSidepanel(passedTab?: any): Promise<boolean> {
+  static async executeToggleSidepanel(passedTab?: any): Promise<boolean> {
     try {
-      logger.log("⌨️ [ShortcutManager] 快捷键打开侧边栏被触发");
+      logger.log("⌨️ [ShortcutManager] 快捷键切换侧边栏被触发");
       let tab = passedTab;
       if (!tab?.windowId && !tab?.id) {
         tab = await getActiveTabOrLastFocused();
       }
 
-      logger.log("📋 [ShortcutManager] 打开侧边栏目标信息", {
+      logger.log("📋 [ShortcutManager] 切换侧边栏目标信息", {
         tabId: tab?.id,
         windowId: tab?.windowId,
       });
 
-      const opened = await openSidePanel({
+      const toggled = await toggleSidePanel({
         windowId: tab?.windowId,
         tabId: tab?.id,
       });
-      return opened;
+      return toggled;
     } catch (error) {
-      logger.error("❌ [ShortcutManager] 打开侧边栏快捷键失败:", error);
+      logger.error("❌ [ShortcutManager] 切换侧边栏快捷键失败:", error);
       return false;
     }
   }

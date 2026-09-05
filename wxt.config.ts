@@ -7,6 +7,7 @@ export default defineConfig({
     name: "人话翻译器",
     version: "1.3.0",
     description: "借助 AI 的力量将专业术语翻译成通俗易懂的人话",
+    minimum_chrome_version: "141",
     permissions: [
       "contextMenus",
       "storage",
@@ -17,23 +18,23 @@ export default defineConfig({
     commands: {
       "translate-selection": {
         suggested_key: {
-          default: "Alt+H",
-          mac: "Alt+H",
-          windows: "Alt+H",
-          linux: "Alt+H",
-          chromeos: "Alt+H",
+          default: "Alt+D",
+          mac: "Option+D",
+          windows: "Alt+D",
+          linux: "Alt+D",
+          chromeos: "Alt+D",
         },
         description: "翻译选中的文本",
       },
       "open-sidepanel": {
         suggested_key: {
           default: "Alt+S",
-          mac: "Alt+S",
+          mac: "Option+S",
           windows: "Alt+S",
           linux: "Alt+S",
           chromeos: "Alt+S",
         },
-        description: "打开人话翻译侧边栏",
+        description: "显示或隐藏人话翻译侧边栏",
       },
     },
     action: {

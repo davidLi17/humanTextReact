@@ -23,55 +23,53 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
   });
 
   describe("1. Content Script Key Matching (Cross-Platform & macOS Deadkeys)", () => {
-    test("correctly recognizes Alt+H on Windows/Linux and macOS", () => {
-      // Windows / Linux 标准 Alt+H
-      const standardAltH = {
+    test("correctly recognizes Alt/Option+D on Windows, Linux and macOS", () => {
+      const standardAltD = {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
-        code: "KeyH",
-        key: "h",
+        code: "KeyD",
+        key: "d",
       };
-      expect(isTranslateShortcut(standardAltH)).toBe(true);
+      expect(isTranslateShortcut(standardAltD)).toBe(true);
 
-      // macOS Option+H 生成 deadkey '˙'
-      const macOptionH = {
+      // macOS Option+D 在美式键盘布局下产生 '∂'
+      const macOptionD = {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
-        code: "KeyH",
-        key: "˙",
+        code: "KeyD",
+        key: "∂",
       };
-      expect(isTranslateShortcut(macOptionH)).toBe(true);
+      expect(isTranslateShortcut(macOptionD)).toBe(true);
 
-      // 大写 H 或输入法状态
-      const upperAltH = {
+      const upperAltD = {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
-        code: "KeyH",
-        key: "H",
+        code: "KeyD",
+        key: "D",
       };
-      expect(isTranslateShortcut(upperAltH)).toBe(true);
+      expect(isTranslateShortcut(upperAltD)).toBe(true);
 
       // 包含 Ctrl 或 Cmd 不应误触
-      const ctrlAltH = {
+      const ctrlAltD = {
         altKey: true,
         ctrlKey: true,
         metaKey: false,
-        code: "KeyH",
-        key: "h",
+        code: "KeyD",
+        key: "d",
       };
-      expect(isTranslateShortcut(ctrlAltH)).toBe(false);
+      expect(isTranslateShortcut(ctrlAltD)).toBe(false);
 
-      const cmdAltH = {
+      const cmdAltD = {
         altKey: true,
         ctrlKey: false,
         metaKey: true,
-        code: "KeyH",
-        key: "h",
+        code: "KeyD",
+        key: "d",
       };
-      expect(isTranslateShortcut(cmdAltH)).toBe(false);
+      expect(isTranslateShortcut(cmdAltD)).toBe(false);
 
       // 其他按键
       const altA = {
@@ -174,7 +172,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
   });
 
   describe("3. Content Script In-Page Keydown Handler (Dual-Channel In-page Fallback)", () => {
-    test("handles Alt+H keydown: shows popup and sends translate message", async () => {
+    test("handles Option+D keydown: shows popup and sends translate message", async () => {
       let shownSelection = "";
       let shownRequestId = "";
       const mockPopupManager = {
@@ -217,8 +215,8 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
-        code: "KeyH",
-        key: "˙",
+        code: "KeyD",
+        key: "∂",
         preventDefault: () => {
           defaultPrevented = true;
         },
@@ -243,7 +241,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       expect(globalThis.window._handler).toBeUndefined();
     });
 
-    test("handles Alt+S keydown: saves selected text and sends openSidepanel message", async () => {
+    test("handles Option+S keydown: saves selected text and sends toggleSidepanel message", async () => {
       const mockPopupManager = {
         showPopup: () => {},
       };
@@ -297,7 +295,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       await globalThis.window._handler(fakeEvent);
 
       expect(defaultPrevented).toBe(true);
-      expect(sentMessage).toEqual({ action: "openSidepanel" });
+      expect(sentMessage).toEqual({ action: "toggleSidepanel" });
       expect(storageSaved?.pendingSidepanelText?.text).toBe("心智模型构建");
     });
   });
@@ -321,9 +319,12 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       expect(registeredListener).toBeFunction();
     });
 
-    test("executeOpenSidepanel opens side panel with windowId and tabId", async () => {
+    test("executeToggleSidepanel opens a closed side panel", async () => {
       let openedParams = null;
       globalThis.browser = {
+        runtime: {
+          getContexts: async () => [],
+        },
         sidePanel: {
           open: async (params) => {
             openedParams = params;
@@ -334,7 +335,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
         },
       };
 
-      const success = await ShortcutManager.executeOpenSidepanel({
+      const success = await ShortcutManager.executeToggleSidepanel({
         id: 101,
         windowId: 202,
       });
@@ -411,7 +412,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       globalThis.browser = {
         commands: {
           getAll: async () => [
-            { name: "translate-selection", shortcut: "Alt+H" },
+            { name: "translate-selection", shortcut: "Alt+D" },
             { name: "open-sidepanel", shortcut: "Alt+S" },
           ],
         },
@@ -426,7 +427,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
 
       await ShortcutManager.saveCurrentShortcut();
       expect(savedData).toEqual({
-        saved_shortcut: "Alt+H",
+        saved_shortcut: "Alt+D",
         saved_sidepanel_shortcut: "Alt+S",
       });
     });

@@ -83,6 +83,10 @@ import {
 } from "@icon-park/react";
 import React, { useEffect, useRef, useState } from "react";
 import "./App.less";
+import {
+  getResetScrollFollowState,
+  getScrollFollowState,
+} from "./scrollState";
 
 const logger = createLogger("sidepanel-app", "💬");
 
@@ -151,6 +155,10 @@ export default function SidePanelApp() {
   // 智能滚动与回到底部/流式指示器状态 (对标 GPT 交互)
   const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const userHasScrolledUpRef = useRef<boolean>(false);
+  const programmaticScrollRef = useRef<boolean>(false);
+  const programmaticScrollTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
 
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
@@ -426,12 +434,37 @@ export default function SidePanelApp() {
 
   // 平滑滚动到底部
   const scrollToBottom = (smooth = true) => {
-    userHasScrolledUpRef.current = false;
-    setIsAtBottom(true);
+    const resetState = getResetScrollFollowState();
+    programmaticScrollRef.current = true;
+    userHasScrolledUpRef.current = resetState.userHasScrolledUp;
+    setIsAtBottom(resetState.isAtBottom);
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current);
+    }
     messagesEndRef.current?.scrollIntoView({
       behavior: smooth ? "smooth" : "auto",
     });
+    programmaticScrollTimerRef.current = setTimeout(() => {
+      programmaticScrollRef.current = false;
+      programmaticScrollTimerRef.current = null;
+    }, smooth ? 750 : 0);
   };
+
+  // 切换会话时始终显示该会话的最新消息，清理上一个会话留下的上翻状态。
+  useEffect(() => {
+    if (activeView === "chat" && activeSessionId) {
+      scrollToBottom(false);
+    }
+  }, [activeSessionId, activeView]);
+
+  useEffect(
+    () => () => {
+      if (programmaticScrollTimerRef.current) {
+        clearTimeout(programmaticScrollTimerRef.current);
+      }
+    },
+    []
+  );
 
   // 自动滚动到消息流底部 (遵循 GPT 交互: 仅在用户未主动往上滑时跟随，绝不跟用户抢夺滚动控制权)
   useEffect(() => {
@@ -503,10 +536,29 @@ export default function SidePanelApp() {
       setQuoteBarVisible(false);
       if (chatContentRef.current) {
         const { scrollTop, scrollHeight, clientHeight } = chatContentRef.current;
-        // 距离底部 40px 以内视作在底部，否则视作用户主动往上查看
-        const atBottom = scrollHeight - scrollTop - clientHeight < 40;
-        setIsAtBottom(atBottom);
-        userHasScrolledUpRef.current = !atBottom;
+        const nextState = getScrollFollowState(
+          { scrollTop, scrollHeight, clientHeight },
+          programmaticScrollRef.current
+        );
+        setIsAtBottom(nextState.isAtBottom);
+        userHasScrolledUpRef.current = nextState.userHasScrolledUp;
+        if (nextState.isAtBottom) {
+          programmaticScrollRef.current = false;
+        }
+      }
+    };
+
+    const markUserScrollIntent = () => {
+      programmaticScrollRef.current = false;
+    };
+
+    const handleScrollKeyDown = (event: KeyboardEvent) => {
+      if (
+        ["ArrowUp", "PageUp", "Home", "ArrowDown", "PageDown", "End"].includes(
+          event.key
+        )
+      ) {
+        markUserScrollIntent();
       }
     };
 
@@ -523,6 +575,14 @@ export default function SidePanelApp() {
       chatEl.addEventListener("mouseup", handleMouseUp);
       chatEl.addEventListener("keyup", handleKeyUp);
       chatEl.addEventListener("scroll", handleScroll, { passive: true });
+      chatEl.addEventListener("wheel", markUserScrollIntent, { passive: true });
+      chatEl.addEventListener("touchstart", markUserScrollIntent, {
+        passive: true,
+      });
+      chatEl.addEventListener("pointerdown", markUserScrollIntent, {
+        passive: true,
+      });
+      chatEl.addEventListener("keydown", handleScrollKeyDown);
     }
     document.addEventListener("mousedown", handleMouseDown);
 
@@ -531,6 +591,10 @@ export default function SidePanelApp() {
         chatEl.removeEventListener("mouseup", handleMouseUp);
         chatEl.removeEventListener("keyup", handleKeyUp);
         chatEl.removeEventListener("scroll", handleScroll);
+        chatEl.removeEventListener("wheel", markUserScrollIntent);
+        chatEl.removeEventListener("touchstart", markUserScrollIntent);
+        chatEl.removeEventListener("pointerdown", markUserScrollIntent);
+        chatEl.removeEventListener("keydown", handleScrollKeyDown);
       }
       document.removeEventListener("mousedown", handleMouseDown);
     };

@@ -6,15 +6,15 @@ import type { PopupManager } from "./popupManager";
 const logger = createLogger("content-shortcuts", "⌨️");
 
 /**
- * 判定键盘事件是否匹配 Alt+H（翻译选中文本）
- * 兼容 macOS Option+H 产生的特殊字符 '˙' 以及各系统键盘布局
+ * 判定键盘事件是否匹配 Alt/Option+D（翻译选中文本）
+ * 通过物理键位 code 兼容 macOS Option+D 产生的特殊字符 '∂' 和不同键盘布局
  */
 export function isTranslateShortcut(e: KeyboardEvent): boolean {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   return (
-    e.code === "KeyH" ||
-    e.key?.toLowerCase() === "h" ||
-    e.key === "˙"
+    e.code === "KeyD" ||
+    e.key?.toLowerCase() === "d" ||
+    e.key === "∂"
   );
 }
 
@@ -71,7 +71,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
   const handleKeyDown = async (e: KeyboardEvent) => {
     const now = Date.now();
 
-    // 1. 匹配 Alt+H：翻译选中文本
+    // 1. 匹配 Alt/Option+D：翻译选中文本
     if (isTranslateShortcut(e)) {
       if (now - lastTranslateTriggerTime < THROTTLE_MS) {
         e.preventDefault();
@@ -80,7 +80,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
       lastTranslateTriggerTime = now;
 
       const selectedText = getSelectedTextFromPage();
-      logger.info("⌨️ [Content Shortcut] 捕获 Alt+H 划词翻译快捷键", {
+      logger.info("⌨️ [Content Shortcut] 捕获 Alt/Option+D 划词翻译快捷键", {
         hasSelectedText: !!selectedText,
         textLength: selectedText.length,
       });
@@ -109,7 +109,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
       return;
     }
 
-    // 2. 匹配 Alt+S：打开侧边栏
+    // 2. 匹配 Alt/Option+S：切换侧边栏
     if (isOpenSidepanelShortcut(e)) {
       if (now - lastSidepanelTriggerTime < THROTTLE_MS) {
         e.preventDefault();
@@ -117,7 +117,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
       }
       lastSidepanelTriggerTime = now;
 
-      logger.info("⌨️ [Content Shortcut] 捕获 Alt+S 打开侧边栏快捷键");
+      logger.info("⌨️ [Content Shortcut] 捕获 Alt/Option+S 侧边栏快捷键");
       e.preventDefault();
       e.stopPropagation();
 
@@ -136,7 +136,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
         }
 
         await browserApi.runtime.sendMessage({
-          action: MESSAGE_TYPES.OPEN_SIDEPANEL,
+          action: MESSAGE_TYPES.TOGGLE_SIDEPANEL,
         });
       } catch (err) {
         logger.error("❌ [Content Shortcut] 请求打开侧边栏失败:", err);
@@ -146,7 +146,7 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
 
   // 使用 capture 模式以确保优先捕获按键事件
   window.addEventListener("keydown", handleKeyDown, true);
-  logger.info("✅ [Content Shortcut] 网页快捷键双通道监听已就绪 (Alt+H, Alt+S)");
+  logger.info("✅ [Content Shortcut] 网页快捷键双通道监听已就绪 (Alt/Option+D, Alt/Option+S)");
 
   return () => {
     window.removeEventListener("keydown", handleKeyDown, true);
