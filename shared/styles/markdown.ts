@@ -258,7 +258,7 @@ export const MARKDOWN_STYLES = /*css*/ `
   /* 文本样式 */
   .bold {
     font-weight: 600;
-    color: #1a1a1a;
+    color: inherit;
   }
 
   .italic {
@@ -292,111 +292,38 @@ export const MARKDOWN_STYLES = /*css*/ `
     height: 1px;
   }
 
-  /* 暗黑模式支持 */
-  @media (prefers-color-scheme: dark) {
-    .markdown-content {
-      color: #e5e5e5;
-    }
 
-    .markdown-paragraph,
-    .markdown-content h1,
-    .markdown-content h2,
-    .markdown-content h3,
-    .markdown-content h4,
-    .markdown-content h5,
-    .markdown-content h6 {
-      color: #e5e5e5;
-    }
-
-    .code-block-container {
-      border-color: #444;
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-    }
-
-    .code-block-header {
-      background: linear-gradient(135deg, #333 0%, #444 100%);
-      border-bottom-color: #444;
-    }
-
-    .code-language {
-      color: #9ca3af;
-    }
-
-    .copy-button {
-      color: #9ca3af;
-    }
-
-    .copy-button:hover {
-      background: #444;
-      color: #e5e5e5;
-    }
-
-    .copy-button:active {
-      background: #555;
-    }
-
-    .code-block {
-      background: transparent;
-    }
-
-    .code-block code {
-      color: #e5e5e5;
-    }
-
-    .inline-code {
-      background: rgba(255, 255, 255, 0.1);
-      color: #ff6b9d;
-    }
-
-    .markdown-quote {
-      background: linear-gradient(135deg, #2d1b0a 0%, #3d2a0f 100%);
-      color: #d97706;
-    }
-
-    .markdown-table th {
-      background: linear-gradient(135deg, #2a2a2a 0%, #333 100%);
-      color: #e5e5e5;
-      border-bottom-color: #444;
-    }
-
-
-  /* 显式暗色主题，父元素设置 data-theme=dark 时启用 */
-  [data-theme="dark"] .markdown-content {
-    color: #e5e5e5;
-  }
+  /* applyTheme 已将系统/手动主题解析为 data-theme；无需再次依赖系统媒体查询。 */
+  [data-theme="dark"] .markdown-content { color: #e5e7eb; }
   [data-theme="dark"] .markdown-paragraph,
   [data-theme="dark"] .markdown-content h1,
   [data-theme="dark"] .markdown-content h2,
   [data-theme="dark"] .markdown-content h3,
   [data-theme="dark"] .markdown-content h4,
   [data-theme="dark"] .markdown-content h5,
-  [data-theme="dark"] .markdown-content h6 { color: #e5e5e5; }
-  [data-theme="dark"] .code-block-container { border-color: #444; background: linear-gradient(135deg, #2a2a2a 0%, #333 100%); }
-  [data-theme="dark"] .code-block-header { background: linear-gradient(135deg, #333 0%, #444 100%); border-bottom-color: #444; }
-  [data-theme="dark"] .code-language, [data-theme="dark"] .copy-button { color: #9ca3af; }
-  [data-theme="dark"] .copy-button:hover { background: #444; color: #e5e5e5; }
-  [data-theme="dark"] .copy-button:active { background: #555; }
-  [data-theme="dark"] .code-block { background: transparent; }
-  [data-theme="dark"] .code-block code { color: #e5e5e5; }
-  [data-theme="dark"] .inline-code { background: rgba(255,255,255,0.1); color: #ff6b9d; }
-  [data-theme="dark"] .markdown-quote { background: linear-gradient(135deg, #2d1b0a 0%, #3d2a0f 100%); color: #d97706; }
-  [data-theme="dark"] .markdown-table th { background: linear-gradient(135deg, #2a2a2a 0%, #333 100%); color: #e5e5e5; border-bottom-color: #444; }
-    .markdown-table {
-      border-color: #444;
-    }
+  [data-theme="dark"] .markdown-content h6 { color: inherit; }
+  [data-theme="dark"] .code-block-container { border-color: #444; background: #1e293b; }
+  [data-theme="dark"] .code-block-header { background: #334155; border-bottom-color: #475569; }
+  [data-theme="dark"] .code-language,
+  [data-theme="dark"] .copy-button { color: #cbd5e1; }
+  [data-theme="dark"] .copy-button:hover { background: #475569; color: #f8fafc; }
+  [data-theme="dark"] .copy-button:active { background: #64748b; }
+  [data-theme="dark"] .code-block code { color: #e5e7eb; }
+  [data-theme="dark"] .inline-code { background: rgba(255,255,255,0.1); color: #fda4af; }
+  [data-theme="dark"] .markdown-quote { background: #36240f; color: #fde68a; }
+  [data-theme="dark"] .markdown-table { border-color: #475569; }
+  [data-theme="dark"] .markdown-table th { background: #1e293b; color: #e5e7eb; border-bottom-color: #475569; }
+  [data-theme="dark"] .markdown-table td { border-bottom-color: #334155; }
+  [data-theme="dark"] .markdown-table tr:nth-child(even) { background: rgba(255,255,255,0.05); }
+  [data-theme="dark"] .strikethrough { color: #cbd5e1; }
+  [data-theme="dark"] .highlight { background: #713f12; color: #fef3c7; }
+  [data-theme="dark"] .markdown-link { color: #93c5fd; }
+  [data-theme="dark"] .markdown-link:hover { color: #bfdbfe; }
 
-    .markdown-table td {
-      border-bottom-color: #333;
-    }
+  /* 同时显式指定选区前景与背景，避免非活动选区出现黑底黑字。 */
+  .markdown-content::selection,
+  .markdown-content ::selection { background: #bfdbfe; color: #111827; }
 
-    .markdown-table tr:nth-child(even) {
-      background: rgba(255, 255, 255, 0.05);
-    }
-
-    .bold {
-      color: #e5e5e5;
-    }
-  }
 `;
 
 /**

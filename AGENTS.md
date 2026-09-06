@@ -73,6 +73,14 @@ Estimated cost:
 
 ## Working Rules For Agents
 
+### Local build delivery
+
+- After every requested Chrome build/package, update the unpacked build in `/Users/bytedance/lhg-Project/human-language-translator-1.3.0-chrome-mv3`, the user's verified Chrome loading directory outside the repository. Keep this exact directory even when the extension version changes; do not switch delivery back to `human-language-translator-chrome` or `.output`.
+- When packaging, also copy the ZIP to `/Users/bytedance/lhg-Project/`, naming it with both version and short Git commit to distinguish builds sharing a version number.
+- Before replacing an existing delivery directory, preserve the previous copy in a clearly named backup; never merge new files over stale hashed chunks.
+- Verify the copied files match the build, and include `BUILD_INFO.txt` in the delivery directory with source commit and build date. Disclose uncommitted source changes when present.
+- Return the absolute delivery path. Reloading only updates the directory Chrome originally loaded; verify that path before telling the user a reload will install the new build.
+
 - Prefer existing project patterns over new abstractions.
 - Do not run package-manager commands with npm, pnpm, or yarn unless explicitly requested.
 - Do not commit generated extension archives or local artifact folders.

@@ -424,7 +424,10 @@ export const POPUP_STYLES = /*css*/ `
   }
 
   /* 集成共享 Markdown 样式，添加 .translator-popup 前缀 */
-  ${MARKDOWN_STYLES.replace(/(\.[a-zA-Z])/g, ".translator-popup $1")}
+  ${MARKDOWN_STYLES.replace(/(\.[a-zA-Z])/g, ".translator-popup $1").replace(
+    /\[data-theme="dark"\] \.translator-popup /g,
+    '.translator-popup[data-theme="dark"] '
+  )}
 
   .translator-popup[data-theme="dark"] {
     color-scheme: dark;
