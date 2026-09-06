@@ -7,7 +7,10 @@ import {
   TranslationRequest, // 翻译请求类型
 } from "@/entrypoints/shared/constants"; // 从共享常量文件中导入
 import { createLogger } from "@/entrypoints/shared/logger";
-import { shouldAcceptRequestUpdate } from "@/entrypoints/shared/requestProtocol";
+import {
+  createRequestId,
+  shouldAcceptRequestUpdate,
+} from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import {
   normalizeThemeMode,
@@ -41,6 +44,8 @@ export class PopupManager {
   private userHasScrolled = false;
   // 当前全局主题偏好
   private themeMode: ThemeMode = THEME_MODES.SYSTEM;
+  // 当前弹窗对应的划词原文，用于失败后重试
+  private lastSelectionText = "";
   // 系统主题和菜单事件的清理函数
   private systemThemeCleanup: (() => void) | null = null;
   private themeMenuCleanup: (() => void) | null = null;
@@ -78,6 +83,7 @@ export class PopupManager {
     this.currentRequestId = requestId;
     this.allowLegacyMessages = allowLegacyMessages;
     this.requestFinished = false;
+    this.lastSelectionText = selection;
 
     // 将弹窗添加到页面中
     document.body.appendChild(popup);
@@ -159,7 +165,7 @@ export class PopupManager {
     // 处理翻译错误或更新翻译结果
     if (request.error) {
       logger.log("❌ [PopupManager] 处理翻译错误");
-      this.handleTranslationError(request.error, elements.loadingEl);
+      this.handleTranslationError(request.error);
     } else {
       logger.log("✅ [PopupManager] 处理翻译更新");
       this.handleTranslationUpdate(request, elements);
@@ -191,6 +197,7 @@ export class PopupManager {
     this.currentRequestId = undefined;
     this.allowLegacyMessages = false;
     this.requestFinished = false;
+    this.lastSelectionText = "";
   }
 
   // 创建弹窗元素方法，接收用户选中的文本
@@ -264,7 +271,25 @@ export class PopupManager {
         <div class="translator-section">
           <div class="translator-label">译文</div>
           <div class="translator-translated-text"></div>
-          <div class="translator-loading">正在翻译...</div>
+          <div class="translator-loading">
+            <span class="translator-loading-text">正在翻译...</span>
+            <button
+              type="button"
+              class="translator-stop-btn"
+              title="停止生成本次翻译"
+              style="margin-left: 10px; padding: 2px 10px; font-size: 12px; line-height: 18px; font-weight: 500; border: 1px solid; border-radius: 6px; background: transparent; color: inherit; opacity: 0.85; cursor: pointer;"
+            >
+              停止
+            </button>
+            <button
+              type="button"
+              class="translator-retry-btn"
+              title="使用原文重新翻译"
+              style="display: none; margin-left: 10px; padding: 2px 10px; font-size: 12px; line-height: 18px; font-weight: 500; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: rgba(52, 199, 89, 0.1); color: #34c759; cursor: pointer;"
+            >
+              重试
+            </button>
+          </div>
         </div>
       </div>
       <button class="translator-copy-btn">复制译文</button>
@@ -331,6 +356,22 @@ export class PopupManager {
         });
         // 移除当前弹窗
         this.removeCurrentPopup();
+      });
+
+    // 停止生成按钮：中断当前流式翻译
+    popup
+      .querySelector(".translator-stop-btn")
+      ?.addEventListener("click", (event) => {
+        event.preventDefault();
+        this.stopCurrentTranslation();
+      });
+
+    // 重试按钮：失败后用上次的划词内容重新发起翻译
+    popup
+      .querySelector(".translator-retry-btn")
+      ?.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.retryTranslation();
       });
 
     // 侧边栏追问按钮点击事件
@@ -573,26 +614,149 @@ export class PopupManager {
       ) as HTMLElement, // 思维链文本
       loadingEl: this.currentPopup.querySelector(
         ".translator-loading"
-      ) as HTMLElement, // 加载提示
+      ) as HTMLElement, // 加载/状态提示行
+      loadingTextEl: this.currentPopup.querySelector(
+        ".translator-loading-text"
+      ) as HTMLElement, // 状态提示文案
+      stopBtnEl: this.currentPopup.querySelector(
+        ".translator-stop-btn"
+      ) as HTMLButtonElement, // 停止生成按钮
+      retryBtnEl: this.currentPopup.querySelector(
+        ".translator-retry-btn"
+      ) as HTMLButtonElement, // 失败重试按钮
       contentEl: this.currentPopup.querySelector(
         ".translator-content"
       ) as HTMLElement, // 内容容器
     };
   }
 
+  // 统一更新状态行的文案与按钮可见性
+  private updateStatusRow(
+    elements: ReturnType<PopupManager["getPopupElements"]>,
+    text: string,
+    options: { showStop?: boolean; showRetry?: boolean }
+  ) {
+    if (!elements.loadingEl || !elements.loadingTextEl) return;
+
+    elements.loadingTextEl.textContent = text;
+    if (elements.stopBtnEl) {
+      elements.stopBtnEl.style.display = options.showStop ? "" : "none";
+    }
+    if (elements.retryBtnEl) {
+      elements.retryBtnEl.style.display = options.showRetry ? "" : "none";
+    }
+  }
+
+  // 停止当前流式翻译：通知后台中止请求，并在本地立即回退状态
+  private stopCurrentTranslation() {
+    if (!this.currentPopup || this.requestFinished) return;
+
+    // 与关闭按钮、Popup 的取消逻辑使用同一清理协议；
+    // 后台对中止（AbortError）静默处理，不会向弹窗推送错误
+    browser.runtime
+      .sendMessage({
+        action: MESSAGE_TYPES.CLEANUP,
+        requestId: this.allowLegacyMessages
+          ? undefined
+          : this.currentRequestId,
+      })
+      .catch((error) => logger.error("停止翻译时发送清理消息失败:", error));
+
+    // 立即结束本地请求状态，忽略后台可能仍在途的迟到更新
+    this.requestFinished = true;
+
+    const elements = this.getPopupElements();
+    const hasPartialText = Boolean(elements.translatedTextEl?.textContent?.trim());
+    // 中止不视为失败，不展示重试入口（与 Popup 的取消文案保持一致）
+    this.updateStatusRow(
+      elements,
+      hasPartialText ? "已停止继续生成" : "已取消翻译",
+      { showStop: false, showRetry: false }
+    );
+  }
+
+  // 失败后使用上次的划词内容重新发起完整翻译流程
+  private async retryTranslation() {
+    if (!this.currentPopup || !this.requestFinished) return; // 翻译进行中不允许重试
+
+    const text = this.lastSelectionText?.trim();
+    if (!text) return;
+
+    const requestId = createRequestId();
+    this.currentRequestId = requestId;
+    this.requestFinished = false;
+    this.userHasScrolled = false;
+
+    // 清空上一次的结果，回到加载中状态
+    const elements = this.getPopupElements();
+    if (elements.translatedTextEl) elements.translatedTextEl.innerHTML = "";
+    if (elements.reasoningTextEl) elements.reasoningTextEl.innerHTML = "";
+    if (elements.reasoningSectionEl) {
+      elements.reasoningSectionEl.style.display = "none";
+    }
+    if (elements.loadingEl) elements.loadingEl.style.display = "";
+    this.updateStatusRow(elements, "正在翻译...", {
+      showStop: true,
+      showRetry: false,
+    });
+
+    try {
+      const settings = await SettingsUtils.getSettings();
+
+      // 读取设置期间弹窗被关闭时，取消刚创建的请求
+      if (!this.currentPopup) {
+        browser.runtime
+          .sendMessage({ action: MESSAGE_TYPES.CLEANUP, requestId })
+          .catch(() => {});
+        return;
+      }
+
+      const response = await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId,
+        text,
+        thinkingEnabled: settings.thinkingEnabled ?? false,
+      });
+
+      // 后台前置校验失败（如缺少 API Key）时同步展示错误
+      if (
+        response &&
+        response.success === false &&
+        this.currentRequestId === requestId
+      ) {
+        this.requestFinished = true;
+        this.handleTranslationError(response.error || "翻译失败，请重试");
+      }
+    } catch (error: any) {
+      logger.error("重试翻译失败:", error);
+      if (this.currentRequestId === requestId) {
+        this.requestFinished = true;
+        this.handleTranslationError(
+          error?.message || "翻译失败，请重试"
+        );
+      }
+    }
+  }
+
   // 处理翻译错误的方法
-  private handleTranslationError(error: string, loadingEl: HTMLElement) {
+  private handleTranslationError(error: string) {
     logger.log("翻译发生错误:", error);
     // 根据错误类型显示不同的错误信息
-    if (
+    const message =
       error.includes("API Key") ||
       error.includes("API 请求失败") ||
       error.includes("rate limit")
-    ) {
-      loadingEl.textContent = "翻译失败：" + error;
-    } else {
-      loadingEl.textContent = "翻译失败，请重试";
-    }
+        ? "翻译失败：" + error
+        : "翻译失败，请重试";
+
+    const elements = this.getPopupElements();
+    if (!elements.loadingEl) return;
+
+    elements.loadingEl.style.display = "";
+    this.updateStatusRow(elements, message, {
+      showStop: false,
+      showRetry: true,
+    });
   }
 
   // 处理翻译更新的方法
