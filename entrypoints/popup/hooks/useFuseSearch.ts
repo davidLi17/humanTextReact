@@ -23,6 +23,7 @@ interface UseFuseSearchReturn<T> {
   getAutoComplete: (query: string) => string[];
   clearResults: () => void;
   results: SearchResult<T>[];
+  totalMatches: number;
   isSearching: boolean;
 }
 
@@ -32,7 +33,7 @@ const defaultOptions: FuseSearchOptions = {
   includeScore: true,
   includeMatches: true,
   minMatchCharLength: 1,
-  maxResults: 10,
+  maxResults: 50,
 };
 
 export function useFuseSearch<T = HistoryItem>(
@@ -40,6 +41,7 @@ export function useFuseSearch<T = HistoryItem>(
   options: Partial<FuseSearchOptions> = {}
 ): UseFuseSearchReturn<T> {
   const [results, setResults] = useState<SearchResult<T>[]>([]);
+  const [totalMatches, setTotalMatches] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
 
   const fuseOptions = useMemo(
@@ -60,23 +62,27 @@ export function useFuseSearch<T = HistoryItem>(
     (query: string): SearchResult<T>[] => {
       if (!query.trim()) {
         setResults([]);
+        setTotalMatches(0);
         setIsSearching(false);
         return [];
       }
 
       setIsSearching(true);
 
-      const fuseResults = fuse.search(query, {
-        limit: fuseOptions.maxResults || 10,
-      });
+      // 全量匹配后按上限截断展示，同时保留实际匹配总数用于提示
+      const fuseResults = fuse.search(query);
+      const limit = fuseOptions.maxResults || 50;
 
-      const searchResults: SearchResult<T>[] = fuseResults.map((result) => ({
-        item: result.item,
-        score: result.score,
-        matches: result.matches,
-      }));
+      const searchResults: SearchResult<T>[] = fuseResults
+        .slice(0, limit)
+        .map((result) => ({
+          item: result.item,
+          score: result.score,
+          matches: result.matches,
+        }));
 
       setResults(searchResults);
+      setTotalMatches(fuseResults.length);
       setIsSearching(false);
 
       return searchResults;
@@ -173,6 +179,7 @@ export function useFuseSearch<T = HistoryItem>(
   // 清空搜索结果
   const clearResults = useCallback(() => {
     setResults([]);
+    setTotalMatches(0);
     setIsSearching(false);
   }, []);
 
@@ -182,6 +189,7 @@ export function useFuseSearch<T = HistoryItem>(
     getAutoComplete,
     clearResults,
     results,
+    totalMatches,
     isSearching,
   };
 }
@@ -194,7 +202,7 @@ export function useHistorySearch(history: HistoryItem[]) {
     includeScore: true,
     includeMatches: true,
     minMatchCharLength: 1,
-    maxResults: 20,
+    maxResults: 50,
   });
 }
 
