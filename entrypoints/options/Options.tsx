@@ -20,6 +20,13 @@ import type {
 } from "@/entrypoints/shared/logger/types";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import {
+  buildBackup,
+  createBackupFileName,
+  formatSectionNames,
+  restoreBackup,
+  validateBackup,
+} from "@/entrypoints/shared/dataBackup";
+import {
   Bug,
   Clear,
   Copy,
@@ -27,8 +34,9 @@ import {
   PauseOne,
   PreviewClose,
   PreviewCloseOne,
+  Upload,
 } from "@icon-park/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
 import "./Options.less";
 
@@ -67,6 +75,12 @@ function Options() {
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
   const [diagnosticBusy, setDiagnosticBusy] = useState(false);
   const [diagnosticNow, setDiagnosticNow] = useState(Date.now());
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupFeedback, setBackupFeedback] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载设置
   useEffect(() => {
@@ -334,6 +348,111 @@ function Options() {
     } finally {
       setDiagnosticBusy(false);
     }
+  };
+
+  // ========== 数据备份与恢复 ==========
+
+  const handleExportBackup = async () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupFeedback(null);
+    try {
+      const backup = await buildBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], {
+        type: "application/json;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = createBackupFileName();
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      setBackupFeedback({
+        type: "success",
+        text: `备份已导出：翻译历史 ${backup.data.history.length} 条 · 生词本 ${backup.data.jargon.length} 条 · 侧边栏会话 ${backup.data.sessions.sessions.length} 个 · 设置 ${Object.keys(backup.data.settings).length} 项（不包含 API Key）`,
+      });
+      optionsLogger.info("数据备份导出成功");
+    } catch (error: any) {
+      optionsLogger.error("数据备份导出失败:", error);
+      setBackupFeedback({
+        type: "error",
+        text: `导出备份失败：${error?.message || "未知错误"}`,
+      });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleImportBackupFile = async (file: File) => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setBackupFeedback(null);
+    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(await file.text());
+      } catch {
+        throw new Error("所选文件不是有效的 JSON 文件");
+      }
+
+      const validation = validateBackup(parsed);
+      if (!validation.valid || !validation.backup) {
+        throw new Error(validation.error || "备份文件格式不正确");
+      }
+      const backup = validation.backup;
+
+      const confirmed = window.confirm(
+        `导入备份将覆盖当前全部数据：\n\n` +
+          `· 翻译历史 ${backup.data.history.length} 条\n` +
+          `· 生词本 ${backup.data.jargon.length} 条\n` +
+          `· 侧边栏会话 ${backup.data.sessions.sessions.length} 个\n` +
+          `· 用户设置（API Key 不受影响，备份中也不包含 API Key）\n\n` +
+          `当前的历史、生词本、会话与设置将被替换，且无法撤销。确定要继续吗？`
+      );
+      if (!confirmed) return;
+
+      const result = await restoreBackup(backup);
+      if (result.failed.length === 0) {
+        setBackupFeedback({
+          type: "success",
+          text: `恢复成功：${formatSectionNames(result.restored)} 已覆盖导入。侧边栏如已打开，请关闭后重新打开即可看到恢复的会话；其他页面如未生效请刷新页面。`,
+        });
+      } else if (result.restored.length > 0) {
+        setBackupFeedback({
+          type: "error",
+          text: `部分恢复成功：${formatSectionNames(result.restored)} 已导入，但 ${formatSectionNames(result.failed)} 失败。${(result.errors || []).join(" ")}`,
+        });
+      } else {
+        throw new Error(
+          (result.errors || ["所有数据均写入失败，请重试"]).join(" ")
+        );
+      }
+      optionsLogger.info("数据备份恢复完成", {
+        restored: result.restored,
+        failed: result.failed,
+      });
+    } catch (error: any) {
+      optionsLogger.error("导入备份失败:", error);
+      setBackupFeedback({
+        type: "error",
+        text: `导入备份失败：${error?.message || "未知错误"}`,
+      });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleBackupFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    // 重置 input，允许用户连续选择同一个文件
+    event.target.value = "";
+    if (!file) return;
+    await handleImportBackupFile(file);
   };
 
   const handleInputChange = (
@@ -745,6 +864,53 @@ function Options() {
           )}
           <div className="setting-hint">
             诊断记录仅保存在当前浏览器会话，API Key、原文、译文和图片会自动脱敏。
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h2>数据备份</h2>
+
+          <div className="setting-hint">
+            将翻译历史、生词本、侧边栏会话与用户设置聚合导出为一个 JSON
+            文件，换机或重装扩展时可一键恢复。备份不包含 API Key。
+          </div>
+
+          <div className="diagnostic-actions">
+            <button
+              type="button"
+              className="diagnostic-btn secondary"
+              onClick={handleExportBackup}
+              disabled={backupBusy}
+            >
+              <Download theme="outline" size="18" />
+              导出备份
+            </button>
+            <button
+              type="button"
+              className="diagnostic-btn secondary"
+              onClick={() => backupFileInputRef.current?.click()}
+              disabled={backupBusy}
+            >
+              <Upload theme="outline" size="18" />
+              导入备份
+            </button>
+            <input
+              ref={backupFileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="backup-file-input"
+              onChange={handleBackupFileChange}
+            />
+          </div>
+
+          {backupFeedback && (
+            <div className={`backup-message ${backupFeedback.type}`} role="status">
+              {backupFeedback.text}
+            </div>
+          )}
+          <div className="setting-hint">
+            导入备份会覆盖当前的全部历史、生词本、会话与设置（API Key
+            不会被覆盖）；恢复后已打开的页面可能需要刷新才会生效。
           </div>
         </div>
 
