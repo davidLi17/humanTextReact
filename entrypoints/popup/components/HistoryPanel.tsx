@@ -25,7 +25,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
   const [copiedKey, setCopiedKey] = useState<string>("");
 
   // 使用 fuse.js 进行智能搜索
-  const { search, results } = useHistorySearch(history);
+  const { search, results, totalMatches } = useHistorySearch(history);
 
   // 防抖搜索
   const debouncedSearch = useCallback(
@@ -225,6 +225,13 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({
       <div className="history-panel-content">
         {filteredHistory.length > 0 ? (
           <>
+            {searchTerm.trim() !== "" && (
+              <div className="history-match-hint">
+                {totalMatches > filteredHistory.length
+                  ? `共 ${totalMatches} 条匹配，仅显示前 ${filteredHistory.length} 条`
+                  : `共 ${totalMatches} 条匹配`}
+              </div>
+            )}
             {filteredHistory.map(renderHistoryItem)}
             <div className="history-limit-hint">
               注意：系统最多保留100条最近的历史记录
