@@ -24,6 +24,10 @@ import { createLogger } from "./logger";
 import { getJargonList, normalizeJargonItem } from "./jargonStorage";
 import { JARGON_STORAGE_KEY, type JargonItem } from "./jargonTypes";
 import type { ChatSession } from "./chatTypes";
+import {
+  JARGON_VAULT_RESULT_SOURCE,
+  type TranslationResultSource,
+} from "./jargonReuse";
 import { SettingsUtils, type UserSettings } from "./settingsUtils";
 
 const logger = createLogger("data-backup", "💾");
@@ -62,6 +66,7 @@ export interface BackupHistoryItem {
   reasoning?: string;
   hasReasoning?: boolean;
   timestamp?: number;
+  resultSource?: TranslationResultSource;
 }
 
 /** 侧边栏会话分区 */
@@ -365,7 +370,24 @@ export function validateBackup(json: unknown): BackupValidationResult {
   }
 
   // 走到这里说明结构全部合法；重新提取为具名局部变量以便类型收窄
-  const historyList = data.history as unknown as BackupHistoryItem[];
+  const historyList = (data.history as Array<Record<string, unknown>>).map(
+    (item): BackupHistoryItem => ({
+      original: item.original as string,
+      translated: item.translated as string,
+      ...(typeof item.reasoning === "string"
+        ? { reasoning: item.reasoning }
+        : {}),
+      ...(typeof item.hasReasoning === "boolean"
+        ? { hasReasoning: item.hasReasoning }
+        : {}),
+      ...(typeof item.timestamp === "number"
+        ? { timestamp: item.timestamp }
+        : {}),
+      ...(item.resultSource === JARGON_VAULT_RESULT_SOURCE
+        ? { resultSource: JARGON_VAULT_RESULT_SOURCE }
+        : {}),
+    })
+  );
   const jargonList = data.jargon as unknown as JargonItem[];
   const sessionsData = data.sessions as unknown as Record<string, unknown>;
   const settingsData = data.settings as unknown as Record<string, unknown>;
@@ -434,6 +456,9 @@ export async function restoreBackup(
         typeof item.timestamp === "number" && item.timestamp > 0
           ? item.timestamp
           : now,
+      ...(item.resultSource === JARGON_VAULT_RESULT_SOURCE
+        ? { resultSource: JARGON_VAULT_RESULT_SOURCE }
+        : {}),
     }));
     await storage.set({ [HISTORY_STORAGE_KEY]: history });
     restored.push("history");

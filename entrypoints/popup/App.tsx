@@ -1,5 +1,4 @@
 import {
-  DEFAULT_SETTINGS,
   MESSAGE_TYPES,
   THEME_MODES,
   ThemeMode,
@@ -51,6 +50,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
     showResult: false,
     thinkingEnabled: false,
     images: [], // 初始化图片数组
+    resultSource: undefined,
   });
 
   const [showHistory, setShowHistory] = useState(false);
@@ -196,6 +196,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
             translatedText: request.content || prev.translatedText,
             reasoningText: request.reasoningContent || prev.reasoningText,
             hasReasoning: request.hasReasoning || false,
+            resultSource: request.resultSource,
             showResult: true,
             isTranslating: !request.done,
             errorMessage: "",
@@ -269,9 +270,6 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
   // 处理滚动事件（空函数，现在滚动在TranslationArea内部处理）
   const handleScroll = () => {};
 
-  const isApiKeyConfigured = (apiKey?: string) =>
-    Boolean(apiKey && apiKey.trim() && apiKey !== DEFAULT_SETTINGS.apiKey);
-
   const getErrorMessage = (error: any) =>
     error?.message || "翻译失败，请稍后重试";
 
@@ -287,7 +285,10 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
   };
 
   // 发送翻译请求
-  const handleTranslate = async (textOverride?: unknown) => {
+  const handleTranslate = async (
+    textOverride?: unknown,
+    options: { bypassJargonVault?: boolean } = {}
+  ) => {
     const overrideText =
       typeof textOverride === "string" ? textOverride : undefined;
     const text = (overrideText ?? translationState.sourceText).trim();
@@ -312,6 +313,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       translatedText: "",
       reasoningText: "",
       hasReasoning: false,
+      resultSource: undefined,
     }));
 
     try {
@@ -323,19 +325,6 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
         temperature: userSettings.temperature,
         hasApiKey: !!userSettings.apiKey,
       });
-
-      if (!isApiKeyConfigured(userSettings.apiKey)) {
-        activeRequestIdRef.current = undefined;
-        setTranslationState((prev: TranslationState) => ({
-          ...prev,
-          activeRequestId: undefined,
-          isTranslating: false,
-          showResult: true,
-          errorMessage: "请先在设置中配置 API Key",
-          translatedText: "",
-        }));
-        return;
-      }
 
       if (browser?.runtime) {
         // 开始新的翻译，传递完整设置
@@ -349,6 +338,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
           promptTemplate: userSettings.promptTemplate,
           apiKey: userSettings.apiKey,
           source: "popup",
+          bypassJargonVault: options.bypassJargonVault,
         });
 
         if (response && response.success === false) {
@@ -378,6 +368,12 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
   const retryTranslate = () => {
     if (!translationState.isTranslating) {
       handleTranslate();
+    }
+  };
+
+  const regenerateTranslate = () => {
+    if (!translationState.isTranslating) {
+      void handleTranslate(undefined, { bypassJargonVault: true });
     }
   };
 
@@ -457,6 +453,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       showResult: false,
       errorMessage: "",
       images: [],
+      resultSource: undefined,
     }));
 
     try {
@@ -487,6 +484,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       showResult: true,
       errorMessage: "",
       images: [],
+      resultSource: item.resultSource,
     }));
     hideHistoryPanel();
   };
@@ -517,6 +515,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       showResult: true,
       errorMessage: "",
       images: [],
+      resultSource: undefined,
     }));
     hideHistoryPanel();
     window.setTimeout(() => handleTranslate(item.original), 0);
@@ -670,6 +669,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
           onThemeChange={handleThemeChange}
           onClearDraft={clearDraft}
           onRetry={retryTranslate}
+          onRegenerate={regenerateTranslate}
           onCancel={cancelTranslate}
           onScroll={() => {}}
           history={history}
@@ -697,5 +697,4 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
 }
 
 export default App;
-
 

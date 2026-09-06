@@ -19,11 +19,56 @@ import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
 import { RequestManager, type RequestContext } from "./requestManager";
 import {
+  getRequestTimeoutRuntime,
   isRequestTimeoutError,
   RequestTimeoutGuard,
 } from "@/entrypoints/shared/requestTimeout";
+import type { TranslationResultSource } from "@/entrypoints/shared/jargonReuse";
+import {
+  getJargonReuseTerm,
+  JARGON_VAULT_RESULT_SOURCE,
+} from "@/entrypoints/shared/jargonReuse";
+import { findExactJargonItem } from "@/entrypoints/shared/jargonStorage";
 
 const logger = createLogger("translation-service", "🌐");
+
+export const LOCAL_RESULT_DELIVERY_TIMEOUT_MS = 5_000;
+let localResultDeliveryTimeoutMs = LOCAL_RESULT_DELIVERY_TIMEOUT_MS;
+
+/** 仅供自动化测试缩短本地终态消息等待；传空值恢复生产默认值。 */
+export function setLocalResultDeliveryTimeoutForTests(timeoutMs?: number): void {
+  localResultDeliveryTimeoutMs =
+    timeoutMs ?? LOCAL_RESULT_DELIVERY_TIMEOUT_MS;
+}
+
+async function waitForLocalResultDelivery(
+  operation: Promise<boolean>,
+  signal: AbortSignal
+): Promise<boolean> {
+  const clock = getRequestTimeoutRuntime().clock;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let handleAbort: (() => void) | undefined;
+
+  const interrupted = new Promise<false>((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    handleAbort = () => resolve(false);
+    signal.addEventListener("abort", handleAbort, { once: true });
+    timeoutId = clock.setTimeout(
+      () => resolve(false),
+      localResultDeliveryTimeoutMs
+    );
+  });
+
+  try {
+    return await Promise.race([operation, interrupted]);
+  } finally {
+    if (timeoutId !== undefined) clock.clearTimeout(timeoutId);
+    if (handleAbort) signal.removeEventListener("abort", handleAbort);
+  }
+}
 
 export interface ImageContent {
   data: string;
@@ -47,6 +92,7 @@ export interface TranslationParams {
   promptTemplate?: string;
   apiKey?: string;
   selectionContext?: SelectionContext;
+  bypassJargonVault?: boolean;
 }
 
 interface StreamChunk {
@@ -248,6 +294,43 @@ export function buildMessagesPayload(
  * 翻译服务只消费已经登记的请求上下文，不自行推断请求归属。
  */
 export class TranslationService {
+  /**
+   * 将本地结果按与模型流相同的请求归属、消息和历史协议交付给界面。
+   */
+  private static async deliverLocalResult(
+    original: string,
+    content: string,
+    resultSource: TranslationResultSource,
+    requestContext: RequestContext
+  ): Promise<string | void> {
+    const { requestId, controller } = requestContext;
+    if (!RequestManager.isActiveRequest(requestId)) return;
+
+    const delivered = await waitForLocalResultDelivery(
+      this.sendTranslationUpdate(
+        requestContext,
+        content,
+        "",
+        true,
+        resultSource
+      ),
+      controller.signal
+    );
+    if (!delivered || !RequestManager.isActiveRequest(requestId)) return;
+
+    // 成功终态已经交付，历史落盘不再阻塞请求进入 finally 完成清理。
+    void HistoryManager.saveTranslationHistory(
+      original,
+      content,
+      "",
+      resultSource
+    )
+      .catch((error) =>
+        logger.error("保存本地生词本结果历史失败:", error)
+      );
+    return content;
+  }
+
   static async translateText(
     params: TranslationParams,
     requestContext: RequestContext
@@ -266,6 +349,7 @@ export class TranslationService {
     let streamFinished = false;
     let result = "";
     let reasoningContent = "";
+    let localResultSelected = false;
 
     logger.log("🚀 [TranslationService] 开始翻译", {
       requestId,
@@ -278,9 +362,34 @@ export class TranslationService {
     });
 
     try {
+      const jargonTerm = getJargonReuseTerm(params);
+      if (jargonTerm) {
+        let savedItem;
+        try {
+          savedItem = await findExactJargonItem(jargonTerm);
+        } catch (error) {
+          logger.warn("读取生词本自动复用项失败，继续正常翻译:", error);
+        }
+
+        // 本地读取期间可能发生停止或同目标替换，旧请求不得继续调用模型。
+        if (!RequestManager.isActiveRequest(requestId)) return;
+
+        if (savedItem) {
+          localResultSelected = true;
+          // 与模型流保持相同终态顺序：先停止首输出、总时长与保活计时器。
+          timeoutGuard.completeStream();
+          return await this.deliverLocalResult(
+            jargonTerm,
+            savedItem.explanation,
+            JARGON_VAULT_RESULT_SOURCE,
+            requestContext
+          );
+        }
+      }
+
       const config = await timeoutGuard.run(SettingsUtils.getSettings());
       const apiKey = params.apiKey || config.apiKey;
-      if (!apiKey) {
+      if (!SettingsUtils.isApiKeyConfigured(apiKey)) {
         throw new Error("请先在设置中配置 API Key");
       }
 
@@ -454,6 +563,10 @@ export class TranslationService {
 
       const message = this.normalizeErrorMessage(error);
       logger.error("翻译过程中出现错误:", error);
+      if (localResultSelected) {
+        // 本地终态交付失败时直接结束，避免再次发送消息或误入模型流程。
+        throw new Error(message);
+      }
       if (RequestManager.isActiveRequest(requestId)) {
         await this.sendTranslationError(requestContext, message);
       }
@@ -551,7 +664,8 @@ export class TranslationService {
     requestContext: RequestContext,
     content: string,
     reasoningContent: string,
-    done: boolean
+    done: boolean,
+    resultSource?: TranslationResultSource
   ): Promise<boolean> {
     const { requestId, target } = requestContext;
     if (!RequestManager.isActiveRequest(requestId)) {
@@ -575,6 +689,7 @@ export class TranslationService {
       hasReasoning: reasoningContent.length > 0,
       reasoningContent,
       done,
+      ...(resultSource ? { resultSource } : {}),
     };
 
     logger.log("📤 [TranslationService] 发送翻译更新", {

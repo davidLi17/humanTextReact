@@ -497,6 +497,31 @@ h1 {
   flex: 1;
 }
 
+.result-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vault-result-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vault-regenerate-btn {
+  display: block;
+  margin: 14px 0 0 auto;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
 /* 主题：暗色模式覆盖（基于 data-theme） */
 [data-theme="dark"] {
   .container { background: #0b1220; box-shadow: 0 -4px 24px rgba(0,0,0,0.4); }
@@ -1347,5 +1372,4 @@ h1 {
     }
   }
 }
-
 

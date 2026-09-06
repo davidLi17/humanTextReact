@@ -20,6 +20,7 @@ import {
   ChatMessage,
   ChatSession,
 } from "@/entrypoints/shared/chatTypes";
+import { retryAssistantMessageAndTruncate } from "@/entrypoints/shared/chatEditRetry";
 import {
   buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
@@ -610,8 +611,15 @@ export default function SidePanelApp() {
       }
 
       if (message.action === MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION) {
-        const { requestId, sessionId, content, reasoningContent, done, error } =
-          message;
+        const {
+          requestId,
+          sessionId,
+          content,
+          reasoningContent,
+          resultSource,
+          done,
+          error,
+        } = message;
 
         if (
           !shouldAcceptRequestUpdate(requestId, activeRequestIdRef.current, true)
@@ -648,6 +656,7 @@ export default function SidePanelApp() {
                   ? "completed"
                   : "streaming",
                 errorMessage: error || undefined,
+                resultSource: resultSource ?? lastMsg.resultSource,
               };
               messages[messages.length - 1] = updatedMsg;
             }
@@ -1543,13 +1552,17 @@ export default function SidePanelApp() {
   };
 
   // 重新生成助手回答 / 重试错误卡片
-  const handleRegenerateMessage = async (assistantMessageId: string) => {
+  const handleRegenerateMessage = async (
+    assistantMessageId: string,
+    bypassJargonVault = false
+  ) => {
     if (isStreaming || !activeSession) return;
 
-    const assistantIndex = activeSession.messages.findIndex(
-      (m) => m.id === assistantMessageId
+    const retryResult = retryAssistantMessageAndTruncate(
+      activeSession.messages,
+      assistantMessageId
     );
-    if (assistantIndex === -1) return;
+    const { assistantIndex } = retryResult;
 
     // 截取该回答之前的所有上下文
     const historyMessages = activeSession.messages.slice(0, assistantIndex);
@@ -1577,20 +1590,9 @@ export default function SidePanelApp() {
       assistantMessageId,
     });
 
-    const newAssistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      reasoningContent: "",
-      hasReasoning: false,
-      createdAt: Date.now(),
-      status: "streaming",
-    };
-
-    const nextMessages = [...historyMessages, newAssistantMessage];
     const updatedSession: ChatSession = {
       ...activeSession,
-      messages: nextMessages,
+      messages: retryResult.updatedMessages,
       updatedAt: Date.now(),
     };
 
@@ -1646,6 +1648,7 @@ export default function SidePanelApp() {
         sessionId: activeSession.id,
         messages: messagesPayload,
         thinkingEnabled,
+        bypassJargonVault,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
         settleSessionWebReadingProgress(
@@ -2585,7 +2588,9 @@ export default function SidePanelApp() {
                               className="error-retry-btn"
                               title="重试生成"
                               disabled={isStreaming}
-                              onClick={() => handleRegenerateMessage(message.id)}
+                              onClick={() =>
+                                handleRegenerateMessage(message.id, false)
+                              }
                             >
                               <Refresh
                                 theme="outline"
@@ -2606,12 +2611,19 @@ export default function SidePanelApp() {
                     {/* 卡片底部操作 */}
                     {message.content && message.role === "assistant" && (
                       <div className="bubble-footer">
+                        {message.resultSource === "jargon-vault" && (
+                          <span className="vault-result-badge">
+                            来自生词本
+                          </span>
+                        )}
                         <button
                           type="button"
                           className="action-link-btn regenerate-btn"
                           title="重新生成回答"
                           disabled={isStreaming}
-                          onClick={() => handleRegenerateMessage(message.id)}
+                          onClick={() =>
+                            handleRegenerateMessage(message.id, true)
+                          }
                         >
                           <Refresh
                             theme="outline"

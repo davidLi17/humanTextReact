@@ -1,5 +1,6 @@
 import { MAX_HISTORY_COUNT } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
+import type { TranslationResultSource } from "@/entrypoints/shared/jargonReuse";
 
 const logger = createLogger("history-manager", "📜");
 /**
@@ -15,6 +16,7 @@ export interface HistoryItem {
   reasoning?: string;
   hasReasoning: boolean;
   timestamp: number;
+  resultSource?: TranslationResultSource;
 }
 
 /**
@@ -28,7 +30,8 @@ export class HistoryManager {
   static async saveTranslationHistory(
     original: string,
     translated: string,
-    reasoning?: string
+    reasoning?: string,
+    resultSource?: TranslationResultSource
   ): Promise<void> {
     try {
       // 获取现有历史
@@ -44,6 +47,7 @@ export class HistoryManager {
         reasoning: reasoning || "",
         hasReasoning: Boolean(reasoning),
         timestamp: Date.now(),
+        ...(resultSource ? { resultSource } : {}),
       };
 
       // 添加到历史记录开头
@@ -152,4 +156,3 @@ export class HistoryManager {
     }
   }
 }
-

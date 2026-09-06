@@ -16,6 +16,8 @@ export type { JargonCategory, JargonInput, JargonItem } from "./jargonTypes";
 const logger = createLogger("jargon-storage", "📚");
 
 export const JARGON_VAULT_STORAGE_KEY = JARGON_STORAGE_KEY;
+export const JARGON_LOOKUP_TIMEOUT_MS = 1000;
+let jargonLookupTimeoutMs = JARGON_LOOKUP_TIMEOUT_MS;
 export const JARGON_CATEGORIES = JARGON_DEFAULT_CATEGORIES;
 export const JARGON_FILTER_CATEGORIES = [
   "全部",
@@ -110,27 +112,64 @@ async function persistJargonList(items: JargonItem[]): Promise<void> {
   }
 }
 
+async function readJargonList(): Promise<JargonItem[]> {
+  const storage = getBrowserStorage();
+  const rawItems = storage
+    ? (await storage.get(JARGON_STORAGE_KEY))[JARGON_STORAGE_KEY]
+    : memoryJargonStorage;
+  if (!Array.isArray(rawItems)) return [];
+
+  const normalized = rawItems
+    .map((item) => normalizeJargonItem(item))
+    .filter((item): item is JargonItem => Boolean(item));
+
+  if (JSON.stringify(rawItems) !== JSON.stringify(normalized)) {
+    await persistJargonList(normalized);
+  }
+  return normalized;
+}
+
 /** 读取时自动迁移旧版 starred/metaphor/职场暗语 数据。 */
 export async function getJargonList(): Promise<JargonItem[]> {
   try {
-    const storage = getBrowserStorage();
-    const rawItems = storage
-      ? (await storage.get(JARGON_STORAGE_KEY))[JARGON_STORAGE_KEY]
-      : memoryJargonStorage;
-    if (!Array.isArray(rawItems)) return [];
-
-    const normalized = rawItems
-      .map((item) => normalizeJargonItem(item))
-      .filter((item): item is JargonItem => Boolean(item));
-
-    if (JSON.stringify(rawItems) !== JSON.stringify(normalized)) {
-      await persistJargonList(normalized);
-    }
-    return normalized;
+    return await readJargonList();
   } catch (error) {
     logger.error("获取生词本失败:", error);
     return [...memoryJargonStorage];
   }
+}
+
+/**
+ * 为自动复用执行严格、区分大小写的词条匹配。
+ * 存储读取失败时向上抛错，让调用方安全回退到正常翻译请求。
+ */
+export async function findExactJargonItem(
+  rawTerm: string,
+  timeoutMs = jargonLookupTimeoutMs
+): Promise<JargonItem | undefined> {
+  const term = rawTerm.trim();
+  if (!term) return undefined;
+
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const items = await Promise.race([
+      readJargonList(),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error("读取生词本超时")),
+          timeoutMs
+        );
+      }),
+    ]);
+    return items.find((item) => item.term === term);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+/** 仅供自动化测试缩短本地读取等待；传空值恢复生产默认值。 */
+export function setJargonLookupTimeoutForTests(timeoutMs?: number): void {
+  jargonLookupTimeoutMs = timeoutMs ?? JARGON_LOOKUP_TIMEOUT_MS;
 }
 
 function normalizeInput(itemData: JargonInput): Omit<JargonItem, "id" | "createdAt" | "updatedAt"> {

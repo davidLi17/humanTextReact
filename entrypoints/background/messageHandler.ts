@@ -93,6 +93,10 @@ export class MessageHandler {
       }
 
       try {
+        const selectionContext =
+          target.kind === "sidepanel"
+            ? normalizeSelectionContext(request.selectionContext)
+            : normalizeSelectionContext(request.selectionContext, request.text);
         // 如果请求中没有传递 thinkingEnabled，则从设置中获取
         let thinkingEnabled = request.thinkingEnabled;
         if (isNil(thinkingEnabled)) {
@@ -109,13 +113,8 @@ export class MessageHandler {
           temperature: request.temperature,
           promptTemplate: request.promptTemplate,
           apiKey: request.apiKey,
-          selectionContext:
-            target.kind === "sidepanel"
-              ? normalizeSelectionContext(request.selectionContext)
-              : normalizeSelectionContext(
-                  request.selectionContext,
-                  request.text
-                ),
+          selectionContext,
+          bypassJargonVault: request.bypassJargonVault === true,
         };
 
         const result = await TranslationService.translateText(

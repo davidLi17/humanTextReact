@@ -118,6 +118,7 @@ export function retryAssistantMessageAndTruncate(
     status: "streaming",
     errorMessage: undefined,
     suggestedQuestions: undefined,
+    resultSource: undefined,
     createdAt: now,
   };
 

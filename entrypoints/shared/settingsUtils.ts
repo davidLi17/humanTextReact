@@ -143,7 +143,13 @@ export class SettingsUtils {
    */
   static async hasApiKey(): Promise<boolean> {
     const settings = await this.getSettings();
-    return !!settings.apiKey && settings.apiKey !== "your_api_key";
+    return this.isApiKeyConfigured(settings.apiKey);
+  }
+
+  /** 判断 Key 是否为可请求服务的真实配置，不输出或记录 Key 内容。 */
+  static isApiKeyConfigured(apiKey?: string): boolean {
+    const normalized = apiKey?.trim();
+    return Boolean(normalized && normalized !== DEFAULT_SETTINGS.apiKey);
   }
 
   /**

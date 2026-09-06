@@ -128,6 +128,8 @@ export interface ChatMessage {
   createdAt: number;
   status?: "pending" | "streaming" | "completed" | "error";
   errorMessage?: string;
+  /** 回答的本地来源；缺省表示模型生成或旧数据。 */
+  resultSource?: import("./jargonReuse").TranslationResultSource;
 }
 
 export interface ChatSession {

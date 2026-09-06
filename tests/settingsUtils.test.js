@@ -205,6 +205,10 @@ describe("SettingsUtils", () => {
         settings: { apiKey: "" },
       });
       expect(await SettingsUtils.hasApiKey()).toBe(false);
+
+      expect(SettingsUtils.isApiKeyConfigured("   ")).toBe(false);
+      expect(SettingsUtils.isApiKeyConfigured("  your_api_key  ")).toBe(false);
+      expect(SettingsUtils.isApiKeyConfigured("  sk-real-key  ")).toBe(true);
     });
 
     test("getThinkingEnabled and getShowSelectionToolbar return correct flags", async () => {

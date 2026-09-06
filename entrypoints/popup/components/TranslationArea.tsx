@@ -27,6 +27,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
   onThemeChange,
   onClearDraft,
   onRetry,
+  onRegenerate,
   onCancel,
   history,
 }) => {
@@ -309,13 +310,28 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
 
                 {translationState.translatedText && (
                   <div className="result-section">
-                    <div className="result-label">译文</div>
+                    <div className="result-label result-label-row">
+                      <span>译文</span>
+                      {translationState.resultSource === "jargon-vault" && (
+                        <span className="vault-result-badge">来自生词本</span>
+                      )}
+                    </div>
                     <div
                       className="result-content markdown-content"
                       dangerouslySetInnerHTML={{
                         __html: parseMarkdown(translationState.translatedText),
                       }}
                     />
+                    {translationState.resultSource === "jargon-vault" && (
+                      <button
+                        type="button"
+                        className="secondary-btn vault-regenerate-btn"
+                        onClick={onRegenerate}
+                        disabled={translationState.isTranslating}
+                      >
+                        重新生成
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -337,5 +353,4 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
 };
 
 export default TranslationArea;
-
 

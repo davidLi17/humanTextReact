@@ -1,4 +1,5 @@
 import type { ThemeMode } from "@/entrypoints/shared/constants";
+import type { TranslationResultSource } from "@/entrypoints/shared/jargonReuse";
 
 /**
  * @description 图片内容接口
@@ -62,6 +63,8 @@ export interface TranslationState {
    * @description 当前选择的图片列表。
    */
   images: ImageContent[];
+  /** 当前结果由本地生词本直接提供。 */
+  resultSource?: TranslationResultSource;
 }
 
 /**
@@ -88,6 +91,8 @@ export interface HistoryItem {
    * @description 翻译的时间戳。
    */
   timestamp: number;
+  /** 历史结果由本地生词本直接提供。 */
+  resultSource?: TranslationResultSource;
 }
 
 /**
@@ -134,6 +139,8 @@ export interface TranslationAreaProps {
    * @description 重试最近一次翻译。
    */
   onRetry: () => void;
+  /** 跳过生词本并明确重新调用模型。 */
+  onRegenerate: () => void;
   /**
    * @description 取消当前翻译。
    */
@@ -250,6 +257,8 @@ export interface MessageRequest {
    * @description 发生的任何错误。
    */
   error?: string;
+  /** 当前结果由本地生词本直接提供。 */
+  resultSource?: TranslationResultSource;
 }
 
 /**
@@ -269,6 +278,5 @@ export interface MessageResponse {
    */
   error?: string;
 }
-
 
 

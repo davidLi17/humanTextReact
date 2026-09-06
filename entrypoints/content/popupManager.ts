@@ -343,6 +343,25 @@ export class PopupManager {
         <div class="translator-section">
           <div class="translator-label">译文</div>
           <div class="translator-translated-text"></div>
+          <div
+            class="translator-result-meta"
+            style="display: none; margin-top: 10px; align-items: center; justify-content: space-between; gap: 10px;"
+          >
+            <span
+              class="translator-vault-source"
+              style="padding: 3px 8px; border-radius: 999px; background: rgba(52, 199, 89, 0.12); color: #248a3d; font-size: 12px; font-weight: 600;"
+            >
+              来自生词本
+            </span>
+            <button
+              type="button"
+              class="translator-regenerate-btn"
+              title="跳过生词本并重新生成"
+              style="padding: 4px 10px; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: transparent; color: #248a3d; font-size: 12px; cursor: pointer;"
+            >
+              重新生成
+            </button>
+          </div>
           <div class="translator-loading">
             <span class="translator-loading-text">正在翻译...</span>
             <button
@@ -476,7 +495,15 @@ export class PopupManager {
       .querySelector(".translator-retry-btn")
       ?.addEventListener("click", (event) => {
         event.preventDefault();
-        void this.retryTranslation();
+        void this.retryTranslation(false);
+      });
+
+    // 生词本命中后的明确重新生成：跳过本地复用并调用模型。
+    popup
+      .querySelector(".translator-regenerate-btn")
+      ?.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.retryTranslation(true);
       });
 
     popup
@@ -770,6 +797,9 @@ export class PopupManager {
       retryBtnEl: this.currentPopup.querySelector(
         ".translator-retry-btn"
       ) as HTMLButtonElement, // 失败重试按钮
+      resultMetaEl: this.currentPopup.querySelector(
+        ".translator-result-meta"
+      ) as HTMLElement,
       contentEl: this.currentPopup.querySelector(
         ".translator-content"
       ) as HTMLElement, // 内容容器
@@ -822,7 +852,7 @@ export class PopupManager {
   }
 
   // 失败后使用上次的划词内容重新发起完整翻译流程
-  private async retryTranslation() {
+  private async retryTranslation(bypassJargonVault = false) {
     if (!this.currentPopup || !this.requestFinished) return; // 翻译进行中不允许重试
 
     const text = this.lastSelectionText?.trim();
@@ -843,6 +873,7 @@ export class PopupManager {
       elements.reasoningSectionEl.style.display = "none";
     }
     if (elements.loadingEl) elements.loadingEl.style.display = "";
+    if (elements.resultMetaEl) elements.resultMetaEl.style.display = "none";
     this.updateStatusRow(elements, "正在翻译...", {
       showStop: true,
       showRetry: false,
@@ -868,6 +899,7 @@ export class PopupManager {
         text,
         selectionContext,
         thinkingEnabled: settings.thinkingEnabled ?? false,
+        bypassJargonVault,
       });
 
       // 后台前置校验失败（如缺少 API Key）时同步展示错误
@@ -983,6 +1015,11 @@ export class PopupManager {
     // 更新译文内容
     if (request.content) {
       elements.translatedTextEl.innerHTML = parseMarkdown(request.content);
+    }
+
+    if (elements.resultMetaEl) {
+      elements.resultMetaEl.style.display =
+        request.resultSource === "jargon-vault" ? "flex" : "none";
     }
 
     // 处理思维链内容

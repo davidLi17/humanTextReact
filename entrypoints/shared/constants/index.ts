@@ -134,4 +134,8 @@ export interface TranslationRequest {
   deferTranslation?: boolean;
   expectedSelectedText?: string;
   includeSelectionContext?: boolean;
+  /** 本次结果由本地生词本直接提供。 */
+  resultSource?: import("../jargonReuse").TranslationResultSource;
+  /** 明确要求跳过生词本命中并重新调用模型。 */
+  bypassJargonVault?: boolean;
 }

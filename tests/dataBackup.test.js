@@ -45,6 +45,7 @@ const historyFixture = [
     reasoning: "",
     hasReasoning: false,
     timestamp: 1700000000000,
+    resultSource: "jargon-vault",
   },
   {
     original: "对齐一下颗粒度",
@@ -246,6 +247,24 @@ describe("validateBackup 合法输入", () => {
     expect(result.valid).toBe(true);
     expect(result.backup.data.sessions.activeSessionId).toBeNull();
   });
+
+  test("历史来源只保留 jargon-vault，未知值在校验规范化时丢弃", () => {
+    const envelope = createBackupEnvelope({
+      history: [
+        {
+          ...historyFixture[0],
+          resultSource: "unknown-source",
+        },
+      ],
+      jargon: [],
+      sessions: { sessions: [], activeSessionId: null },
+      settings: {},
+    });
+
+    const result = validateBackup(JSON.parse(JSON.stringify(envelope)));
+    expect(result.valid).toBe(true);
+    expect(result.backup.data.history[0].resultSource).toBeUndefined();
+  });
 });
 
 describe("validateBackup 非法输入", () => {
@@ -386,6 +405,8 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
 
     const backup = await buildBackup();
     const serialized = JSON.stringify(backup, null, 2);
+    expect(backup.data.history[0].resultSource).toBe("jargon-vault");
+    expect(serialized).toContain('"resultSource": "jargon-vault"');
 
     // 2. 在全新目标环境反序列化、校验并恢复
     const target = createMockBrowser();
@@ -412,6 +433,9 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
 
     // 3. 校验目标存储中的四类数据
     expect(target.stores.local[HISTORY_STORAGE_KEY]).toEqual(historyFixture);
+    expect(
+      target.stores.local[HISTORY_STORAGE_KEY][0].resultSource
+    ).toBe("jargon-vault");
     expect(target.stores.local[SESSIONS_STORAGE_KEY]).toEqual(sessionsFixture);
     expect(target.stores.local[ACTIVE_SESSION_STORAGE_KEY]).toBe("session-1");
 

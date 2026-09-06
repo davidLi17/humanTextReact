@@ -73,6 +73,11 @@ Estimated cost:
 
 ## Working Rules For Agents
 
+### Benefit queue delivery
+
+- When the user defines a maximum-benefit feature queue, complete exactly one queued item at a time. For each item, finish verification, commit, push the current development branch, build, and update the fixed Chrome loading directory before starting the next item.
+- Continue until the user's explicitly defined queue is empty. Do not add unrequested features, reorder the queue, or automatically merge the development branch into `main`.
+
 ### Local build delivery
 
 - After every requested Chrome build/package, update the unpacked build in `/Users/bytedance/lhg-Project/human-language-translator-1.3.0-chrome-mv3`, the user's verified Chrome loading directory outside the repository. Keep this exact directory even when the extension version changes; do not switch delivery back to `human-language-translator-chrome` or `.output`.
