@@ -397,6 +397,16 @@ export class SelectionActionBar {
         <span class="translator-action-icon" aria-hidden="true">📖</span>
         <span class="translator-action-text">侧边栏人话</span>
       </button>
+      <div class="translator-action-divider" aria-hidden="true"></div>
+      <button
+        type="button"
+        class="translator-action-btn translator-action-btn-copy"
+        title="复制选中文本"
+        aria-label="复制这段话"
+      >
+        <span class="translator-action-icon" aria-hidden="true">📋</span>
+        <span class="translator-action-text">复制</span>
+      </button>
     `;
 
     // 防止在操作条上点击时导致选区被浏览器清空
@@ -422,6 +432,13 @@ export class SelectionActionBar {
       e.preventDefault();
       e.stopPropagation();
       void this.handleOpenSidepanelClick();
+    });
+
+    const copyBtn = bar.querySelector(".translator-action-btn-copy");
+    copyBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void this.handleCopyClick(copyBtn as HTMLButtonElement);
     });
 
     targetDocument.body.appendChild(bar);
@@ -496,6 +513,57 @@ export class SelectionActionBar {
       }
     } catch (error) {
       logger.error("触发侧边栏人话失败:", error);
+    }
+  }
+
+  private async handleCopyClick(button?: HTMLButtonElement): Promise<void> {
+    const text = this.currentSelectedText;
+    if (!isValidSelectionText(text)) return;
+
+    const copied = await this.copyTextToClipboard(text);
+    if (!copied) {
+      logger.error("复制选中文本失败", { textLength: text.length });
+      this.hide();
+      return;
+    }
+
+    logger.log("复制选中文本成功", { textLength: text.length });
+
+    // 按钮反馈「已复制」，短暂停留后收起操作条并还原文案
+    const textEl = button?.querySelector<HTMLSpanElement>(
+      ".translator-action-text"
+    );
+    if (textEl) textEl.textContent = "已复制 ✓";
+    window.setTimeout(() => {
+      if (textEl) textEl.textContent = "复制";
+      this.hide();
+    }, 500);
+  }
+
+  private async copyTextToClipboard(text: string): Promise<boolean> {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (error) {
+      logger.warn("navigator.clipboard 写入失败，尝试 execCommand 兜底:", error);
+    }
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand("copy");
+      textarea.remove();
+      return ok;
+    } catch (error) {
+      logger.error("execCommand 复制失败:", error);
+      return false;
     }
   }
 
