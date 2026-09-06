@@ -1243,6 +1243,52 @@
   }
 }
 
+.web-reading-overview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+  padding: 9px 12px;
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  border-radius: 10px;
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+
+  .overview-reading-btn {
+    border: none;
+    border-radius: 999px;
+    padding: 5px 12px;
+    background: var(--color-primary);
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      opacity: 0.92;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+  }
+}
+
+.overview-stale-notice {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 /* Markdown 渲染定制 */
 .markdown-content {
   font-size: 13px;

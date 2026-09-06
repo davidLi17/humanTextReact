@@ -59,6 +59,11 @@ import {
   type WebReadingResponse,
 } from "@/entrypoints/shared/webReadingState";
 import {
+  getWebReadingOverviewActions,
+  prepareWebReadingOverviewRequest,
+  type WebReadingOverviewAction,
+} from "@/entrypoints/shared/webReadingOverview";
+import {
   ExtractActiveTabResult,
   extractActiveTabContent,
   getActiveTab,
@@ -115,7 +120,7 @@ import {
   Refresh,
   Down,
 } from "@icon-park/react";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.less";
 import {
   getResetScrollFollowState,
@@ -264,6 +269,7 @@ export default function SidePanelApp() {
   const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
     undefined
   );
+  const overviewRequestIdRef = useRef<string | undefined>(undefined);
   const sessionsRef = useRef<ChatSession[]>([]);
   const activeSessionIdRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -453,6 +459,9 @@ export default function SidePanelApp() {
     if (!transition.invalidated) return false;
     activeRequestIdRef.current = transition.activeRequestId;
     activeRequestOwnerRef.current = transition.owner;
+    if (overviewRequestIdRef.current === requestId) {
+      overviewRequestIdRef.current = undefined;
+    }
     return transition.invalidated;
   };
 
@@ -1471,6 +1480,112 @@ export default function SidePanelApp() {
     }
   };
 
+  // 用户主动生成网页全文总览；资格、内容和 48K 边界都在点击时重新校验。
+  const handleGenerateWebReadingOverview = async (readingRunId: string) => {
+    if (
+      isStreaming ||
+      isExtractingPage ||
+      activeRequestIdRef.current ||
+      overviewRequestIdRef.current
+    ) {
+      return;
+    }
+    overviewRequestIdRef.current = "starting";
+
+    const sessionId = activeSessionIdRef.current;
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === sessionId
+    );
+    if (!currentSession) {
+      overviewRequestIdRef.current = undefined;
+      const error = "当前会话不存在，无法生成全文总览。";
+      setExtractError(error);
+      showToast(error);
+      return;
+    }
+    const prepared = prepareWebReadingOverviewRequest(
+      currentSession.messages,
+      readingRunId
+    );
+    if (!prepared.success) {
+      overviewRequestIdRef.current = undefined;
+      setExtractError(prepared.error);
+      showToast(prepared.error);
+      return;
+    }
+
+    const userMessageId = createRequestId();
+    const assistantMessageId = createRequestId();
+    const currentRequestId = createRequestId();
+    const userMessage: ChatMessage = {
+      id: userMessageId,
+      role: "user",
+      content: `生成《${prepared.run.title}》的全文总览（第 1-${prepared.run.totalSegments} 段）`,
+      overviewMeta: prepared.meta,
+      createdAt: Date.now(),
+      status: "completed",
+    };
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
+      hasReasoning: false,
+      createdAt: Date.now(),
+      status: "streaming",
+    };
+    const updatedSession: ChatSession = {
+      ...currentSession,
+      messages: [...currentSession.messages, userMessage, assistantMessage],
+      updatedAt: Date.now(),
+    };
+    const nextSessions = sessionsRef.current.map((session) =>
+      session.id === sessionId ? updatedSession : session
+    );
+
+    overviewRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId,
+      assistantMessageId,
+    });
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+    setIsStreaming(true);
+    setExtractError(null);
+    scrollToBottom(true);
+
+    try {
+      const response = (await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId,
+        messages: prepared.messages,
+        thinkingEnabled,
+        bypassJargonVault: true,
+      })) as WebReadingResponse;
+      if (!isSuccessfulWebReadingResponse(response)) {
+        markAssistantMessageAsError(
+          sessionId,
+          assistantMessageId,
+          response?.error || "全文总览未返回有效结果，请重试",
+          currentRequestId
+        );
+      }
+    } catch (error: any) {
+      logger.error("生成网页全文总览失败:", error);
+      markAssistantMessageAsError(
+        sessionId,
+        assistantMessageId,
+        error?.message || "全文总览请求发送失败，请检查网络或设置",
+        currentRequestId
+      );
+    }
+  };
+
   // 发送常规消息或追问
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend ?? inputText).trim();
@@ -1788,12 +1903,117 @@ export default function SidePanelApp() {
     }
   };
 
+  const handleRetryWebReadingOverview = async (
+    assistantMessageId: string,
+    overviewUserMessage: ChatMessage
+  ) => {
+    if (
+      isStreaming ||
+      !activeSession ||
+      activeRequestIdRef.current ||
+      overviewRequestIdRef.current ||
+      !overviewUserMessage.overviewMeta
+    ) {
+      return;
+    }
+    overviewRequestIdRef.current = "starting";
+
+    const prepared = prepareWebReadingOverviewRequest(
+      activeSession.messages,
+      overviewUserMessage.overviewMeta.readingRunId,
+      overviewUserMessage.overviewMeta.sourceFingerprint
+    );
+    if (!prepared.success) {
+      overviewRequestIdRef.current = undefined;
+      setExtractError(prepared.error);
+      showToast(prepared.error);
+      return;
+    }
+
+    const retryResult = retryAssistantMessageAndTruncate(
+      activeSession.messages,
+      assistantMessageId
+    );
+    const currentRequestId = createRequestId();
+    overviewRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: activeSession.id,
+      assistantMessageId,
+    });
+
+    const updatedSession: ChatSession = {
+      ...activeSession,
+      messages: retryResult.updatedMessages,
+      updatedAt: Date.now(),
+    };
+    const nextSessions = sessionsRef.current.map((session) =>
+      session.id === activeSession.id ? updatedSession : session
+    );
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+    setRegeneratingId(assistantMessageId);
+    setTimeout(() => setRegeneratingId(null), 800);
+    setIsStreaming(true);
+    setExtractError(null);
+    scrollToBottom(true);
+
+    try {
+      const response = (await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId: activeSession.id,
+        messages: prepared.messages,
+        thinkingEnabled,
+        bypassJargonVault: true,
+      })) as WebReadingResponse;
+      if (!isSuccessfulWebReadingResponse(response)) {
+        markAssistantMessageAsError(
+          activeSession.id,
+          assistantMessageId,
+          response?.error || "全文总览未返回有效结果，请重试",
+          currentRequestId
+        );
+      }
+    } catch (error: any) {
+      logger.error("重试网页全文总览失败:", error);
+      markAssistantMessageAsError(
+        activeSession.id,
+        assistantMessageId,
+        error?.message || "全文总览重试失败，请检查网络或设置",
+        currentRequestId
+      );
+    }
+  };
+
   // 重新生成助手回答 / 重试错误卡片
   const handleRegenerateMessage = async (
     assistantMessageId: string,
     bypassJargonVault = false
   ) => {
     if (isStreaming || !activeSession) return;
+
+    const targetAssistantIndex = activeSession.messages.findIndex(
+      (message) =>
+        message.id === assistantMessageId && message.role === "assistant"
+    );
+    const precedingUserMessage =
+      targetAssistantIndex > 0
+        ? activeSession.messages[targetAssistantIndex - 1]
+        : undefined;
+    if (
+      precedingUserMessage?.role === "user" &&
+      precedingUserMessage.overviewMeta?.kind === "web-reading-overview"
+    ) {
+      await handleRetryWebReadingOverview(
+        assistantMessageId,
+        precedingUserMessage
+      );
+      return;
+    }
 
     const retryResult = retryAssistantMessageAndTruncate(
       activeSession.messages,
@@ -2276,6 +2496,37 @@ export default function SidePanelApp() {
     }
   };
 
+  const webReadingOverviewViewState = useMemo(() => {
+    if (!activeSession || isStreaming || isExtractingPage) {
+      return {
+        actions: new Map<string, WebReadingOverviewAction>(),
+        staleAssistantIds: new Set<string>(),
+      };
+    }
+
+    const actions = getWebReadingOverviewActions(activeSession.messages);
+    const fingerprintByRun = new Map(
+      Array.from(actions.values()).map((action) => [
+        action.readingRunId,
+        action.sourceFingerprint,
+      ])
+    );
+    const staleAssistantIds = new Set<string>();
+    activeSession.messages.forEach((message, index) => {
+      if (message.role !== "user" || !message.overviewMeta) return;
+      const assistant = activeSession.messages[index + 1];
+      if (assistant?.role !== "assistant") return;
+      const currentFingerprint = fingerprintByRun.get(
+        message.overviewMeta.readingRunId
+      );
+      if (currentFingerprint !== message.overviewMeta.sourceFingerprint) {
+        staleAssistantIds.add(assistant.id);
+      }
+    });
+    return { actions, staleAssistantIds };
+  }, [activeSession?.messages, isStreaming, isExtractingPage]);
+  const webReadingOverviewActions = webReadingOverviewViewState.actions;
+
   return (
     <div className="sidepanel-container" ref={sidepanelContainerRef}>
       {/* 顶部重构布局：第一层 核心顶栏 (Header Bar) */}
@@ -2748,7 +2999,35 @@ export default function SidePanelApp() {
                         </div>
                       ) : (
                         <div className="user-bubble-wrapper">
-                          {message.pageMeta?.isWebPageReading ? (
+                          {message.overviewMeta ? (
+                            <div className="webpage-user-card overview-user-card">
+                              <div className="webpage-badge">
+                                <DocDetail theme="filled" size="13" />
+                                <span>全文总览</span>
+                              </div>
+                              <div
+                                className="webpage-title"
+                                title={
+                                  typeof message.overviewMeta.title === "string"
+                                    ? message.overviewMeta.title
+                                    : "网页全文总览"
+                                }
+                              >
+                                {typeof message.overviewMeta.title === "string"
+                                  ? message.overviewMeta.title
+                                  : "网页全文总览"}
+                              </div>
+                              <div className="webpage-meta-row">
+                                <span className="webpage-words-tag">
+                                  {Number.isInteger(
+                                    message.overviewMeta.totalSegments
+                                  )
+                                    ? `来源范围：第 1-${message.overviewMeta.totalSegments} 段`
+                                    : "来源范围：全部已读分段"}
+                                </span>
+                              </div>
+                            </div>
+                          ) : message.pageMeta?.isWebPageReading ? (
                             <div className="webpage-user-card">
                               <div className="webpage-badge">
                                 <BookOne theme="filled" size="13" />
@@ -2807,21 +3086,30 @@ export default function SidePanelApp() {
                           )}
 
                           {/* 悬浮操作区：编辑按钮 */}
-                          <div className="user-bubble-actions">
-                            <button
-                              type="button"
-                              className="user-action-btn edit-msg-btn"
-                              title="编辑消息"
-                              disabled={isStreaming}
-                              onClick={() => handleStartEditMessage(message)}
-                            >
-                              <Edit theme="outline" size="13" />
-                            </button>
-                          </div>
+                          {!message.overviewMeta && (
+                            <div className="user-bubble-actions">
+                              <button
+                                type="button"
+                                className="user-action-btn edit-msg-btn"
+                                title="编辑消息"
+                                disabled={isStreaming}
+                                onClick={() => handleStartEditMessage(message)}
+                              >
+                                <Edit theme="outline" size="13" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )
                     ) : (
                       <>
+                        {webReadingOverviewViewState.staleAssistantIds.has(
+                          message.id
+                        ) && (
+                          <div className="overview-stale-notice">
+                            此总览基于旧分段结果，当前已失效，请重新生成全文总览。
+                          </div>
+                        )}
                         {message.content ? (
                           <div
                             className="markdown-content"
@@ -3015,6 +3303,34 @@ export default function SidePanelApp() {
                         >
                           继续解读剩余部分（第{" "}
                           {activeWebReadingProgress.segmentIndex} 段）
+                        </button>
+                      </div>
+                    )}
+
+                  {/* 阅读完成后仅提供用户主动触发的全文总览入口。 */}
+                  {message.role === "assistant" &&
+                    !activeWebReadingProgress &&
+                    webReadingOverviewActions.has(message.id) && (
+                      <div className="web-reading-overview-bar">
+                        <span>
+                          📚 全部分段已解读，可综合查看全文主线与关键结论
+                        </span>
+                        <button
+                          type="button"
+                          className="overview-reading-btn"
+                          disabled={isStreaming || isExtractingPage}
+                          onClick={() => {
+                            const action = webReadingOverviewActions.get(
+                              message.id
+                            );
+                            if (action) {
+                              void handleGenerateWebReadingOverview(
+                                action.readingRunId
+                              );
+                            }
+                          }}
+                        >
+                          {webReadingOverviewActions.get(message.id)?.label}
                         </button>
                       </div>
                     )}

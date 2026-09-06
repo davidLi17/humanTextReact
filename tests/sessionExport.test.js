@@ -40,6 +40,31 @@ describe("Session Export Utilities", () => {
         createdAt: 1700000002000,
         status: "completed",
       },
+      {
+        id: "msg-4",
+        role: "user",
+        content: "生成《架构演进》的全文总览（第 1-2 段）",
+        overviewMeta: {
+          kind: "web-reading-overview",
+          version: 1,
+          readingRunId: "run-1",
+          sourceFingerprint: "v1-private",
+          title: "架构演进",
+          url: "https://example.com/arch",
+          totalSegments: 2,
+          requestChars: 1234,
+          sourceAssistantMessageIds: ["segment-a", "segment-b"],
+        },
+        createdAt: 1700000003000,
+        status: "completed",
+      },
+      {
+        id: "msg-5",
+        role: "assistant",
+        content: "这是可读的全文总览正文。",
+        createdAt: 1700000004000,
+        status: "completed",
+      },
     ],
   };
 
@@ -53,6 +78,9 @@ describe("Session Export Utilities", () => {
     expect(md).toContain("OKR 就是目标与关键成果");
     expect(md).toContain("[网页通读]");
     expect(md).toContain("https://example.com/arch");
+    expect(md).toContain("**[全文总览]**");
+    expect(md).toContain("这是可读的全文总览正文。");
+    expect(md).not.toContain("v1-private");
   });
 
   test("formats session as plain text", () => {
@@ -62,6 +90,9 @@ describe("Session Export Utilities", () => {
     expect(text).toContain("什么是 OKR？");
     expect(text).toContain("[人话翻译器]");
     expect(text).toContain("OKR 就是目标与关键成果");
+    expect(text).toContain("全文总览");
+    expect(text).toContain("这是可读的全文总览正文。");
+    expect(text).not.toContain("v1-private");
   });
 
   test("handles empty session gracefully", () => {

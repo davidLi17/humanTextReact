@@ -20,7 +20,11 @@ export function formatSessionAsMarkdown(session: ChatSession): string {
   session.messages.forEach((msg) => {
     if (msg.role === "user") {
       lines.push(`### 👤 用户`);
-      if (msg.pageMeta?.isWebPageReading) {
+      if (msg.overviewMeta?.kind === "web-reading-overview") {
+        lines.push(`**[全文总览]**`);
+        lines.push(msg.content);
+        lines.push("");
+      } else if (msg.pageMeta?.isWebPageReading) {
         lines.push(`**[网页通读]** 《${msg.pageMeta.title}》`);
         if (msg.pageMeta.url) {
           lines.push(`> 来源链接: ${msg.pageMeta.url}`);
@@ -76,7 +80,9 @@ export function formatSessionAsPlainText(session: ChatSession): string {
         ? "人话翻译器"
         : "系统";
     lines.push(`[${roleName}]`);
-    if (msg.pageMeta?.isWebPageReading) {
+    if (msg.overviewMeta?.kind === "web-reading-overview") {
+      lines.push("全文总览");
+    } else if (msg.pageMeta?.isWebPageReading) {
       lines.push(`通读网页: 《${msg.pageMeta.title}》 (${msg.pageMeta.url})`);
     }
     if (msg.content) {

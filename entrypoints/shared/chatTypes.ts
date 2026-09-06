@@ -126,12 +126,26 @@ export interface ChatMessage {
     /** 同一次网页阅读运行的稳定身份，区分同 URL 的多次阅读。 */
     readingRunId?: string;
   };
+  /** 网页全文总览的来源证明；仅保存可读元信息，不保存模型 Prompt。 */
+  overviewMeta?: WebReadingOverviewMeta;
   suggestedQuestions?: string[];
   createdAt: number;
   status?: "pending" | "streaming" | "completed" | "error";
   errorMessage?: string;
   /** 回答的本地来源；缺省表示模型生成或旧数据。 */
   resultSource?: import("./jargonReuse").TranslationResultSource;
+}
+
+export interface WebReadingOverviewMeta {
+  kind: "web-reading-overview";
+  version: 1;
+  readingRunId: string;
+  sourceFingerprint: string;
+  title: string;
+  url: string;
+  totalSegments: number;
+  requestChars: number;
+  sourceAssistantMessageIds: string[];
 }
 
 export interface ChatSession {
