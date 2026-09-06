@@ -1,13 +1,28 @@
-import { buildHistoryPayload, type ChatMessage } from "./chatTypes";
+import {
+  buildHistoryPayload,
+  type ChatMessage,
+  type ChatSession,
+} from "./chatTypes";
 import {
   buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
+  getWebReadingSegmentCount,
   MAX_PAGE_CONTENT_CHARS,
   type WebPageMetadata,
 } from "./webReadingPrompt";
 
 export const WEB_READING_REPLAY_MISSING_MESSAGE =
   "这条旧网页记录没有保存可重放的正文，请重新点击「通读当前网页」。";
+export const WEB_READING_INTERRUPTED_MESSAGE =
+  "上次生成因侧边栏关闭或扩展重载中断，可点击重试当前分段。";
+export const CHAT_INTERRUPTED_MESSAGE =
+  "上次生成因侧边栏关闭或扩展重载中断，可点击重试。";
+export const WEB_READING_PROGRESS_VERSION = 1 as const;
+export const WEB_READING_PROGRESS_STORAGE_KEY =
+  "sidepanel_web_reading_progress_v1";
+export const WEB_READING_MAX_SINGLE_CONTENT_CHARS = 1_000_000;
+export const WEB_READING_MAX_TOTAL_CONTENT_CHARS = 2_000_000;
+export const WEB_READING_MAX_PERSISTED_ENTRIES = 10;
 
 type WebReadingPageMeta = NonNullable<ChatMessage["pageMeta"]>;
 
@@ -20,6 +35,7 @@ export function createWebReadingPageMeta(
     segmentIndex: number;
     totalSegments: number;
     userInstruction?: string;
+    readingRunId?: string;
   }
 ): WebReadingPageMeta {
   const sourceContent = (page.content || "").slice(
@@ -37,6 +53,7 @@ export function createWebReadingPageMeta(
     segmentIndex: options.segmentIndex,
     totalSegments: options.totalSegments,
     userInstruction: options.userInstruction?.trim() || undefined,
+    readingRunId: options.readingRunId,
   };
 }
 
@@ -98,6 +115,7 @@ export function buildWebReadingHistoryPayload(messages: ChatMessage[]) {
 }
 
 export interface WebReadingProgressState {
+  readingRunId: string;
   title: string;
   url: string;
   wordCount?: number;
@@ -113,12 +131,315 @@ export interface WebReadingProgressState {
   pendingSegmentIndex?: number;
   pendingNextStart?: number;
   pendingAssistantMessageId?: string;
+  updatedAt: number;
+}
+
+export interface PersistedWebReadingProgress {
+  sessionId: string;
+  readingRunId: string;
+  title: string;
+  url: string;
+  wordCount?: number;
+  fullContent: string;
+  totalSegments: number;
+  segmentIndex: number;
+  nextStart: number;
+  lastAssistantMessageId: string;
+  updatedAt: number;
+}
+
+export interface PersistedWebReadingProgressStore {
+  version: typeof WEB_READING_PROGRESS_VERSION;
+  records: Record<string, PersistedWebReadingProgress>;
+}
+
+export interface SerializedWebReadingProgress {
+  store: PersistedWebReadingProgressStore;
+  persistedSessionIds: string[];
+  omittedSessionIds: string[];
+}
+
+export interface HydratedWebReadingProgress {
+  progressMap: Map<string, WebReadingProgressState>;
+  sessions: ChatSession[];
+  sessionsChanged: boolean;
+  progressNeedsRewrite: boolean;
+  droppedSessionIds: string[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 把运行时 Map 转成独立存储 DTO。pending 字段只存在内存；容量不足时
+ * 优先保留本次变更的会话，再按更新时间保留较新的完整正文，绝不截断正文。
+ */
+export function serializeWebReadingProgressMap(
+  progressMap: Map<string, WebReadingProgressState>,
+  prioritySessionId?: string
+): SerializedWebReadingProgress {
+  const candidates = Array.from(progressMap.entries())
+    .map(([sessionId, progress]) => ({ sessionId, progress }))
+    .sort((left, right) => {
+      if (left.sessionId === prioritySessionId) return -1;
+      if (right.sessionId === prioritySessionId) return 1;
+      return right.progress.updatedAt - left.progress.updatedAt;
+    });
+  const records: Record<string, PersistedWebReadingProgress> = {};
+  const persistedSessionIds: string[] = [];
+  const omittedSessionIds: string[] = [];
+  let totalChars = 0;
+
+  for (const { sessionId, progress } of candidates) {
+    const contentLength = progress.fullContent.length;
+    const validIdentity = Boolean(
+      sessionId && progress.readingRunId && progress.lastAssistantMessageId
+    );
+    const exceedsCapacity =
+      contentLength === 0 ||
+      contentLength > WEB_READING_MAX_SINGLE_CONTENT_CHARS ||
+      persistedSessionIds.length >= WEB_READING_MAX_PERSISTED_ENTRIES ||
+      totalChars + contentLength > WEB_READING_MAX_TOTAL_CONTENT_CHARS;
+
+    if (!validIdentity || exceedsCapacity) {
+      omittedSessionIds.push(sessionId);
+      continue;
+    }
+
+    records[sessionId] = {
+      sessionId,
+      readingRunId: progress.readingRunId,
+      title: progress.title,
+      url: progress.url,
+      wordCount: progress.wordCount,
+      fullContent: progress.fullContent,
+      totalSegments: progress.totalSegments,
+      segmentIndex: progress.segmentIndex,
+      nextStart: progress.nextStart,
+      lastAssistantMessageId:
+        progress.pendingAssistantMessageId ?? progress.lastAssistantMessageId,
+      updatedAt: progress.updatedAt,
+    };
+    persistedSessionIds.push(sessionId);
+    totalChars += contentLength;
+  }
+
+  return {
+    store: { version: WEB_READING_PROGRESS_VERSION, records },
+    persistedSessionIds,
+    omittedSessionIds,
+  };
+}
+
+function normalizePersistedProgress(
+  raw: unknown,
+  session: ChatSession
+): WebReadingProgressState | null {
+  if (!isPlainObject(raw)) return null;
+  const {
+    sessionId,
+    readingRunId,
+    title,
+    url,
+    wordCount,
+    fullContent,
+    totalSegments,
+    segmentIndex,
+    nextStart,
+    lastAssistantMessageId,
+    updatedAt,
+  } = raw;
+  if (
+    sessionId !== session.id ||
+    typeof readingRunId !== "string" ||
+    !readingRunId ||
+    typeof title !== "string" ||
+    typeof url !== "string" ||
+    typeof fullContent !== "string" ||
+    !fullContent.trim() ||
+    fullContent.length > WEB_READING_MAX_SINGLE_CONTENT_CHARS ||
+    typeof totalSegments !== "number" ||
+    totalSegments !== getWebReadingSegmentCount(fullContent.length) ||
+    typeof segmentIndex !== "number" ||
+    !Number.isInteger(segmentIndex) ||
+    segmentIndex < 1 ||
+    segmentIndex > totalSegments ||
+    typeof nextStart !== "number" ||
+    nextStart !== (segmentIndex - 1) * MAX_PAGE_CONTENT_CHARS ||
+    typeof lastAssistantMessageId !== "string" ||
+    !lastAssistantMessageId ||
+    typeof updatedAt !== "number" ||
+    !Number.isFinite(updatedAt) ||
+    updatedAt <= 0 ||
+    (wordCount !== undefined && typeof wordCount !== "number")
+  ) {
+    return null;
+  }
+
+  const userMessageIndex = session.messages.findLastIndex(
+    (message) =>
+      message.role === "user" &&
+      message.pageMeta?.isWebPageReading === true &&
+      message.pageMeta.readingRunId === readingRunId
+  );
+  const assistantMessageIndex = session.messages.findIndex(
+    (message) =>
+      message.role === "assistant" && message.id === lastAssistantMessageId
+  );
+  const pageMeta = session.messages[userMessageIndex]?.pageMeta;
+  const messageSegmentIndex = pageMeta?.segmentIndex;
+  const expectedSourceContent =
+    typeof messageSegmentIndex === "number"
+      ? fullContent.slice(
+          (messageSegmentIndex - 1) * MAX_PAGE_CONTENT_CHARS,
+          messageSegmentIndex * MAX_PAGE_CONTENT_CHARS
+        )
+      : undefined;
+  if (
+    userMessageIndex < 0 ||
+    assistantMessageIndex <= userMessageIndex ||
+    !pageMeta ||
+    pageMeta.title !== title ||
+    pageMeta.url !== url ||
+    pageMeta.totalSegments !== totalSegments ||
+    pageMeta.sourceContent !== expectedSourceContent ||
+    (messageSegmentIndex !== segmentIndex &&
+      messageSegmentIndex !== Math.max(1, segmentIndex - 1))
+  ) {
+    return null;
+  }
+
+  return {
+    readingRunId,
+    title,
+    url,
+    wordCount: typeof wordCount === "number" ? wordCount : undefined,
+    fullContent,
+    totalSegments,
+    segmentIndex,
+    nextStart,
+    lastAssistantMessageId,
+    updatedAt,
+  };
+}
+
+function recoverInterruptedAssistantMessages(
+  sessions: ChatSession[],
+  now: number
+): { sessions: ChatSession[]; changed: boolean } {
+  let changed = false;
+  const recovered = sessions.map((session) => {
+    let sessionChanged = false;
+    const messages = session.messages.map((message, index) => {
+      if (
+        message.role !== "assistant" ||
+        (message.status !== "streaming" && message.status !== "pending")
+      ) {
+        return message;
+      }
+      sessionChanged = true;
+      changed = true;
+      const precedingUserMessage = session.messages[index - 1];
+      const isWebReading =
+        precedingUserMessage?.role === "user" &&
+        precedingUserMessage.pageMeta?.isWebPageReading === true;
+      return {
+        ...message,
+        status: "error" as const,
+        errorMessage: isWebReading
+          ? WEB_READING_INTERRUPTED_MESSAGE
+          : CHAT_INTERRUPTED_MESSAGE,
+      };
+    });
+    return sessionChanged ? { ...session, messages, updatedAt: now } : session;
+  });
+  return { sessions: recovered, changed };
+}
+
+/**
+ * 联合会话快照恢复阅读断点。无效、孤儿、页面身份不匹配及超容量记录均丢弃；
+ * 旧 pending 助手改成可重试错误态，不自动抓网页或发起模型请求。
+ */
+export function hydrateWebReadingProgress(
+  rawStore: unknown,
+  sessions: ChatSession[],
+  now = Date.now(),
+  prioritySessionId?: string
+): HydratedWebReadingProgress {
+  const recoveredSessions = recoverInterruptedAssistantMessages(sessions, now);
+  if (
+    !isPlainObject(rawStore) ||
+    rawStore.version !== WEB_READING_PROGRESS_VERSION ||
+    !isPlainObject(rawStore.records)
+  ) {
+    return {
+      progressMap: new Map(),
+      sessions: recoveredSessions.sessions,
+      sessionsChanged: recoveredSessions.changed,
+      progressNeedsRewrite: rawStore !== undefined,
+      droppedSessionIds: [],
+    };
+  }
+
+  const sessionsById = new Map(
+    recoveredSessions.sessions.map((session) => [session.id, session])
+  );
+  const validProgress = new Map<string, WebReadingProgressState>();
+  const droppedSessionIds: string[] = [];
+
+  for (const [sessionId, rawProgress] of Object.entries(rawStore.records)) {
+    const session = sessionsById.get(sessionId);
+    const normalized = session
+      ? normalizePersistedProgress(rawProgress, session)
+      : null;
+    if (!normalized) {
+      droppedSessionIds.push(sessionId);
+      continue;
+    }
+    validProgress.set(sessionId, normalized);
+  }
+
+  const capacityResult = serializeWebReadingProgressMap(
+    validProgress,
+    prioritySessionId
+  );
+  for (const omitted of capacityResult.omittedSessionIds) {
+    validProgress.delete(omitted);
+    if (!droppedSessionIds.includes(omitted)) droppedSessionIds.push(omitted);
+  }
+
+  const canonicalStore = serializeWebReadingProgressMap(
+    validProgress,
+    prioritySessionId
+  ).store;
+
+  return {
+    progressMap: validProgress,
+    sessions: recoveredSessions.sessions,
+    sessionsChanged: recoveredSessions.changed,
+    progressNeedsRewrite:
+      JSON.stringify(rawStore) !== JSON.stringify(canonicalStore),
+    droppedSessionIds,
+  };
 }
 
 export interface ActiveSidepanelRequest {
   requestId: string;
   sessionId: string;
   assistantMessageId: string;
+  readingRunId?: string;
+}
+
+/** 只有当前确实存在同会话、同阅读运行的进度时，才延迟 sessions 到联合检查点。 */
+export function hasMatchingWebReadingProgress(
+  progressBySession: Map<string, WebReadingProgressState>,
+  owner?: ActiveSidepanelRequest
+): boolean {
+  if (!owner?.readingRunId) return false;
+  return (
+    progressBySession.get(owner.sessionId)?.readingRunId === owner.readingRunId
+  );
 }
 
 export function getActiveSidepanelRequestOwner(
@@ -195,8 +516,11 @@ export function createInitialWebReadingProgress(params: {
   totalSegments: number;
   requestId: string;
   assistantMessageId: string;
+  readingRunId: string;
+  now?: number;
 }): WebReadingProgressState {
   return {
+    readingRunId: params.readingRunId,
     title: params.page.title,
     url: params.page.url,
     wordCount: params.page.wordCount,
@@ -212,6 +536,7 @@ export function createInitialWebReadingProgress(params: {
       params.page.content.length
     ),
     pendingAssistantMessageId: params.assistantMessageId,
+    updatedAt: params.now ?? Date.now(),
   };
 }
 
@@ -223,6 +548,7 @@ export function beginWebReadingSegment(
     segmentIndex: number;
     nextStart: number;
     assistantMessageId: string;
+    now?: number;
   }
 ): WebReadingProgressState {
   if (params.segmentIndex !== progress.segmentIndex) return progress;
@@ -232,6 +558,7 @@ export function beginWebReadingSegment(
     pendingSegmentIndex: params.segmentIndex,
     pendingNextStart: params.nextStart,
     pendingAssistantMessageId: params.assistantMessageId,
+    updatedAt: params.now ?? Date.now(),
   };
 }
 
@@ -247,11 +574,14 @@ export function rewindWebReadingProgressForReplay(
     segmentIndex: number;
     requestId: string;
     assistantMessageId: string;
+    readingRunId?: string;
+    now?: number;
   }
 ): WebReadingProgressState {
   if (
     progress.title !== params.title ||
     progress.url !== params.url ||
+    progress.readingRunId !== params.readingRunId ||
     params.segmentIndex < 1 ||
     params.segmentIndex > progress.totalSegments
   ) {
@@ -275,6 +605,7 @@ export function rewindWebReadingProgressForReplay(
     pendingSegmentIndex: params.segmentIndex,
     pendingNextStart: segmentEnd,
     pendingAssistantMessageId: params.assistantMessageId,
+    updatedAt: params.now ?? Date.now(),
   };
 }
 
@@ -306,15 +637,23 @@ export function cancelWebReadingProgressByRequest(
 export function settleWebReadingSegment(
   progress: WebReadingProgressState,
   requestId: string,
-  response?: WebReadingResponse
+  response?: WebReadingResponse,
+  now = Date.now(),
+  readingRunId?: string
 ): WebReadingProgressState | null {
-  if (progress.pendingRequestId !== requestId) return progress;
+  if (
+    progress.pendingRequestId !== requestId ||
+    (readingRunId !== undefined && progress.readingRunId !== readingRunId)
+  ) {
+    return progress;
+  }
 
   const pendingSegmentIndex = progress.pendingSegmentIndex;
   const base: WebReadingProgressState = {
     ...progress,
     lastAssistantMessageId:
       progress.pendingAssistantMessageId ?? progress.lastAssistantMessageId,
+    updatedAt: now,
   };
   delete base.pendingRequestId;
   delete base.pendingSegmentIndex;

@@ -19,6 +19,10 @@ import {
   MAX_HISTORY_COUNT,
 } from "../entrypoints/shared/constants/index.ts";
 import {
+  WEB_READING_PROGRESS_STORAGE_KEY,
+  WEB_READING_PROGRESS_VERSION,
+} from "../entrypoints/shared/webReadingState.ts";
+import {
   createMemoryBrowserStorage,
   preserveGlobals,
   setTestGlobal,
@@ -411,12 +415,22 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
     // 2. 在全新目标环境反序列化、校验并恢复
     const target = createMockBrowser();
     setTestGlobal("browser", target.browser);
+    const targetLocalWrites = [];
+    const originalTargetLocalSet = target.browser.storage.local.set;
+    target.browser.storage.local.set = async (items) => {
+      targetLocalWrites.push(structuredClone(items));
+      await originalTargetLocalSet(items);
+    };
     // 目标环境已有的数据与 API Key 应被「覆盖/保留」
     target.stores.local[HISTORY_STORAGE_KEY] = [
       { original: "旧历史", translated: "会被覆盖", timestamp: 1 },
     ];
     target.stores.local.settings = { apiKey: "sk-existing-key" };
     target.stores.sync.settings = { apiKey: "sk-existing-key" };
+    target.stores.local[WEB_READING_PROGRESS_STORAGE_KEY] = {
+      version: WEB_READING_PROGRESS_VERSION,
+      records: { stale: { fullContent: "旧断点" } },
+    };
 
     const parsed = JSON.parse(serialized);
     const validation = validateBackup(parsed);
@@ -438,6 +452,16 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
     ).toBe("jargon-vault");
     expect(target.stores.local[SESSIONS_STORAGE_KEY]).toEqual(sessionsFixture);
     expect(target.stores.local[ACTIVE_SESSION_STORAGE_KEY]).toBe("session-1");
+    expect(target.stores.local[WEB_READING_PROGRESS_STORAGE_KEY]).toEqual({
+      version: WEB_READING_PROGRESS_VERSION,
+      records: {},
+    });
+    const sessionsCheckpoint = targetLocalWrites.find(
+      (items) => SESSIONS_STORAGE_KEY in items
+    );
+    expect(sessionsCheckpoint).toHaveProperty(
+      WEB_READING_PROGRESS_STORAGE_KEY
+    );
 
     const restoredJargon = target.stores.local[JARGON_STORAGE_KEY];
     expect(restoredJargon).toHaveLength(2);

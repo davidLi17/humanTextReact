@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { MAX_PAGE_CONTENT_CHARS } from "../entrypoints/shared/webReadingPrompt.ts";
 import {
   WEB_READING_REPLAY_MISSING_MESSAGE,
+  CHAT_INTERRUPTED_MESSAGE,
+  WEB_READING_INTERRUPTED_MESSAGE,
+  WEB_READING_MAX_PERSISTED_ENTRIES,
+  WEB_READING_MAX_SINGLE_CONTENT_CHARS,
+  WEB_READING_MAX_TOTAL_CONTENT_CHARS,
   beginWebReadingSegment,
   buildReplayableWebReadingPrompt,
   buildWebReadingHistoryPayload,
@@ -9,9 +14,12 @@ import {
   createInitialWebReadingProgress,
   createWebReadingPageMeta,
   getActiveSidepanelRequestOwner,
+  hasMatchingWebReadingProgress,
   invalidateActiveSidepanelRequest,
+  hydrateWebReadingProgress,
   isWebReadingContinueReady,
   rewindWebReadingProgressForReplay,
+  serializeWebReadingProgressMap,
   settleWebReadingSegment,
   shouldShowWebReadingContinue,
 } from "../entrypoints/shared/webReadingState.ts";
@@ -113,6 +121,8 @@ describe("网页续读进度提交", () => {
       totalSegments: 3,
       requestId: "request-1",
       assistantMessageId: "assistant-1",
+      readingRunId: "run-1",
+      now: 1,
     });
 
   test.each([
@@ -205,6 +215,12 @@ describe("网页续读进度提交", () => {
     };
     expect(getActiveSidepanelRequestOwner("request-1", owner)).toEqual(owner);
     expect(
+      hasMatchingWebReadingProgress(new Map(), {
+        ...owner,
+        readingRunId: "run-1",
+      })
+    ).toBe(false);
+    expect(
       invalidateActiveSidepanelRequest(
         {
           activeRequestId: "request-new",
@@ -225,11 +241,19 @@ describe("网页续读进度提交", () => {
       totalSegments: 2,
       requestId: "request-other",
       assistantMessageId: "assistant-other",
+      readingRunId: "run-other",
+      now: 1,
     });
     const progressMap = new Map([
       ["session-a", makeInitial()],
       ["session-b", otherSessionProgress],
     ]);
+    expect(
+      hasMatchingWebReadingProgress(progressMap, {
+        ...owner,
+        readingRunId: "run-1",
+      })
+    ).toBe(true);
     const cancelledMap = cancelWebReadingProgressByRequest(
       progressMap,
       "request-1"
@@ -298,6 +322,7 @@ describe("网页续读进度提交", () => {
         segmentIndex: 1,
         requestId,
         assistantMessageId: `assistant-${requestId}`,
+        readingRunId: "run-1",
       });
     const succeeded = settleWebReadingSegment(rewind("edit-success"), "edit-success", {
       success: true,
@@ -320,6 +345,7 @@ describe("网页续读进度提交", () => {
         segmentIndex: 1,
         requestId: "other-edit",
         assistantMessageId: "other-assistant",
+        readingRunId: "run-1",
       })
     ).toBe(afterSecond);
   });
@@ -355,5 +381,228 @@ describe("网页续读进度提交", () => {
         status: "error",
       })
     ).toBe(false);
+  });
+});
+
+describe("网页阅读断点序列化与恢复", () => {
+  const fullContent = `第一段-${"甲".repeat(
+    MAX_PAGE_CONTENT_CHARS
+  )}第二段结尾`;
+  const page = {
+    title: "可恢复长文章",
+    url: "https://example.com/resume",
+    content: fullContent,
+    wordCount: fullContent.length,
+  };
+
+  function createResumeSession({
+    webStatus = "streaming",
+    webContent = "已经收到的部分内容",
+    sourceContent,
+  } = {}) {
+    const pageMeta = createWebReadingPageMeta(page, {
+      segmentIndex: 1,
+      totalSegments: 2,
+      readingRunId: "run-resume",
+    });
+    if (sourceContent !== undefined) pageMeta.sourceContent = sourceContent;
+    return {
+      id: "session-resume",
+      title: "速读: 可恢复长文章",
+      messages: [
+        createMessage(pageMeta),
+        {
+          id: "assistant-resume",
+          role: "assistant",
+          content: webContent,
+          reasoningContent: "部分思考",
+          createdAt: 2,
+          status: webStatus,
+        },
+        {
+          id: "user-normal",
+          role: "user",
+          content: "普通问题",
+          createdAt: 3,
+          status: "completed",
+        },
+        {
+          id: "assistant-normal",
+          role: "assistant",
+          content: "普通回答的部分内容",
+          createdAt: 4,
+          status: "pending",
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 4,
+    };
+  }
+
+  function createPersistedStore() {
+    const pending = createInitialWebReadingProgress({
+      page,
+      totalSegments: 2,
+      requestId: "request-resume",
+      assistantMessageId: "assistant-resume",
+      readingRunId: "run-resume",
+      now: 10,
+    });
+    return serializeWebReadingProgressMap(
+      new Map([["session-resume", pending]])
+    ).store;
+  }
+
+  test("真实存储往返清除 pending，并把网页与普通残留生成改成可重试错误", () => {
+    const stored = structuredClone(createPersistedStore());
+    expect(stored.records["session-resume"].pendingRequestId).toBeUndefined();
+    expect(stored.records["session-resume"].segmentIndex).toBe(1);
+    expect(stored.records["session-resume"].nextStart).toBe(0);
+
+    const hydrated = hydrateWebReadingProgress(
+      stored,
+      [createResumeSession()],
+      100
+    );
+    const restored = hydrated.progressMap.get("session-resume");
+    expect(restored.pendingRequestId).toBeUndefined();
+    expect(restored.segmentIndex).toBe(1);
+    expect(restored.fullContent).toBe(fullContent);
+
+    const messages = hydrated.sessions[0].messages;
+    expect(messages[1]).toMatchObject({
+      content: "已经收到的部分内容",
+      reasoningContent: "部分思考",
+      status: "error",
+      errorMessage: WEB_READING_INTERRUPTED_MESSAGE,
+    });
+    expect(messages[3]).toMatchObject({
+      content: "普通回答的部分内容",
+      status: "error",
+      errorMessage: CHAT_INTERRUPTED_MESSAGE,
+    });
+    expect(hydrated.sessionsChanged).toBe(true);
+  });
+
+  test("没有新进度键时也修复历史 pending，且不会凭空创建断点", () => {
+    const hydrated = hydrateWebReadingProgress(undefined, [createResumeSession()]);
+    expect(hydrated.progressMap.size).toBe(0);
+    expect(hydrated.progressNeedsRewrite).toBe(false);
+    expect(hydrated.sessions[0].messages[1].status).toBe("error");
+    expect(hydrated.sessions[0].messages[3].status).toBe("error");
+  });
+
+  test("正文分段、runId、页面或助手不匹配时丢弃断点但仍修复卡片", () => {
+    const cases = [
+      (store, session) => {
+        session.messages[0].pageMeta.sourceContent = "另一份正文";
+      },
+      (store) => {
+        store.records["session-resume"].readingRunId = "run-other";
+      },
+      (store) => {
+        store.records["session-resume"].url = "https://example.com/other";
+      },
+      (store) => {
+        store.records["session-resume"].lastAssistantMessageId = "missing";
+      },
+    ];
+
+    for (const mutate of cases) {
+      const store = structuredClone(createPersistedStore());
+      const session = createResumeSession();
+      mutate(store, session);
+      const hydrated = hydrateWebReadingProgress(store, [session]);
+      expect(hydrated.progressMap.size).toBe(0);
+      expect(hydrated.droppedSessionIds).toEqual(["session-resume"]);
+      expect(hydrated.sessions[0].messages[1].status).toBe("error");
+    }
+
+    const orphaned = hydrateWebReadingProgress(createPersistedStore(), []);
+    expect(orphaned.progressMap.size).toBe(0);
+    expect(orphaned.droppedSessionIds).toEqual(["session-resume"]);
+
+    const unknownVersion = createPersistedStore();
+    unknownVersion.version = 99;
+    const incompatible = hydrateWebReadingProgress(unknownVersion, [
+      createResumeSession(),
+    ]);
+    expect(incompatible.progressMap.size).toBe(0);
+    expect(incompatible.progressNeedsRewrite).toBe(true);
+    expect(incompatible.sessions[0].messages[1].status).toBe("error");
+  });
+
+  test("旧 readingRun 的迟到结算不能推进新运行", () => {
+    const current = createInitialWebReadingProgress({
+      page,
+      totalSegments: 2,
+      requestId: "request-current",
+      assistantMessageId: "assistant-resume",
+      readingRunId: "run-current",
+      now: 1,
+    });
+    expect(
+      settleWebReadingSegment(
+        current,
+        "request-current",
+        { success: true, result: "旧运行结果" },
+        2,
+        "run-old"
+      )
+    ).toBe(current);
+  });
+
+  test("容量限制优先保留当前断点，不截断正文，并最多保存十条", () => {
+    const createProgress = (id, length, updatedAt) => ({
+      readingRunId: `run-${id}`,
+      title: id,
+      url: `https://example.com/${id}`,
+      fullContent: id.repeat(Math.ceil(length / id.length)).slice(0, length),
+      totalSegments: Math.ceil(length / MAX_PAGE_CONTENT_CHARS),
+      segmentIndex: 1,
+      nextStart: 0,
+      lastAssistantMessageId: `assistant-${id}`,
+      updatedAt,
+    });
+
+    const tooLarge = createProgress(
+      "large",
+      WEB_READING_MAX_SINGLE_CONTENT_CHARS + 1,
+      1
+    );
+    const oversized = serializeWebReadingProgressMap(
+      new Map([["large", tooLarge]]),
+      "large"
+    );
+    expect(oversized.persistedSessionIds).toEqual([]);
+    expect(oversized.omittedSessionIds).toEqual(["large"]);
+    expect(tooLarge.fullContent).toHaveLength(
+      WEB_READING_MAX_SINGLE_CONTENT_CHARS + 1
+    );
+
+    const perArticle = Math.floor(
+      WEB_READING_MAX_TOTAL_CONTENT_CHARS / 2
+    );
+    const totalLimited = serializeWebReadingProgressMap(
+      new Map([
+        ["old-priority", createProgress("p", perArticle, 1)],
+        ["new-1", createProgress("n", perArticle, 3)],
+        ["new-2", createProgress("m", perArticle, 2)],
+      ]),
+      "old-priority"
+    );
+    expect(totalLimited.persistedSessionIds).toContain("old-priority");
+    expect(totalLimited.persistedSessionIds).toHaveLength(2);
+    expect(totalLimited.omittedSessionIds).toHaveLength(1);
+
+    const eleven = new Map(
+      Array.from({ length: WEB_READING_MAX_PERSISTED_ENTRIES + 1 }, (_, index) => [
+        `session-${index}`,
+        createProgress(`s${index}`, 10, index + 1),
+      ])
+    );
+    expect(
+      serializeWebReadingProgressMap(eleven).persistedSessionIds
+    ).toHaveLength(WEB_READING_MAX_PERSISTED_ENTRIES);
   });
 });

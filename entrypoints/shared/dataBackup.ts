@@ -28,6 +28,10 @@ import {
   JARGON_VAULT_RESULT_SOURCE,
   type TranslationResultSource,
 } from "./jargonReuse";
+import {
+  WEB_READING_PROGRESS_STORAGE_KEY,
+  WEB_READING_PROGRESS_VERSION,
+} from "./webReadingState";
 import { SettingsUtils, type UserSettings } from "./settingsUtils";
 
 const logger = createLogger("data-backup", "💾");
@@ -490,6 +494,11 @@ export async function restoreBackup(
     const sessions = data.sessions.sessions;
     const payload: Record<string, unknown> = {
       [SESSIONS_STORAGE_KEY]: sessions,
+      // 备份 v1 不携带未读全文；恢复会话时必须同步清空本机旧断点。
+      [WEB_READING_PROGRESS_STORAGE_KEY]: {
+        version: WEB_READING_PROGRESS_VERSION,
+        records: {},
+      },
     };
     if (
       data.sessions.activeSessionId &&
@@ -499,6 +508,8 @@ export async function restoreBackup(
     } else if (sessions.length > 0) {
       // 备份未指定有效激活会话时，回落到第一个会话（与侧边栏加载逻辑一致）
       payload[ACTIVE_SESSION_STORAGE_KEY] = sessions[0].id;
+    } else {
+      payload[ACTIVE_SESSION_STORAGE_KEY] = "";
     }
     await storage.set(payload);
     restored.push("sessions");

@@ -123,6 +123,8 @@ export interface ChatMessage {
     totalSegments?: number;
     /** 编辑网页消息时保存的用户补充指令，与原文分开存储。 */
     userInstruction?: string;
+    /** 同一次网页阅读运行的稳定身份，区分同 URL 的多次阅读。 */
+    readingRunId?: string;
   };
   suggestedQuestions?: string[];
   createdAt: number;

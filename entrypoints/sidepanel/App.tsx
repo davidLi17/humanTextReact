@@ -46,6 +46,8 @@ import {
   createInitialWebReadingProgress,
   createWebReadingPageMeta,
   getActiveSidepanelRequestOwner,
+  hasMatchingWebReadingProgress,
+  hydrateWebReadingProgress,
   invalidateActiveSidepanelRequest,
   isSuccessfulWebReadingResponse,
   isWebReadingContinueReady,
@@ -130,11 +132,16 @@ import {
   saveComposerDraft,
   type SidepanelComposerDraft,
 } from "./composerDraft";
+import {
+  WebReadingProgressStorage,
+  WebReadingProgressFailureGate,
+  WebReadingPendingActionGate,
+  loadWebReadingHydrationSnapshot,
+  prepareWebReadingProgressCheckpoint,
+  type WebReadingProgressWriteResult,
+} from "./webReadingProgressStorage";
 
 const logger = createLogger("sidepanel-app", "💬");
-
-const SESSIONS_STORAGE_KEY = "sidepanel_chat_sessions";
-const ACTIVE_SESSION_STORAGE_KEY = "sidepanel_active_session_id";
 
 interface PendingSidepanelEnvelope {
   text: string;
@@ -257,6 +264,8 @@ export default function SidePanelApp() {
   const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
     undefined
   );
+  const sessionsRef = useRef<ChatSession[]>([]);
+  const activeSessionIdRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -265,6 +274,21 @@ export default function SidePanelApp() {
     new Map()
   );
   const consumedEnvelopeIdsRef = useRef<Set<string>>(new Set());
+  const webReadingProgressRef = useRef<
+    Map<string, WebReadingProgressState>
+  >(new Map());
+  const webReadingProgressHydratedRef = useRef(false);
+  const webReadingProgressStorageRef = useRef<WebReadingProgressStorage | null>(
+    null
+  );
+  const progressSaveFailureGateRef = useRef(
+    new WebReadingProgressFailureGate()
+  );
+  const nonRestorableProgressSessionsRef = useRef<Set<string>>(new Set());
+  const pendingActionGateRef = useRef(new WebReadingPendingActionGate());
+  if (!webReadingProgressStorageRef.current) {
+    webReadingProgressStorageRef.current = new WebReadingProgressStorage();
+  }
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
@@ -284,6 +308,7 @@ export default function SidePanelApp() {
       composerDraftsRef.current,
       nextSessionId
     );
+    activeSessionIdRef.current = nextSessionId;
     setActiveSessionId(nextSessionId);
     setInputText(nextDraft.inputText);
     setImages(nextDraft.images);
@@ -330,6 +355,8 @@ export default function SidePanelApp() {
     webReadingProgressMap,
     setWebReadingProgressMap,
   ] = useState<Map<string, WebReadingProgressState>>(new Map());
+  const [webReadingProgressHydrated, setWebReadingProgressHydrated] =
+    useState(false);
   const activeWebReadingProgress = activeSession
     ? webReadingProgressMap.get(activeSession.id)
     : undefined;
@@ -337,6 +364,77 @@ export default function SidePanelApp() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const handleProgressWriteResult = (
+    result: WebReadingProgressWriteResult,
+    prioritySessionId?: string
+  ) => {
+    progressSaveFailureGateRef.current.recordSuccess();
+    for (const sessionId of result.persistedSessionIds) {
+      nonRestorableProgressSessionsRef.current.delete(sessionId);
+    }
+    const newlyOmitted = result.omittedSessionIds.filter((sessionId) => {
+      if (nonRestorableProgressSessionsRef.current.has(sessionId)) return false;
+      nonRestorableProgressSessionsRef.current.add(sessionId);
+      return true;
+    });
+    if (newlyOmitted.length === 0) return;
+
+    showToast(
+      newlyOmitted.includes(prioritySessionId || "")
+        ? "正文超过断点保存容量，本次当前会话仍可继续；关闭侧边栏后不保证恢复。"
+        : "部分较早阅读断点超过本地容量；对应会话当前可继续，关闭后不保证恢复。"
+    );
+  };
+
+  const persistWebReadingProgress = (
+    progressMap: Map<string, WebReadingProgressState>,
+    prioritySessionId?: string,
+    checkpoint?: { sessions?: ChatSession[]; activeSessionId?: string }
+  ) => {
+    void webReadingProgressStorageRef.current!
+      .enqueueCheckpoint({
+        progressMap,
+        prioritySessionId,
+        sessions: checkpoint?.sessions,
+        activeSessionId: checkpoint?.activeSessionId,
+      })
+      .then((result) => handleProgressWriteResult(result, prioritySessionId))
+      .catch((error) => {
+        logger.error("保存网页阅读断点失败:", error);
+        if (!progressSaveFailureGateRef.current.recordFailure()) return;
+        showToast(
+          "阅读进度保存失败，本次当前会话仍可继续；关闭侧边栏后可能无法恢复。"
+        );
+      });
+  };
+
+  const commitWebReadingProgress = (
+    updater: (
+      previous: Map<string, WebReadingProgressState>
+    ) => Map<string, WebReadingProgressState>,
+    prioritySessionId?: string
+  ) => {
+    if (!webReadingProgressHydratedRef.current) return false;
+    const previous = webReadingProgressRef.current;
+    const checkpoint = prepareWebReadingProgressCheckpoint(
+      previous,
+      updater,
+      sessionsRef.current,
+      prioritySessionId
+    );
+    if (!checkpoint) return false;
+    webReadingProgressRef.current = checkpoint.progressMap;
+    setWebReadingProgressMap(checkpoint.progressMap);
+    persistWebReadingProgress(
+      checkpoint.progressMap,
+      checkpoint.prioritySessionId,
+      {
+        sessions: checkpoint.sessions,
+      }
+    );
+    return true;
   };
 
   const registerActiveRequest = (owner: ActiveSidepanelRequest) => {
@@ -360,19 +458,26 @@ export default function SidePanelApp() {
 
   const settleSessionWebReadingProgress = (
     sessionId: string,
+    readingRunId: string | undefined,
     requestId: string,
     response?: WebReadingResponse
   ) => {
-    setWebReadingProgressMap((prev) => {
+    commitWebReadingProgress((prev) => {
       const current = prev.get(sessionId);
       if (!current) return prev;
-      const settled = settleWebReadingSegment(current, requestId, response);
+      const settled = settleWebReadingSegment(
+        current,
+        requestId,
+        response,
+        Date.now(),
+        readingRunId
+      );
       if (settled === current) return prev;
       const next = new Map(prev);
       if (settled) next.set(sessionId, settled);
       else next.delete(sessionId);
       return next;
-    });
+    }, sessionId);
   };
 
   const rewindSessionWebReadingProgress = (
@@ -382,8 +487,8 @@ export default function SidePanelApp() {
     assistantMessageId: string
   ) => {
     const meta = message.pageMeta;
-    if (!meta?.isWebPageReading) return;
-    setWebReadingProgressMap((prev) => {
+    if (!meta?.isWebPageReading) return false;
+    return commitWebReadingProgress((prev) => {
       const current = prev.get(sessionId);
       if (!current) return prev;
       const rewound = rewindWebReadingProgressForReplay(current, {
@@ -392,12 +497,13 @@ export default function SidePanelApp() {
         segmentIndex: meta.segmentIndex || 1,
         requestId,
         assistantMessageId,
+        readingRunId: meta.readingRunId,
       });
       if (rewound === current) return prev;
       const next = new Map(prev);
       next.set(sessionId, rewound);
       return next;
-    });
+    }, sessionId);
   };
 
   const markAssistantMessageAsError = (
@@ -406,10 +512,13 @@ export default function SidePanelApp() {
     errorMessage: string,
     requestId: string
   ) => {
+    const requestOwner = getActiveSidepanelRequestOwner(
+      requestId,
+      activeRequestOwnerRef.current
+    );
     if (!clearActiveRequest(requestId)) return;
     setIsStreaming(false);
-    setSessions((prev) =>
-      prev.map((session) => {
+    const updatedSessions = sessionsRef.current.map((session) => {
         if (session.id !== sessionId) return session;
         const messages = session.messages.map((message) =>
           message.id === assistantMessageId && message.role === "assistant"
@@ -417,8 +526,24 @@ export default function SidePanelApp() {
             : message
         );
         return { ...session, messages, updatedAt: Date.now() };
-      })
-    );
+      });
+    sessionsRef.current = updatedSessions;
+    setSessions(updatedSessions);
+
+    if (
+      hasMatchingWebReadingProgress(
+        webReadingProgressRef.current,
+        requestOwner
+      )
+    ) {
+      commitWebReadingProgress(
+        (previous) =>
+          cancelWebReadingProgressByRequest(previous, requestId),
+        sessionId
+      );
+    } else {
+      void saveSessionsToStorage(updatedSessions);
+    }
   };
 
   // 初始化代码复制与日志
@@ -491,73 +616,99 @@ export default function SidePanelApp() {
     return () => unsubscribe();
   }, []);
 
-  // 加载存储的会话
+  // 联合加载会话与网页阅读断点；完成前禁止消费待办或写入初始空 Map。
   useEffect(() => {
+    let cancelled = false;
     const loadSessions = async () => {
       try {
-        if (!browser?.storage?.local) return;
-        const stored = await browser.storage.local.get([
-          SESSIONS_STORAGE_KEY,
-          ACTIVE_SESSION_STORAGE_KEY,
-        ]);
-        const storedSessions = stored[SESSIONS_STORAGE_KEY] as
-          | ChatSession[]
-          | undefined;
-        const storedActiveId = stored[ACTIVE_SESSION_STORAGE_KEY] as
-          | string
-          | undefined;
+        const snapshot = await loadWebReadingHydrationSnapshot();
+        if (cancelled) return;
+        const storedSessions = Array.isArray(snapshot.sessions)
+          ? (snapshot.sessions as ChatSession[])
+          : [];
+        const initialSessions =
+          storedSessions.length > 0 ? storedSessions : [createNewSession()];
+        const hydration = hydrateWebReadingProgress(
+          snapshot.webReadingProgress,
+          initialSessions,
+          Date.now(),
+          typeof snapshot.activeSessionId === "string"
+            ? snapshot.activeSessionId
+            : undefined
+        );
+        const nextActiveSessionId =
+          typeof snapshot.activeSessionId === "string" &&
+          hydration.sessions.some(
+            (session) => session.id === snapshot.activeSessionId
+          )
+            ? snapshot.activeSessionId
+            : hydration.sessions[0].id;
 
-        if (storedSessions && storedSessions.length > 0) {
-          setSessions(storedSessions);
-          if (
-            storedActiveId &&
-            storedSessions.some((s) => s.id === storedActiveId)
-          ) {
-            setActiveSessionId(storedActiveId);
-          } else {
-            setActiveSessionId(storedSessions[0].id);
-          }
-        } else {
-          const freshSession = createNewSession();
-          setSessions([freshSession]);
-          setActiveSessionId(freshSession.id);
+        sessionsRef.current = hydration.sessions;
+        activeSessionIdRef.current = nextActiveSessionId;
+        webReadingProgressRef.current = hydration.progressMap;
+        setSessions(hydration.sessions);
+        setActiveSessionId(nextActiveSessionId);
+        setWebReadingProgressMap(hydration.progressMap);
+        webReadingProgressHydratedRef.current = true;
+        setWebReadingProgressHydrated(true);
+
+        if (hydration.sessionsChanged || hydration.progressNeedsRewrite) {
+          persistWebReadingProgress(hydration.progressMap, undefined, {
+            sessions: hydration.sessionsChanged
+              ? hydration.sessions
+              : undefined,
+            activeSessionId: nextActiveSessionId,
+          });
         }
       } catch (error) {
-        logger.error("加载会话失败:", error);
+        if (cancelled) return;
+        logger.error("加载会话与网页阅读断点失败:", error);
         const fallback = createNewSession();
+        sessionsRef.current = [fallback];
+        activeSessionIdRef.current = fallback.id;
+        webReadingProgressRef.current = new Map();
         setSessions([fallback]);
         setActiveSessionId(fallback.id);
+        setWebReadingProgressMap(new Map());
+        webReadingProgressHydratedRef.current = true;
+        setWebReadingProgressHydrated(true);
+        showToast("未能恢复上次阅读进度，当前不会自动续读。");
       }
     };
 
     void loadSessions();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 持久化保存会话
   const saveSessionsToStorage = async (updatedSessions: ChatSession[]) => {
-    try {
-      if (!browser?.storage?.local) return;
-      await browser.storage.local.set({
-        [SESSIONS_STORAGE_KEY]: updatedSessions,
-      });
-    } catch (error) {
-      logger.error("保存会话失败:", error);
-    }
+    if (!webReadingProgressHydratedRef.current) return;
+    sessionsRef.current = updatedSessions;
+    persistWebReadingProgress(
+      webReadingProgressRef.current,
+      activeSessionIdRef.current || undefined,
+      {
+      sessions: updatedSessions,
+      }
+    );
   };
 
   const saveActiveSessionId = async (id: string) => {
-    try {
-      if (!browser?.storage?.local) return;
-      await browser.storage.local.set({
-        [ACTIVE_SESSION_STORAGE_KEY]: id,
-      });
-    } catch (error) {
-      logger.error("保存激活会话ID失败:", error);
-    }
+    if (!webReadingProgressHydratedRef.current) return;
+    activeSessionIdRef.current = id;
+    persistWebReadingProgress(webReadingProgressRef.current, id, {
+      activeSessionId: id,
+    });
   };
 
   // 检查是否有待翻译文本或通读请求
   useEffect(() => {
+    if (!pendingActionGateRef.current.tryClaim(webReadingProgressHydrated)) {
+      return;
+    }
     const checkPendingActions = async () => {
       try {
         if (!browser?.storage?.local) return;
@@ -592,12 +743,13 @@ export default function SidePanelApp() {
     };
 
     void checkPendingActions();
-  }, [sessions, activeSessionId]);
+  }, [webReadingProgressHydrated]);
 
   // 监听后台消息与流式更新
   useEffect(() => {
     const messageListener = (message: any) => {
       if (message.action === "sendToSidepanel" && message.text) {
+        if (!webReadingProgressHydratedRef.current) return;
         if (consumeSidepanelEnvelope(message)) {
           void removePendingEnvelopeIfMatches(message.envelopeId);
         }
@@ -605,6 +757,7 @@ export default function SidePanelApp() {
       }
 
       if (message.action === MESSAGE_TYPES.READ_WEB_PAGE) {
+        if (!webReadingProgressHydratedRef.current) return;
         setActiveView("chat");
         void handleReadCurrentPage();
         return;
@@ -627,9 +780,8 @@ export default function SidePanelApp() {
           return;
         }
 
-        setSessions((prevSessions) => {
-          const targetSessionId = sessionId || activeSessionId;
-          const updated = prevSessions.map((s) => {
+        const targetSessionId = sessionId || activeSessionIdRef.current;
+        const updatedSessions = sessionsRef.current.map((s) => {
             if (s.id !== targetSessionId) return s;
 
             const messages = [...s.messages];
@@ -667,15 +819,24 @@ export default function SidePanelApp() {
               updatedAt: Date.now(),
             };
           });
-
-          if (done) {
-            void saveSessionsToStorage(updated);
-          }
-          return updated;
-        });
+        sessionsRef.current = updatedSessions;
+        setSessions(updatedSessions);
 
         if (done) {
           const completedRequestId = requestId || activeRequestIdRef.current;
+          const completedOwner = getActiveSidepanelRequestOwner(
+            completedRequestId,
+            activeRequestOwnerRef.current
+          );
+          // 网页阅读等待 response 结算时把完成态与进度放进同一检查点。
+          if (
+            !hasMatchingWebReadingProgress(
+              webReadingProgressRef.current,
+              completedOwner
+            )
+          ) {
+            void saveSessionsToStorage(updatedSessions);
+          }
           if (
             completedRequestId &&
             clearActiveRequest(completedRequestId)
@@ -862,13 +1023,22 @@ export default function SidePanelApp() {
 
   // 通读当前网页核心逻辑
   const handleReadCurrentPage = async () => {
-    if (isStreaming || isExtractingPage) return;
+    if (
+      !webReadingProgressHydratedRef.current ||
+      isStreaming ||
+      isExtractingPage
+    ) {
+      return;
+    }
+    const extractionSessionId = activeSessionIdRef.current;
+    if (!extractionSessionId) return;
 
     let activeWebRequest:
       | {
           sessionId: string;
           requestId: string;
           assistantMessageId: string;
+          readingRunId: string;
           hasProgress: boolean;
         }
       | undefined;
@@ -949,34 +1119,56 @@ export default function SidePanelApp() {
         return;
       }
 
+      const latestSessions = sessionsRef.current;
+      const extractionSession = latestSessions.find(
+        (session) => session.id === extractionSessionId
+      );
+      if (
+        !extractionSession ||
+        activeSessionIdRef.current !== extractionSessionId
+      ) {
+        setExtractError(
+          "提取期间当前会话已变化，本次通读已取消，请重新点击「通读当前网页」。"
+        );
+        setIsExtractingPage(false);
+        return;
+      }
+
       // 如果当前会话已有消息，为网页通读创建一个干净的新会话
-      let targetSession = activeSession;
-      if (activeSession && activeSession.messages.length > 0) {
+      let targetSession = extractionSession;
+      if (extractionSession.messages.length > 0) {
         targetSession = createNewSession(
           `速读: ${pageData.title.slice(0, 12)}...`
         );
-        const updatedSessions = [targetSession, ...sessions];
+        const updatedSessions = [targetSession, ...latestSessions];
+        sessionsRef.current = updatedSessions;
         setSessions(updatedSessions);
         activateSessionWithDraft(targetSession.id);
         void saveSessionsToStorage(updatedSessions);
         void saveActiveSessionId(targetSession.id);
-      } else if (targetSession) {
-        targetSession.title = `速读: ${pageData.title.slice(0, 12)}...`;
+      } else {
+        targetSession = {
+          ...targetSession,
+          title: `速读: ${pageData.title.slice(0, 12)}...`,
+        };
       }
 
       const userMessageId = createRequestId();
       const assistantMessageId = createRequestId();
       const currentRequestId = createRequestId();
+      const readingRunId = createRequestId();
       const totalSegments = getWebReadingSegmentCount(pageData.content.length);
       registerActiveRequest({
         requestId: currentRequestId,
         sessionId: targetSession.id,
         assistantMessageId,
+        readingRunId: totalSegments > 1 ? readingRunId : undefined,
       });
       activeWebRequest = {
         sessionId: targetSession.id,
         requestId: currentRequestId,
         assistantMessageId,
+        readingRunId,
         hasProgress: totalSegments > 1,
       };
 
@@ -988,6 +1180,7 @@ export default function SidePanelApp() {
         pageMeta: createWebReadingPageMeta(pageData, {
           segmentIndex: 1,
           totalSegments,
+          readingRunId,
         }),
         createdAt: Date.now(),
         status: "completed",
@@ -1010,14 +1203,15 @@ export default function SidePanelApp() {
         updatedAt: Date.now(),
       };
 
-      const nextSessions = sessions.map((s) =>
+      const currentSessions = sessionsRef.current;
+      const nextSessions = currentSessions.map((s) =>
         s.id === targetSession.id ? updatedSession : s
       );
       if (!nextSessions.some((s) => s.id === targetSession.id)) {
         nextSessions.unshift(updatedSession);
       }
+      sessionsRef.current = nextSessions;
       setSessions(nextSessions);
-      void saveSessionsToStorage(nextSessions);
 
       // 首段先登记为 pending；只有业务成功且结果非空后，才开放第二段续读。
       if (totalSegments > 1) {
@@ -1026,12 +1220,15 @@ export default function SidePanelApp() {
           totalSegments,
           requestId: currentRequestId,
           assistantMessageId,
+          readingRunId,
         });
-        setWebReadingProgressMap((prev) => {
+        commitWebReadingProgress((prev) => {
           const next = new Map(prev);
           next.set(targetSession.id, progressState);
           return next;
-        });
+        }, targetSession.id);
+      } else {
+        void saveSessionsToStorage(nextSessions);
       }
 
       setIsExtractingPage(false);
@@ -1054,13 +1251,6 @@ export default function SidePanelApp() {
         messages: messagesPayload,
         thinkingEnabled,
       })) as WebReadingResponse;
-      if (activeWebRequest.hasProgress) {
-        settleSessionWebReadingProgress(
-          activeWebRequest.sessionId,
-          activeWebRequest.requestId,
-          response
-        );
-      }
       if (!isSuccessfulWebReadingResponse(response)) {
         markAssistantMessageAsError(
           activeWebRequest.sessionId,
@@ -1068,6 +1258,16 @@ export default function SidePanelApp() {
           response?.error || "网页通读未返回有效结果，请重试",
           activeWebRequest.requestId
         );
+      }
+      if (activeWebRequest.hasProgress) {
+        settleSessionWebReadingProgress(
+          activeWebRequest.sessionId,
+          activeWebRequest.readingRunId,
+          activeWebRequest.requestId,
+          response
+        );
+      } else {
+        void saveSessionsToStorage(sessionsRef.current);
       }
     } catch (error: any) {
       // 提取链路失败均已提前 return，走到这里的异常属于会话组装或 AI 请求发送环节
@@ -1086,12 +1286,6 @@ export default function SidePanelApp() {
           }）`
         );
       }
-      if (activeWebRequest?.hasProgress) {
-        settleSessionWebReadingProgress(
-          activeWebRequest.sessionId,
-          activeWebRequest.requestId
-        );
-      }
       if (activeWebRequest) {
         markAssistantMessageAsError(
           activeWebRequest.sessionId,
@@ -1099,13 +1293,27 @@ export default function SidePanelApp() {
           error?.message || "通读网页请求失败，请检查网络或 API 设置",
           activeWebRequest.requestId
         );
+        if (activeWebRequest.hasProgress) {
+          settleSessionWebReadingProgress(
+            activeWebRequest.sessionId,
+            activeWebRequest.readingRunId,
+            activeWebRequest.requestId
+          );
+        }
       }
     }
   };
 
   // 继续解读网页长文的剩余分段（同会话上下文顺序解读，直至读完）
   const handleContinueWebReading = async () => {
-    if (isStreaming || isExtractingPage || !activeSession) return;
+    if (
+      !webReadingProgressHydratedRef.current ||
+      isStreaming ||
+      isExtractingPage ||
+      !activeSession
+    ) {
+      return;
+    }
     const progress = webReadingProgressMap.get(activeSession.id);
     if (!isWebReadingContinueReady(progress)) return;
 
@@ -1119,11 +1327,11 @@ export default function SidePanelApp() {
       segmentEnd
     );
     if (!segmentContent.trim()) {
-      setWebReadingProgressMap((prev) => {
+      commitWebReadingProgress((prev) => {
         const next = new Map(prev);
         next.delete(activeSession.id);
         return next;
-      });
+      }, activeSession.id);
       return;
     }
 
@@ -1134,6 +1342,7 @@ export default function SidePanelApp() {
       requestId: currentRequestId,
       sessionId: activeSession.id,
       assistantMessageId,
+      readingRunId: progress.readingRunId,
     });
 
     const userMessage: ChatMessage = {
@@ -1147,7 +1356,11 @@ export default function SidePanelApp() {
           content: segmentContent,
           wordCount: progress.wordCount,
         },
-        { segmentIndex, totalSegments: progress.totalSegments }
+        {
+          segmentIndex,
+          totalSegments: progress.totalSegments,
+          readingRunId: progress.readingRunId,
+        }
       ),
       createdAt: Date.now(),
       status: "completed",
@@ -1169,14 +1382,14 @@ export default function SidePanelApp() {
       updatedAt: Date.now(),
     };
 
-    const nextSessions = sessions.map((s) =>
+    const nextSessions = sessionsRef.current.map((s) =>
       s.id === activeSession.id ? updatedSession : s
     );
+    sessionsRef.current = nextSessions;
     setSessions(nextSessions);
-    void saveSessionsToStorage(nextSessions);
 
     // 请求期间只记录 pending，不提前推进，避免失败后跳段或末段入口消失。
-    setWebReadingProgressMap((prev) => {
+    commitWebReadingProgress((prev) => {
       const current = prev.get(activeSession.id);
       if (!current) return prev;
       const next = new Map(prev);
@@ -1190,7 +1403,7 @@ export default function SidePanelApp() {
         })
       );
       return next;
-    });
+    }, activeSession.id);
 
     setIsStreaming(true);
     setExtractError(null);
@@ -1228,11 +1441,6 @@ export default function SidePanelApp() {
         messages: messagesPayload,
         thinkingEnabled,
       })) as WebReadingResponse;
-      settleSessionWebReadingProgress(
-        activeSession.id,
-        currentRequestId,
-        response
-      );
       if (!isSuccessfulWebReadingResponse(response)) {
         markAssistantMessageAsError(
           activeSession.id,
@@ -1241,13 +1449,23 @@ export default function SidePanelApp() {
           currentRequestId
         );
       }
+      settleSessionWebReadingProgress(
+        activeSession.id,
+        progress.readingRunId,
+        currentRequestId,
+        response
+      );
     } catch (error: any) {
       logger.error("发送续读请求失败:", error);
-      settleSessionWebReadingProgress(activeSession.id, currentRequestId);
       markAssistantMessageAsError(
         activeSession.id,
         assistantMessageId,
         error?.message || "续读请求发送失败，请检查网络或设置",
+        currentRequestId
+      );
+      settleSessionWebReadingProgress(
+        activeSession.id,
+        progress.readingRunId,
         currentRequestId
       );
     }
@@ -1303,9 +1521,10 @@ export default function SidePanelApp() {
       updatedAt: Date.now(),
     };
 
-    const nextSessions = sessions.map((s) =>
+    const nextSessions = sessionsRef.current.map((s) =>
       s.id === activeSession.id ? updatedSession : s
     );
+    sessionsRef.current = nextSessions;
     setSessions(nextSessions);
     void saveSessionsToStorage(nextSessions);
 
@@ -1416,10 +1635,20 @@ export default function SidePanelApp() {
 
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
+    const replayReadingRunId = replayPrompt?.success
+      ? oldUserMsg.pageMeta?.readingRunId
+      : undefined;
+    const ownedReplayRunId =
+      replayReadingRunId &&
+      webReadingProgressRef.current.get(activeSession.id)?.readingRunId ===
+        replayReadingRunId
+        ? replayReadingRunId
+        : undefined;
     registerActiveRequest({
       requestId: currentRequestId,
       sessionId: activeSession.id,
       assistantMessageId,
+      readingRunId: ownedReplayRunId,
     });
 
     const updatedUserMsg: ChatMessage = {
@@ -1465,11 +1694,11 @@ export default function SidePanelApp() {
       updatedAt: Date.now(),
     };
 
-    const nextSessions = sessions.map((s) =>
+    const nextSessions = sessionsRef.current.map((s) =>
       s.id === activeSession.id ? updatedSession : s
     );
+    sessionsRef.current = nextSessions;
     setSessions(nextSessions);
-    void saveSessionsToStorage(nextSessions);
 
     // 退出编辑状态并启动流式生成
     setEditingMessageId(null);
@@ -1478,13 +1707,16 @@ export default function SidePanelApp() {
     setExtractError(null);
     scrollToBottom(true);
 
-    if (replayPrompt?.success) {
-      rewindSessionWebReadingProgress(
+    const savedWithReadingProgress = replayPrompt?.success
+      ? rewindSessionWebReadingProgress(
         activeSession.id,
         updatedUserMsg,
         currentRequestId,
         assistantMessageId
-      );
+        )
+      : false;
+    if (!savedWithReadingProgress) {
+      void saveSessionsToStorage(nextSessions);
     }
 
     try {
@@ -1523,11 +1755,6 @@ export default function SidePanelApp() {
         thinkingEnabled,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
-        settleSessionWebReadingProgress(
-          activeSession.id,
-          currentRequestId,
-          response
-        );
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
             activeSession.id,
@@ -1536,18 +1763,28 @@ export default function SidePanelApp() {
             currentRequestId
           );
         }
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          oldUserMsg.pageMeta?.readingRunId,
+          currentRequestId,
+          response
+        );
       }
     } catch (error: any) {
       logger.error("重新发送编辑消息失败:", error);
-      if (replayPrompt?.success) {
-        settleSessionWebReadingProgress(activeSession.id, currentRequestId);
-      }
       markAssistantMessageAsError(
         activeSession.id,
         assistantMessageId,
         error?.message || "请求发送失败，请检查网络或设置",
         currentRequestId
       );
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          oldUserMsg.pageMeta?.readingRunId,
+          currentRequestId
+        );
+      }
     }
   };
 
@@ -1584,10 +1821,20 @@ export default function SidePanelApp() {
     setTimeout(() => setRegeneratingId(null), 800);
 
     const currentRequestId = createRequestId();
+    const replayReadingRunId = replayPrompt?.success
+      ? prevUserMsg.pageMeta?.readingRunId
+      : undefined;
+    const ownedReplayRunId =
+      replayReadingRunId &&
+      webReadingProgressRef.current.get(activeSession.id)?.readingRunId ===
+        replayReadingRunId
+        ? replayReadingRunId
+        : undefined;
     registerActiveRequest({
       requestId: currentRequestId,
       sessionId: activeSession.id,
       assistantMessageId,
+      readingRunId: ownedReplayRunId,
     });
 
     const updatedSession: ChatSession = {
@@ -1596,23 +1843,26 @@ export default function SidePanelApp() {
       updatedAt: Date.now(),
     };
 
-    const nextSessions = sessions.map((s) =>
+    const nextSessions = sessionsRef.current.map((s) =>
       s.id === activeSession.id ? updatedSession : s
     );
+    sessionsRef.current = nextSessions;
     setSessions(nextSessions);
-    void saveSessionsToStorage(nextSessions);
 
     setIsStreaming(true);
     setExtractError(null);
     scrollToBottom(true);
 
-    if (replayPrompt?.success) {
-      rewindSessionWebReadingProgress(
+    const savedWithReadingProgress = replayPrompt?.success
+      ? rewindSessionWebReadingProgress(
         activeSession.id,
         prevUserMsg,
         currentRequestId,
         assistantMessageId
-      );
+        )
+      : false;
+    if (!savedWithReadingProgress) {
+      void saveSessionsToStorage(nextSessions);
     }
 
     try {
@@ -1651,11 +1901,6 @@ export default function SidePanelApp() {
         bypassJargonVault,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
-        settleSessionWebReadingProgress(
-          activeSession.id,
-          currentRequestId,
-          response
-        );
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
             activeSession.id,
@@ -1664,18 +1909,28 @@ export default function SidePanelApp() {
             currentRequestId
           );
         }
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          prevUserMsg.pageMeta?.readingRunId,
+          currentRequestId,
+          response
+        );
       }
     } catch (error: any) {
       logger.error("重新生成回答失败:", error);
-      if (replayPrompt?.success) {
-        settleSessionWebReadingProgress(activeSession.id, currentRequestId);
-      }
       markAssistantMessageAsError(
         activeSession.id,
         assistantMessageId,
         error?.message || "重新生成失败，请检查网络或设置",
         currentRequestId
       );
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          prevUserMsg.pageMeta?.readingRunId,
+          currentRequestId
+        );
+      }
     }
   };
 
@@ -1691,29 +1946,35 @@ export default function SidePanelApp() {
     // 先同步失效本地归属和 pending；后台清理完成后不再改动任何前台状态。
     clearActiveRequest(stoppedRequestId);
     setIsStreaming(false);
-    setWebReadingProgressMap((prev) =>
-      cancelWebReadingProgressByRequest(prev, stoppedRequestId)
-    );
     if (stoppedOwner) {
-      setSessions((prev) => {
-        const updated = prev.map((session) => {
-          if (session.id !== stoppedOwner.sessionId) return session;
-          const messages = session.messages.map((message) =>
-            message.id === stoppedOwner.assistantMessageId &&
-            message.role === "assistant" &&
-            message.status === "streaming"
-              ? {
-                  ...message,
-                  status: "error" as const,
-                  errorMessage: "生成已停止，可点击重试继续当前内容。",
-                }
-              : message
-          );
-          return { ...session, messages, updatedAt: Date.now() };
-        });
-        void saveSessionsToStorage(updated);
-        return updated;
+      const updatedSessions = sessionsRef.current.map((session) => {
+        if (session.id !== stoppedOwner.sessionId) return session;
+        const messages = session.messages.map((message) =>
+          message.id === stoppedOwner.assistantMessageId &&
+          message.role === "assistant" &&
+          message.status === "streaming"
+            ? {
+                ...message,
+                status: "error" as const,
+                errorMessage: "生成已停止，可点击重试继续当前内容。",
+              }
+            : message
+        );
+        return { ...session, messages, updatedAt: Date.now() };
       });
+      sessionsRef.current = updatedSessions;
+      setSessions(updatedSessions);
+      const hasPendingWebReading = Array.from(
+        webReadingProgressRef.current.values()
+      ).some((progress) => progress.pendingRequestId === stoppedRequestId);
+      commitWebReadingProgress(
+        (previous) =>
+          cancelWebReadingProgressByRequest(previous, stoppedRequestId),
+        stoppedOwner.sessionId
+      );
+      if (!hasPendingWebReading) {
+        void saveSessionsToStorage(updatedSessions);
+      }
     }
 
     try {
@@ -1733,11 +1994,10 @@ export default function SidePanelApp() {
       void handleStopGenerating();
     }
     const fresh = createNewSession();
-    setSessions((prev) => {
-      const updated = [fresh, ...prev];
-      void saveSessionsToStorage(updated);
-      return updated;
-    });
+    const updatedSessions = [fresh, ...sessionsRef.current];
+    sessionsRef.current = updatedSessions;
+    setSessions(updatedSessions);
+    void saveSessionsToStorage(updatedSessions);
     activateSessionWithDraft(fresh.id);
     void saveActiveSessionId(fresh.id);
     setActiveView("chat");
@@ -1767,27 +2027,31 @@ export default function SidePanelApp() {
         })
         .catch((error) => logger.error("删除会话时清理请求失败:", error));
     }
-    setWebReadingProgressMap((prev) => {
+    const hadWebReadingProgress = webReadingProgressRef.current.has(sessionId);
+    const filtered = sessionsRef.current.filter((s) => s.id !== sessionId);
+    composerDraftsRef.current.delete(sessionId);
+    if (filtered.length === 0) {
+      const fresh = createNewSession();
+      sessionsRef.current = [fresh];
+      setSessions([fresh]);
+      activateSessionWithDraft(fresh.id, false);
+      void saveActiveSessionId(fresh.id);
+    } else {
+      sessionsRef.current = filtered;
+      setSessions(filtered);
+      if (activeSessionIdRef.current === sessionId) {
+        activateSessionWithDraft(filtered[0].id, false);
+        void saveActiveSessionId(filtered[0].id);
+      }
+    }
+    commitWebReadingProgress((prev) => {
       if (!prev.has(sessionId)) return prev;
       const next = new Map(prev);
       next.delete(sessionId);
       return next;
-    });
-    const filtered = sessions.filter((s) => s.id !== sessionId);
-    composerDraftsRef.current.delete(sessionId);
-    if (filtered.length === 0) {
-      const fresh = createNewSession();
-      setSessions([fresh]);
-      activateSessionWithDraft(fresh.id, false);
-      void saveSessionsToStorage([fresh]);
-      void saveActiveSessionId(fresh.id);
-    } else {
-      setSessions(filtered);
-      void saveSessionsToStorage(filtered);
-      if (activeSessionId === sessionId) {
-        activateSessionWithDraft(filtered[0].id, false);
-        void saveActiveSessionId(filtered[0].id);
-      }
+    }, sessionId);
+    if (!hadWebReadingProgress) {
+      void saveSessionsToStorage(sessionsRef.current);
     }
   };
 
