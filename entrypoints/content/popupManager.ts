@@ -13,6 +13,11 @@ import {
 } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import {
+  FontScaleController,
+  applyFontScale,
+  handleScopedFontScaleShortcut,
+} from "@/entrypoints/shared/fontScale";
+import {
   normalizeThemeMode,
   watchSystemTheme,
 } from "@/entrypoints/shared/theme";
@@ -74,15 +79,42 @@ export class PopupManager {
   // 系统主题和菜单事件的清理函数
   private systemThemeCleanup: (() => void) | null = null;
   private themeMenuCleanup: (() => void) | null = null;
+  private settingsCleanup: (() => void) | null = null;
+  private destroyed = false;
+  private fontScaleNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly fontScaleController: FontScaleController;
+  private readonly handleFontScaleKeyDown = (event: KeyboardEvent) => {
+    handleScopedFontScaleShortcut(
+      event,
+      this.currentPopup,
+      (action) => this.fontScaleController.perform(action)
+    );
+  };
 
   constructor() {
+    this.fontScaleController = new FontScaleController({
+      apply: (value) => {
+        if (this.currentPopup) applyFontScale(this.currentPopup, value);
+      },
+      persist: (value) =>
+        SettingsUtils.setFontScalePercent(value),
+      onPersistError: (error) => {
+        logger.error("保存浮窗字体大小失败:", error);
+        this.showFontScaleSaveError();
+      },
+    });
     void SettingsUtils.getSettings().then((settings) => {
+      if (this.destroyed) return;
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.fontScaleController.hydrate(settings.fontScalePercent);
     });
 
-    SettingsUtils.onSettingsChanged((settings) => {
+    this.settingsCleanup = SettingsUtils.onSettingsChanged((settings) => {
+      if (this.destroyed) return;
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.fontScaleController.syncExternal(settings.fontScalePercent);
     });
+    document.addEventListener("keydown", this.handleFontScaleKeyDown, true);
   }
 
   // 显示弹窗方法，接收用户选中的文本
@@ -259,6 +291,39 @@ export class PopupManager {
     this.deferredStartInProgress = false;
   }
 
+  public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.removeCurrentPopup();
+    this.settingsCleanup?.();
+    this.settingsCleanup = null;
+    this.systemThemeCleanup?.();
+    this.systemThemeCleanup = null;
+    if (this.fontScaleNoticeTimer) {
+      clearTimeout(this.fontScaleNoticeTimer);
+      this.fontScaleNoticeTimer = null;
+    }
+    document.removeEventListener("keydown", this.handleFontScaleKeyDown, true);
+  }
+
+  private showFontScaleSaveError(): void {
+    const popup = this.currentPopup;
+    if (!popup) return;
+    let notice = popup.querySelector(
+      ".translator-font-scale-toast"
+    ) as HTMLElement | null;
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.className = "translator-font-scale-toast";
+      notice.setAttribute("role", "status");
+      notice.setAttribute("aria-live", "polite");
+      popup.appendChild(notice);
+    }
+    notice.textContent = "字体大小保存失败，重开后可能恢复旧值";
+    if (this.fontScaleNoticeTimer) clearTimeout(this.fontScaleNoticeTimer);
+    this.fontScaleNoticeTimer = setTimeout(() => notice?.remove(), 3000);
+  }
+
   // 创建弹窗元素方法，接收用户选中的文本
   private createPopupElement(
     selection: string,
@@ -268,6 +333,7 @@ export class PopupManager {
     // 创建div元素作为弹窗容器
     const popup = document.createElement("div");
     popup.className = "translator-popup"; // 设置CSS类名
+    popup.tabIndex = -1;
     // 设置弹窗HTML结构
     popup.innerHTML = `
       <div class="translator-header">
@@ -349,7 +415,7 @@ export class PopupManager {
           >
             <span
               class="translator-vault-source"
-              style="padding: 3px 8px; border-radius: 999px; background: rgba(52, 199, 89, 0.12); color: #248a3d; font-size: 12px; font-weight: 600;"
+              style="padding: 3px 8px; border-radius: 999px; background: rgba(52, 199, 89, 0.12); color: #248a3d; font-size: calc(12px * var(--ht-font-scale, 1)); font-weight: 600;"
             >
               来自生词本
             </span>
@@ -357,7 +423,7 @@ export class PopupManager {
               type="button"
               class="translator-regenerate-btn"
               title="跳过生词本并重新生成"
-              style="padding: 4px 10px; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: transparent; color: #248a3d; font-size: 12px; cursor: pointer;"
+              style="padding: 4px 10px; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: transparent; color: #248a3d; font-size: calc(12px * var(--ht-font-scale, 1)); cursor: pointer;"
             >
               重新生成
             </button>
@@ -368,7 +434,7 @@ export class PopupManager {
               type="button"
               class="translator-stop-btn"
               title="停止生成本次翻译"
-              style="margin-left: 10px; padding: 2px 10px; font-size: 12px; line-height: 18px; font-weight: 500; border: 1px solid; border-radius: 6px; background: transparent; color: inherit; opacity: 0.85; cursor: pointer;"
+              style="margin-left: 10px; padding: 2px 10px; font-size: calc(12px * var(--ht-font-scale, 1)); line-height: 1.5; font-weight: 500; border: 1px solid; border-radius: 6px; background: transparent; color: inherit; opacity: 0.85; cursor: pointer;"
             >
               停止
             </button>
@@ -376,7 +442,7 @@ export class PopupManager {
               type="button"
               class="translator-retry-btn"
               title="使用原文重新翻译"
-              style="display: none; margin-left: 10px; padding: 2px 10px; font-size: 12px; line-height: 18px; font-weight: 500; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: rgba(52, 199, 89, 0.1); color: #34c759; cursor: pointer;"
+              style="display: none; margin-left: 10px; padding: 2px 10px; font-size: calc(12px * var(--ht-font-scale, 1)); line-height: 1.5; font-weight: 500; border: 1px solid rgba(52, 199, 89, 0.3); border-radius: 6px; background: rgba(52, 199, 89, 0.1); color: #34c759; cursor: pointer;"
             >
               重试
             </button>
@@ -419,7 +485,14 @@ export class PopupManager {
       if (loading) loading.style.display = "none";
     }
     applyPopupTheme(popup, this.themeMode);
+    applyFontScale(popup, this.fontScaleController.getValue());
     this.updateThemeControls(popup);
+    popup.addEventListener("pointerdown", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest?.("button, a, input, textarea, select")) {
+        popup.focus({ preventScroll: true });
+      }
+    });
 
     return popup;
   }
@@ -625,6 +698,7 @@ export class PopupManager {
   }
 
   private setThemeMode(mode: ThemeMode) {
+    if (this.destroyed) return;
     this.themeMode = normalizeThemeMode(mode);
     this.systemThemeCleanup?.();
     this.systemThemeCleanup = null;

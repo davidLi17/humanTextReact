@@ -7,7 +7,7 @@ import { injectStyles } from "./styles";
 
 export default defineContentScript({
   matches: ["<all_urls>"],
-  main() {
+  main(ctx) {
     // 初始化日志系统
     void initializeLogger("content");
     contentLogger.info("人话翻译器 content script 启动");
@@ -26,7 +26,14 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener(messageHandler.handleMessage);
 
     // 注册网页内快捷键双通道监听器（彻底解决快捷键失灵）
-    initContentShortcuts(popupManager);
+    const cleanupShortcuts = initContentShortcuts(popupManager);
+
+    ctx.onInvalidated(() => {
+      cleanupShortcuts();
+      selectionActionBar.destroy();
+      popupManager.destroy();
+      browser.runtime.onMessage.removeListener(messageHandler.handleMessage);
+    });
 
     contentLogger.success("Content script 初始化完成");
   },

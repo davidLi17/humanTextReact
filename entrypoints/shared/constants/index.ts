@@ -2,6 +2,7 @@
  * 全局共享常量定义
  * 所有模块统一使用此文件中的常量
  */
+import { DEFAULT_FONT_SCALE_PERCENT } from "../fontScale";
 
 /**
  * 消息类型常量
@@ -78,6 +79,7 @@ export const DEFAULT_SETTINGS = {
   contextualSelectionEnabled: false,
   logLevel: LOG_LEVELS.OFF as LogLevel,
   theme: THEME_MODES.SYSTEM as ThemeMode,
+  fontScalePercent: DEFAULT_FONT_SCALE_PERCENT,
 } as const;
 
 /**

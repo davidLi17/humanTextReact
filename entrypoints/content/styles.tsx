@@ -6,6 +6,7 @@ import type { ThemeMode } from "@/entrypoints/shared/constants";
 
 export const POPUP_STYLES = /*css*/ `
   .translator-popup {
+    --ht-font-scale: 1;
     position: fixed;
     z-index: 10000;
     background: white;
@@ -24,6 +25,8 @@ export const POPUP_STYLES = /*css*/ `
     border: 1px solid rgba(0, 0, 0, 0.08);
     backdrop-filter: blur(8px);
     color-scheme: light;
+    font-size: calc(16px * var(--ht-font-scale, 1));
+    outline: none;
   }
 
   .translator-popup::after {
@@ -71,7 +74,7 @@ export const POPUP_STYLES = /*css*/ `
   .translator-popup .translator-title {
     font-weight: 600;
     color: #1a1a1a;
-    font-size: 15px;
+    font-size: calc(15px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-header-actions {
@@ -92,7 +95,7 @@ export const POPUP_STYLES = /*css*/ `
     justify-content: center;
     border: 1px solid rgba(79, 70, 229, 0.2);
     background: rgba(79, 70, 229, 0.06);
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     font-weight: 500;
   }
 
@@ -113,7 +116,7 @@ export const POPUP_STYLES = /*css*/ `
     justify-content: center;
     border: 1px solid rgba(245, 158, 11, 0.25);
     background: rgba(245, 158, 11, 0.08);
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     font-weight: 500;
   }
 
@@ -136,7 +139,7 @@ export const POPUP_STYLES = /*css*/ `
     height: 30px;
     border: 0;
     background: transparent;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-close-btn:hover {
@@ -199,7 +202,7 @@ export const POPUP_STYLES = /*css*/ `
     color: #334155;
     cursor: pointer;
     font: inherit;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     text-align: left;
   }
 
@@ -250,7 +253,7 @@ export const POPUP_STYLES = /*css*/ `
     border: 1px solid rgba(52, 199, 89, 0.3);
     border-radius: 6px;
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     font-weight: 500;
     cursor: pointer;
     opacity: 0.8;
@@ -264,7 +267,7 @@ export const POPUP_STYLES = /*css*/ `
   }
 
   .translator-popup .translator-label {
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
     color: #666;
     margin-bottom: 10px;
     font-weight: 600;
@@ -276,14 +279,14 @@ export const POPUP_STYLES = /*css*/ `
     color: #1a1a1a;
     line-height: 1.6;
     overflow-wrap: break-word;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-reasoning-text {
     color: #4a5568;
     line-height: 1.6;
     overflow-wrap: break-word;
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
     background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
     padding: 16px;
     border-radius: 8px;
@@ -296,14 +299,14 @@ export const POPUP_STYLES = /*css*/ `
     line-height: 1.6;
     overflow-wrap: break-word;
     font-weight: 500;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-loading {
     display: inline-block;
     margin-left: 8px;
     color: #64748b;
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-copy-btn {
@@ -320,7 +323,7 @@ export const POPUP_STYLES = /*css*/ `
     border-radius: 0 0 12px 12px;
     margin-top: auto;
     font-weight: 600;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
     transition: all 0.2s ease;
   }
 
@@ -339,7 +342,7 @@ export const POPUP_STYLES = /*css*/ `
   }
 
   .translator-popup .translator-context-preview-title {
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
     font-weight: 600;
     color: #3730a3;
   }
@@ -349,7 +352,7 @@ export const POPUP_STYLES = /*css*/ `
     gap: 8px;
     margin-top: 4px;
     color: #64748b;
-    font-size: 11px;
+    font-size: calc(11px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-context-source span {
@@ -369,7 +372,7 @@ export const POPUP_STYLES = /*css*/ `
     margin-top: 8px;
     overflow: auto;
     color: #475569;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     line-height: 1.55;
   }
 
@@ -386,7 +389,7 @@ export const POPUP_STYLES = /*css*/ `
     background: #fff;
     color: #4338ca;
     cursor: pointer;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
   }
 
   .translator-popup .translator-context-actions .translator-context-btn {
@@ -556,6 +559,7 @@ export const POPUP_STYLES = /*css*/ `
 
   /* 划选快捷操作条 (Selection Action Bar) 样式 */
   .translator-action-bar {
+    --ht-font-scale: 1;
     position: fixed;
     z-index: 2147483647;
     display: inline-flex;
@@ -568,7 +572,7 @@ export const POPUP_STYLES = /*css*/ `
     gap: 3px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
       "Helvetica Neue", Arial, sans-serif;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     line-height: 1;
     cursor: default;
     user-select: none;
@@ -577,6 +581,23 @@ export const POPUP_STYLES = /*css*/ `
     color-scheme: light;
     animation: translatorActionBarFadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
     box-sizing: border-box;
+    outline: none;
+  }
+
+  .translator-font-scale-toast {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 20;
+    max-width: calc(100% - 16px);
+    padding: 5px 8px;
+    border: 1px solid rgba(220, 38, 38, 0.28);
+    border-radius: 6px;
+    background: #fff1f2;
+    color: #b91c1c;
+    font-size: calc(11px * var(--ht-font-scale, 1));
+    line-height: 1.4;
+    white-space: normal;
   }
 
   .translator-action-bar * {
@@ -603,7 +624,7 @@ export const POPUP_STYLES = /*css*/ `
     border: none;
     background: transparent;
     color: #374151;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     font-weight: 500;
     line-height: 1;
     cursor: pointer;

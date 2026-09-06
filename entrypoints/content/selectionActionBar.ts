@@ -7,6 +7,11 @@ import { createLogger } from "@/entrypoints/shared/logger";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import {
+  FontScaleController,
+  applyFontScale,
+  handleScopedFontScaleShortcut,
+} from "@/entrypoints/shared/fontScale";
+import {
   normalizeThemeMode,
   watchSystemTheme,
 } from "@/entrypoints/shared/theme";
@@ -259,7 +264,20 @@ export class SelectionActionBar {
   private settingsCleanup: (() => void) | null = null;
   private systemThemeCleanup: (() => void) | null = null;
   private initialized = false;
+  private destroyed = false;
   private cleanupFns: Array<() => void> = [];
+  private fontScaleNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly fontScaleController = new FontScaleController({
+    apply: (value) => {
+      if (this.container) applyFontScale(this.container, value);
+    },
+    persist: (value) =>
+      SettingsUtils.setFontScalePercent(value),
+    onPersistError: (error) => {
+      logger.error("保存快捷操作条字体大小失败:", error);
+      this.showFontScaleSaveError();
+    },
+  });
 
   constructor(
     private popupManager?: PopupManager,
@@ -270,7 +288,7 @@ export class SelectionActionBar {
     targetDocument: Document = document,
     targetWindow: Window = window
   ): void {
-    if (this.initialized) return;
+    if (this.initialized || this.destroyed) return;
     this.initialized = true;
 
     this.setupEventListeners(targetDocument, targetWindow);
@@ -299,6 +317,7 @@ export class SelectionActionBar {
     targetWindow?: Window,
     targetDocument?: Document
   ): void {
+    if (this.destroyed) return;
     if (!isValidSelectionText(text)) {
       this.hide();
       return;
@@ -366,6 +385,8 @@ export class SelectionActionBar {
    * 销毁并清理事件
    */
   public destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.hide();
     this.cleanupFns.forEach((fn) => fn());
     this.cleanupFns = [];
@@ -373,12 +394,34 @@ export class SelectionActionBar {
     this.settingsCleanup = null;
     this.systemThemeCleanup?.();
     this.systemThemeCleanup = null;
+    if (this.fontScaleNoticeTimer) {
+      clearTimeout(this.fontScaleNoticeTimer);
+      this.fontScaleNoticeTimer = null;
+    }
 
     if (this.container) {
       this.container.remove();
       this.container = null;
     }
     this.initialized = false;
+  }
+
+  private showFontScaleSaveError(): void {
+    const container = this.container;
+    if (!container) return;
+    let notice = container.querySelector(
+      ".translator-font-scale-toast"
+    ) as HTMLElement | null;
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.className = "translator-font-scale-toast";
+      notice.setAttribute("role", "status");
+      notice.setAttribute("aria-live", "polite");
+      container.appendChild(notice);
+    }
+    notice.textContent = "字体大小保存失败";
+    if (this.fontScaleNoticeTimer) clearTimeout(this.fontScaleNoticeTimer);
+    this.fontScaleNoticeTimer = setTimeout(() => notice?.remove(), 3000);
   }
 
   private ensureContainer(targetDocument: Document = document): HTMLElement {
@@ -395,6 +438,7 @@ export class SelectionActionBar {
     bar.setAttribute("data-translator-element", "true");
     bar.setAttribute("role", "toolbar");
     bar.setAttribute("aria-label", "人话翻译快捷操作");
+    bar.tabIndex = -1;
     bar.style.display = "none";
 
     bar.innerHTML = `
@@ -431,6 +475,7 @@ export class SelectionActionBar {
 
     // 防止在操作条上点击时导致选区被浏览器清空
     bar.addEventListener("mousedown", (e) => {
+      bar.focus({ preventScroll: true });
       e.preventDefault();
       e.stopPropagation();
     });
@@ -462,6 +507,7 @@ export class SelectionActionBar {
     });
 
     targetDocument.body.appendChild(bar);
+    applyFontScale(bar, this.fontScaleController.getValue());
     this.container = bar;
     return bar;
   }
@@ -672,6 +718,13 @@ export class SelectionActionBar {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        handleScopedFontScaleShortcut(e, this.container, (action) =>
+          this.fontScaleController.perform(action)
+        )
+      ) {
+        return;
+      }
       if (e.key === "Escape" && this.isVisible) {
         this.hide();
       }
@@ -705,19 +758,24 @@ export class SelectionActionBar {
 
   private initTheme(): void {
     void SettingsUtils.getSettings().then((settings) => {
+      if (this.destroyed) return;
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.fontScaleController.hydrate(settings.fontScalePercent);
       this.contextualSelectionEnabled =
         settings.contextualSelectionEnabled === true;
     });
 
     this.settingsCleanup = SettingsUtils.onSettingsChanged((settings) => {
+      if (this.destroyed) return;
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.fontScaleController.syncExternal(settings.fontScalePercent);
       this.contextualSelectionEnabled =
         settings.contextualSelectionEnabled === true;
     });
   }
 
   public setThemeMode(mode: ThemeMode): void {
+    if (this.destroyed) return;
     this.themeMode = normalizeThemeMode(mode);
     this.systemThemeCleanup?.();
     this.systemThemeCleanup = null;

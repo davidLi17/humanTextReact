@@ -18,6 +18,7 @@ import {
   DEFAULT_SETTINGS,
   MAX_HISTORY_COUNT,
 } from "../entrypoints/shared/constants/index.ts";
+import { SettingsUtils } from "../entrypoints/shared/settingsUtils.ts";
 import {
   WEB_READING_PROGRESS_STORAGE_KEY,
   WEB_READING_PROGRESS_VERSION,
@@ -114,6 +115,7 @@ const settingsFixture = {
   contextualSelectionEnabled: false,
   logLevel: "debug",
   theme: "dark",
+  fontScalePercent: 130,
 };
 
 beforeEach(() => {
@@ -406,6 +408,7 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
     source.stores.local[ACTIVE_SESSION_STORAGE_KEY] = "session-1";
     source.stores.sync.settings = { ...settingsFixture, apiKey: "sk-secret-key" };
     source.stores.local.settings = { ...settingsFixture, apiKey: "sk-secret-key" };
+    source.stores.local.fontScalePercent = 130;
 
     const backup = await buildBackup();
     const serialized = JSON.stringify(backup, null, 2);
@@ -427,6 +430,8 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
     ];
     target.stores.local.settings = { apiKey: "sk-existing-key" };
     target.stores.sync.settings = { apiKey: "sk-existing-key" };
+    target.stores.local.fontScalePercent = 90;
+    target.stores.sync.fontScalePercent = 90;
     target.stores.local[WEB_READING_PROGRESS_STORAGE_KEY] = {
       version: WEB_READING_PROGRESS_VERSION,
       records: { stale: { fullContent: "旧断点" } },
@@ -476,6 +481,9 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
       expect(store.settings.theme).toBe("dark");
       expect(store.settings.apiKey).toBe("sk-existing-key");
     }
+    expect(target.stores.local.fontScalePercent).toBe(130);
+    expect(target.stores.sync.fontScalePercent).toBe(130);
+    expect((await SettingsUtils.getSettings()).fontScalePercent).toBe(130);
     expect(serialized.includes("sk-secret-key")).toBe(false);
   });
 

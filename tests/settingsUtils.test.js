@@ -227,6 +227,73 @@ describe("SettingsUtils", () => {
   });
 
   describe("setSettings and setSetting", () => {
+    test("字号独立保存不重写其他设置，sync 失败后本机重开仍读取 local 新值", async () => {
+      const syncSettings = {
+        apiKey: "sk-kept",
+        theme: "light",
+        fontScalePercent: 100,
+      };
+      const localStore = {
+        settings: { ...syncSettings },
+      };
+      let settingsObjectWriteCount = 0;
+
+      globalThis.browser = {
+        storage: {
+          sync: {
+            get: async (key) =>
+              key === "settings" ? { settings: syncSettings } : {},
+            set: async () => {
+              throw new Error("sync unavailable");
+            },
+          },
+          local: {
+            get: async (key) => {
+              if (key === "settings") return { settings: localStore.settings };
+              if (key === "fontScalePercent") {
+                return { fontScalePercent: localStore.fontScalePercent };
+              }
+              return {};
+            },
+            set: async (payload) => {
+              if (payload.settings) settingsObjectWriteCount += 1;
+              Object.assign(localStore, payload);
+            },
+          },
+        },
+      };
+
+      await SettingsUtils.setFontScalePercent(130);
+      const reopened = await SettingsUtils.getSettings();
+      expect(reopened.fontScalePercent).toBe(130);
+      expect(reopened.apiKey).toBe("sk-kept");
+      expect(reopened.theme).toBe("light");
+      expect(settingsObjectWriteCount).toBe(0);
+    });
+
+    test("本机字号写入失败会明确拒绝，不假装已经保存", async () => {
+      let syncWriteCalled = false;
+      globalThis.browser = {
+        storage: {
+          local: {
+            set: async () => {
+              throw new Error("local font write failed");
+            },
+          },
+          sync: {
+            set: async () => {
+              syncWriteCalled = true;
+            },
+          },
+        },
+      };
+
+      await expect(SettingsUtils.setFontScalePercent(120)).rejects.toThrow(
+        "local font write failed"
+      );
+      expect(syncWriteCalled).toBe(false);
+    });
+
     test("writes merged settings to both sync and local storage", async () => {
       let syncPayload = null;
       let localPayload = null;
@@ -370,6 +437,17 @@ describe("SettingsUtils", () => {
 
       globalThis.browser = {
         storage: {
+          sync: {
+            get: async () => ({
+              settings: {
+                apiKey: "sk-changed-key",
+                theme: "dark",
+              },
+            }),
+          },
+          local: {
+            get: async () => ({}),
+          },
           onChanged: {
             addListener: (listener) => {
               registeredListener = listener;
@@ -381,10 +459,11 @@ describe("SettingsUtils", () => {
         },
       };
 
-      let receivedSettings = null;
-      const unsubscribe = SettingsUtils.onSettingsChanged((settings) => {
-        receivedSettings = settings;
+      let resolveSettings;
+      const receivedSettings = new Promise((resolve) => {
+        resolveSettings = resolve;
       });
+      const unsubscribe = SettingsUtils.onSettingsChanged(resolveSettings);
 
       expect(registeredListener).not.toBeNull();
 
@@ -398,10 +477,10 @@ describe("SettingsUtils", () => {
         },
       });
 
-      expect(receivedSettings).not.toBeNull();
-      expect(receivedSettings.apiKey).toBe("sk-changed-key");
-      expect(receivedSettings.theme).toBe("dark");
-      expect(receivedSettings.model).toBe(DEFAULT_SETTINGS.model);
+      const settings = await receivedSettings;
+      expect(settings.apiKey).toBe("sk-changed-key");
+      expect(settings.theme).toBe("dark");
+      expect(settings.model).toBe(DEFAULT_SETTINGS.model);
 
       unsubscribe();
       expect(removedListener).toBe(registeredListener);
@@ -444,6 +523,88 @@ describe("SettingsUtils", () => {
 
       const settings = await receivedSettings;
       expect(settings.model).toBe("refetched-model");
+      unsubscribe();
+    });
+
+    test("异步设置读取开始后取消订阅，读取完成也不会迟到回调", async () => {
+      let registeredListener = null;
+      let resolveSyncRead;
+      let markLocalRead;
+      const localReadCompleted = new Promise((resolve) => {
+        markLocalRead = resolve;
+      });
+      globalThis.browser = {
+        storage: {
+          sync: {
+            get: () =>
+              new Promise((resolve) => {
+                resolveSyncRead = resolve;
+              }),
+          },
+          local: {
+            get: async () => {
+              markLocalRead();
+              return {};
+            },
+          },
+          onChanged: {
+            addListener: (listener) => {
+              registeredListener = listener;
+            },
+            removeListener: () => {},
+          },
+        },
+      };
+
+      let callbackCount = 0;
+      const unsubscribe = SettingsUtils.onSettingsChanged(() => {
+        callbackCount += 1;
+      });
+      registeredListener({ settings: { newValue: { theme: "dark" } } });
+      unsubscribe();
+      resolveSyncRead({ settings: { theme: "dark" } });
+      await localReadCompleted;
+      await Promise.resolve();
+      expect(callbackCount).toBe(0);
+    });
+
+    test("先调字号再改主题时，整包 settings 事件不会把权威字号回灌为旧值", async () => {
+      let registeredListener = null;
+      globalThis.browser = {
+        storage: {
+          sync: {
+            get: async (key) =>
+              key === "settings"
+                ? { settings: { theme: "dark", fontScalePercent: 100 } }
+                : {},
+          },
+          local: {
+            get: async (key) =>
+              key === "fontScalePercent" ? { fontScalePercent: 130 } : {},
+          },
+          onChanged: {
+            addListener: (listener) => {
+              registeredListener = listener;
+            },
+            removeListener: () => {},
+          },
+        },
+      };
+
+      let resolveSettings;
+      const received = new Promise((resolve) => {
+        resolveSettings = resolve;
+      });
+      const unsubscribe = SettingsUtils.onSettingsChanged(resolveSettings);
+      registeredListener({
+        settings: {
+          newValue: { theme: "dark", fontScalePercent: 100 },
+        },
+      });
+
+      const settings = await received;
+      expect(settings.theme).toBe("dark");
+      expect(settings.fontScalePercent).toBe(130);
       unsubscribe();
     });
 

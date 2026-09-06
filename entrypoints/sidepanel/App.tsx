@@ -10,6 +10,8 @@ import {
   shouldAcceptRequestUpdate,
 } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import { FontScaleControl } from "@/entrypoints/shared/FontScaleControl";
+import { useFontScale } from "@/entrypoints/shared/useFontScale";
 import {
   applyTheme,
   normalizeThemeMode,
@@ -213,6 +215,11 @@ const QUICK_PROMPTS = [
 ];
 
 export default function SidePanelApp() {
+  const {
+    fontScalePercent,
+    performFontScaleAction,
+    fontScaleSaveStatus,
+  } = useFontScale();
   const [themeMode, setThemeMode] = useState<ThemeMode>(THEME_MODES.SYSTEM);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -2561,6 +2568,7 @@ export default function SidePanelApp() {
           <div className="view-switch-pills">
             <button
               type="button"
+              aria-label="切换到对话"
               className={`view-pill ${activeView === "chat" ? "active" : ""}`}
               onClick={() => setActiveView("chat")}
             >
@@ -2569,6 +2577,7 @@ export default function SidePanelApp() {
             </button>
             <button
               type="button"
+              aria-label="切换到生词本"
               className={`view-pill ${activeView === "vault" ? "active" : ""}`}
               onClick={() => setActiveView("vault")}
             >
@@ -2579,6 +2588,14 @@ export default function SidePanelApp() {
         </div>
 
         <div className="header-bar-right">
+          <FontScaleControl
+            compact
+            value={fontScalePercent}
+            saveStatus={fontScaleSaveStatus}
+            onDecrease={() => performFontScaleAction("decrease")}
+            onReset={() => performFontScaleAction("reset")}
+            onIncrease={() => performFontScaleAction("increase")}
+          />
           <button
             type="button"
             className="icon-btn new-chat-btn"
@@ -3260,7 +3277,8 @@ export default function SidePanelApp() {
                           borderRadius: 10,
                           border: "1px dashed var(--color-primary)",
                           background: "var(--color-primary-light)",
-                          fontSize: 12,
+                          fontSize:
+                            "calc(12px * var(--ht-font-scale, 1))",
                           color: "var(--color-text-secondary)",
                         }}
                       >
@@ -3281,7 +3299,8 @@ export default function SidePanelApp() {
                             border: "none",
                             borderRadius: 999,
                             padding: "5px 12px",
-                            fontSize: 12,
+                            fontSize:
+                              "calc(12px * var(--ht-font-scale, 1))",
                             fontWeight: 600,
                             whiteSpace: "nowrap",
                             cursor:

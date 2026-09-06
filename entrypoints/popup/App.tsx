@@ -9,6 +9,7 @@ import {
   shouldAcceptRequestUpdate,
 } from "@/entrypoints/shared/requestProtocol";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import { useFontScale } from "@/entrypoints/shared/useFontScale";
 import {
   applyTheme,
   normalizeThemeMode,
@@ -35,6 +36,7 @@ interface AppProps {
 }
 
 function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
+  const { fontScaleSaveStatus } = useFontScale();
   const activeRequestIdRef = useRef<string | undefined>(undefined);
   const [themeMode, setThemeMode] = useState<ThemeMode>(
     normalizeThemeMode(initialThemeMode)
@@ -657,6 +659,11 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
 
   return (
     <div className="container" onScroll={handleScroll}>
+      {fontScaleSaveStatus === "error" && (
+        <div className="font-scale-save-toast" role="status" aria-live="polite">
+          字体大小保存失败，重开后可能恢复旧值
+        </div>
+      )}
       {!showHistory ? (
         <TranslationArea
           translationState={translationState}
@@ -697,4 +704,3 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
 }
 
 export default App;
-

@@ -1,8 +1,10 @@
 import { defaults } from "lodash-es";
 import { DEFAULT_SETTINGS, LogLevel, ThemeMode } from "./constants";
 import { createLogger } from "./logger";
+import { normalizeFontScalePercent } from "./fontScale";
 
 const logger = createLogger("shared-settings-utils", "⚙️");
+const FONT_SCALE_STORAGE_KEY = "fontScalePercent";
 
 /**
  * 用户设置接口
@@ -18,6 +20,14 @@ export interface UserSettings {
   contextualSelectionEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
+  fontScalePercent: number;
+}
+
+function normalizeSettings(settings: UserSettings): UserSettings {
+  return {
+    ...settings,
+    fontScalePercent: normalizeFontScalePercent(settings.fontScalePercent),
+  };
 }
 
 /**
@@ -65,7 +75,7 @@ export class SettingsUtils {
             thinkingEnabled: mergedSettings.thinkingEnabled,
           });
 
-          return mergedSettings;
+          return this.withStoredFontScale(browserAPI, mergedSettings);
         }
       } catch (error) {
         logger.warn("同步设置读取失败，尝试本地设置", error);
@@ -77,7 +87,10 @@ export class SettingsUtils {
 
         if (localSettings && Object.keys(localSettings).length > 0) {
           logger.log("✅ [SettingsUtils] 本地设置获取成功");
-          return defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings;
+          return this.withStoredFontScale(
+            browserAPI,
+            defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings
+          );
         }
       } catch (error) {
         logger.warn("本地设置读取失败，尝试旧格式", error);
@@ -88,7 +101,7 @@ export class SettingsUtils {
     } catch (error) {
       logger.error("❌ [SettingsUtils] 获取设置失败:", error);
       // 返回默认设置
-      return { ...DEFAULT_SETTINGS };
+      return normalizeSettings({ ...DEFAULT_SETTINGS });
     }
   }
 
@@ -105,7 +118,10 @@ export class SettingsUtils {
 
       if (Object.keys(syncSettings).length > 0) {
         logger.success("从云端获取旧格式设置成功", syncSettings);
-        return defaults({}, syncSettings, DEFAULT_SETTINGS) as UserSettings;
+        return this.withStoredFontScale(
+          browserAPI,
+          defaults({}, syncSettings, DEFAULT_SETTINGS) as UserSettings
+        );
       }
     } catch (error) {
       logger.warn("云端旧格式设置读取失败", error);
@@ -117,15 +133,49 @@ export class SettingsUtils {
 
       if (Object.keys(localSettings).length > 0) {
         logger.success("从本地获取旧格式设置成功", localSettings);
-        return defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings;
+        return this.withStoredFontScale(
+          browserAPI,
+          defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings
+        );
       }
 
       logger.info("使用默认设置", DEFAULT_SETTINGS);
-      return { ...DEFAULT_SETTINGS };
+      return normalizeSettings({ ...DEFAULT_SETTINGS });
     } catch (error) {
       logger.error("本地旧格式设置读取失败:", error);
-      return { ...DEFAULT_SETTINGS };
+      return normalizeSettings({ ...DEFAULT_SETTINGS });
     }
+  }
+
+  /** 字号以本机 local 独立键为准，避免 sync 写失败后重开读回旧值。 */
+  private static async withStoredFontScale(
+    browserAPI: any,
+    settings: UserSettings
+  ): Promise<UserSettings> {
+    let storedValue: unknown;
+    try {
+      storedValue = (
+        await browserAPI.storage.local.get(FONT_SCALE_STORAGE_KEY)
+      )?.[FONT_SCALE_STORAGE_KEY];
+    } catch (error) {
+      logger.warn("读取本地字体大小失败，尝试同步存储", error);
+    }
+    if (storedValue === undefined) {
+      try {
+        storedValue = (
+          await browserAPI.storage.sync.get(FONT_SCALE_STORAGE_KEY)
+        )?.[FONT_SCALE_STORAGE_KEY];
+      } catch (error) {
+        logger.warn("读取同步字体大小失败，使用设置默认值", error);
+      }
+    }
+    return normalizeSettings({
+      ...settings,
+      fontScalePercent:
+        storedValue === undefined
+          ? settings.fontScalePercent
+          : normalizeFontScalePercent(storedValue),
+    });
   }
 
   /**
@@ -197,6 +247,9 @@ export class SettingsUtils {
         existing,
         DEFAULT_SETTINGS
       ) as UserSettings;
+      merged.fontScalePercent = normalizeFontScalePercent(
+        merged.fontScalePercent
+      );
 
       const [syncResult, localResult] = await Promise.allSettled([
         browserAPI.storage.sync.set({ settings: merged }),
@@ -216,6 +269,15 @@ export class SettingsUtils {
         logger.warn("本地设置保存失败，已保存在同步存储", localResult.reason);
       }
 
+      if (
+        Object.prototype.hasOwnProperty.call(
+          newSettings,
+          "fontScalePercent"
+        )
+      ) {
+        await this.setFontScalePercent(newSettings.fontScalePercent);
+      }
+
       logger.success("✅ [SettingsUtils] 设置已更新", {
         keys: Object.keys(newSettings),
       });
@@ -232,7 +294,29 @@ export class SettingsUtils {
     key: K,
     value: UserSettings[K]
   ): Promise<void> {
+    if (key === "fontScalePercent") {
+      return this.setFontScalePercent(value);
+    }
     return this.setSettings({ [key]: value } as Partial<UserSettings>);
+  }
+
+  /**
+   * 字号写入独立键，不重写整包设置；local 是当前设备的读取主源，
+   * 成功后再同步到 sync。sync 失败不会让本机重开回退，也不会覆盖其他字段。
+   */
+  static async setFontScalePercent(value: unknown): Promise<void> {
+    const browserAPI = this.getBrowserAPI();
+    const normalized = normalizeFontScalePercent(value);
+    await browserAPI.storage.local.set({
+      [FONT_SCALE_STORAGE_KEY]: normalized,
+    });
+    try {
+      await browserAPI.storage.sync.set({
+        [FONT_SCALE_STORAGE_KEY]: normalized,
+      });
+    } catch (error) {
+      logger.warn("字体大小已保存在本机，但同步存储写入失败", error);
+    }
   }
 
   /**
@@ -246,18 +330,15 @@ export class SettingsUtils {
     if (!onChanged?.addListener || !onChanged?.removeListener) {
       return () => {};
     }
+    let active = true;
 
     const listener = (changes: any) => {
-      if (changes.settings) {
+      if (changes.settings || changes[FONT_SCALE_STORAGE_KEY]) {
         logger.log("🔄 [SettingsUtils] 检测到设置变化");
-        const changedSettings = changes.settings.newValue;
-        if (changedSettings) {
-          callback(
-            defaults({}, changedSettings, DEFAULT_SETTINGS) as UserSettings
-          );
-        } else {
-          this.getSettings().then(callback);
-        }
+        // 整包 settings 事件中可能仍带旧字号；始终合并独立权威字号键。
+        void this.getSettings().then((settings) => {
+          if (active) callback(settings);
+        });
       }
     };
 
@@ -265,6 +346,7 @@ export class SettingsUtils {
 
     // 返回取消监听的函数
     return () => {
+      active = false;
       onChanged.removeListener(listener);
     };
   }

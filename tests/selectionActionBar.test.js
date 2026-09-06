@@ -446,6 +446,8 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
     expect(container?.style.display).toBe("inline-flex");
     expect(container?.getAttribute("role")).toBe("toolbar");
     expect(container?.getAttribute("data-translator-element")).toBe("true");
+    expect(container?.tabIndex).toBe(-1);
+    expect(container?.style["--ht-font-scale"]).toBe("1");
 
     bar.hide();
     expect(bar.getIsVisible()).toBe(false);

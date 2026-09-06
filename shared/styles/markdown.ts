@@ -126,7 +126,7 @@ export const MARKDOWN_STYLES = /*css*/ `
     overflow-x: auto;
     font-family: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
       "Courier New", monospace;
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
     line-height: 1.5;
     color: #2d3748;
     background: transparent;

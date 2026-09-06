@@ -26,6 +26,11 @@
 @border-radius-sm: 6px;
 @transition-speed: 0.3s;
 
+:root {
+  --ht-font-scale: 1;
+  font-size: calc(16px * var(--ht-font-scale));
+}
+
 // --- Mixins ---
 .transition(@property: all, @duration: @transition-speed, @ease: ease) {
   transition: @property @duration @ease;
@@ -118,6 +123,12 @@ body {
 
   .save-success { color: @success-color; }
   .save-error { color: @error-color; }
+
+  .font-scale-control button {
+    background: #111827;
+    color: #e5e7eb;
+    border-color: #374151;
+  }
 }
 
 // --- Layout ---
@@ -128,6 +139,52 @@ body {
   background: @background-color;
   height: 100vh;
   border-radius: 0;
+}
+
+.font-scale-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
+
+  button {
+    min-width: 46px;
+    min-height: 38px;
+    padding: 7px 12px;
+    border: 1px solid @border-color;
+    border-radius: @border-radius-sm;
+    background: @card-background;
+    color: @text-color;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      border-color: @primary-color;
+      color: @primary-color;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+  }
+
+  .font-scale-value {
+    min-width: 70px;
+  }
+
+  .font-scale-status {
+    margin-left: 4px;
+    color: @text-color-light;
+    font-size: calc(12px * var(--ht-font-scale, 1));
+
+    &.error {
+      color: @error-color;
+    }
+  }
 }
 
 .options-header {
@@ -142,7 +199,7 @@ body {
 
   h1 {
     margin: 0 0 10px;
-    font-size: 28px;
+    font-size: calc(28px * var(--ht-font-scale, 1));
     font-weight: 600;
     color: @primary-color;
   }
@@ -150,7 +207,7 @@ body {
   p {
     margin: 0;
     color: @text-color-light;
-    font-size: 16px;
+    font-size: calc(16px * var(--ht-font-scale, 1));
   }
 }
 
@@ -184,7 +241,7 @@ body {
 
   h2 {
     margin: 0 0 25px;
-    font-size: 20px;
+    font-size: calc(20px * var(--ht-font-scale, 1));
     font-weight: 600;
     color: @text-color;
     display: flex;
@@ -225,7 +282,7 @@ body {
     padding: 12px 16px;
     border: 2px solid @border-color;
     border-radius: @border-radius;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
     .transition(border-color);
     box-sizing: border-box;
     font-family: inherit;
@@ -270,7 +327,7 @@ body {
 
   .setting-hint {
     margin-top: 8px;
-    font-size: 13px;
+    font-size: calc(13px * var(--ht-font-scale, 1));
     color: @text-color-light;
     line-height: 1.4;
     .model-hint-container {
@@ -307,7 +364,7 @@ body {
   border-radius: @border-radius;
   padding: 12px 16px;
   font-family: @font-family-mono;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   margin-right: 16px;
   min-width: 120px;
   text-align: center;
@@ -343,7 +400,7 @@ body {
   border: none;
   border-radius: @border-radius;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 500;
   .transition();
 }
@@ -449,7 +506,7 @@ body {
   gap: 8px 18px;
   margin-top: 10px;
   color: @text-color-light;
-  font-size: 13px;
+  font-size: calc(13px * var(--ht-font-scale, 1));
 }
 
 .diagnostic-actions {
@@ -470,7 +527,7 @@ body {
   border-radius: @border-radius-sm;
   cursor: pointer;
   font: inherit;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 600;
   .transition();
 
@@ -510,7 +567,7 @@ body {
 .diagnostic-message {
   margin-top: 14px;
   color: @text-color;
-  font-size: 13px;
+  font-size: calc(13px * var(--ht-font-scale, 1));
   font-weight: 500;
 }
 
@@ -520,7 +577,7 @@ body {
 
 .backup-message {
   margin-top: 14px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ht-font-scale, 1));
   font-weight: 500;
   line-height: 1.6;
   word-break: break-word;
@@ -599,7 +656,7 @@ body {
 .save-success,
 .save-error,
 .test-status {
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 500;
 }
 
@@ -631,7 +688,7 @@ body {
   .options-header {
     padding: 20px;
     h1 {
-      font-size: 24px;
+      font-size: calc(24px * var(--ht-font-scale, 1));
     }
   }
 
@@ -728,7 +785,7 @@ body {
   border: 1px solid @border-color;
   border-radius: @border-radius-sm;
   background-color: @white;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   color: @text-color;
   cursor: pointer;
   .transition(border-color, 0.2s, ease);

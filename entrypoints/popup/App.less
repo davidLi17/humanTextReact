@@ -33,7 +33,7 @@
   padding: 16px 24px;
   border-radius: @radius-medium;
   cursor: pointer;
-  font-size: 16px;
+  font-size: calc(16px * var(--ht-font-scale, 1));
   font-weight: 600;
   transition: all @transition-duration ease;
   box-shadow: @shadow-light;
@@ -89,7 +89,7 @@
   color: @primary-color-start;
   cursor: pointer;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 600;
   border-radius: @radius-small;
   transition: all 0.2s ease;
@@ -177,7 +177,7 @@ body {
 // Headers
 h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: calc(20px * var(--ht-font-scale, 1));
   font-weight: 700;
   .gradient-text();
   letter-spacing: -0.5px;
@@ -246,7 +246,7 @@ h1 {
   background: transparent;
   color: @text-color-dark;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   text-align: left;
 
   &:hover {
@@ -305,7 +305,7 @@ h1 {
     border: none;
     border-radius: 10px;
     resize: vertical;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
     line-height: 1.5;
     box-sizing: border-box;
     background: transparent;
@@ -320,7 +320,7 @@ h1 {
     
     &::placeholder {
       color: @text-color-placeholder;
-      font-size: 14px;
+      font-size: calc(14px * var(--ht-font-scale, 1));
     }
   }
 }
@@ -332,7 +332,7 @@ h1 {
   border: 1px solid @border-color;
   border-radius: @radius-small;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 500;
   color: @primary-color-start;
   cursor: pointer;
@@ -374,7 +374,7 @@ h1 {
   color: @primary-color-start;
   border-radius: @radius-medium;
   cursor: pointer;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 600;
   padding: 12px 18px;
   transition: all 0.2s ease;
@@ -419,7 +419,7 @@ h1 {
   align-items: center;
   margin-bottom: 16px;
   color: #4a5568;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 600;
 }
 .icon-btn {
@@ -428,7 +428,7 @@ h1 {
 .result-content {
   color: @text-color-dark;
   line-height: 1.6;
-  font-size: 15px;
+  font-size: calc(15px * var(--ht-font-scale, 1));
   overflow-wrap: break-word;
   
   p { margin: 0.8em 0; }
@@ -454,7 +454,7 @@ h1 {
       background: none;
       color: @text-color-dark;
       padding: 0;
-      font-size: 13px;
+      font-size: calc(13px * var(--ht-font-scale, 1));
     }
   }
   blockquote {
@@ -511,7 +511,7 @@ h1 {
   border-radius: 999px;
   background: rgba(16, 185, 129, 0.12);
   color: #047857;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 600;
 }
 
@@ -519,7 +519,7 @@ h1 {
   display: block;
   margin: 14px 0 0 auto;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
 }
 
 /* 主题：暗色模式覆盖（基于 data-theme） */
@@ -671,7 +671,7 @@ h1 {
   }
 }
 .result-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   color: @primary-color-start;
   margin-bottom: 12px;
   font-weight: 700;
@@ -681,7 +681,7 @@ h1 {
 .result-section-reasoning .result-content {
   color: #4a5568;
   line-height: 1.6;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
   padding: 16px;
   border-radius: @radius-small;
@@ -694,7 +694,7 @@ h1 {
   color: @primary-color-start;
   cursor: pointer;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 600;
   border-radius: @radius-small;
   transition: all 0.2s ease;
@@ -717,7 +717,7 @@ h1 {
   background: linear-gradient(135deg, #fed7d7 0%, #feb2b2 100%);
   border-radius: @radius-medium;
   text-align: center;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 500;
   display: flex;
   align-items: center;
@@ -763,12 +763,12 @@ h1 {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 16px;
+    font-size: calc(16px * var(--ht-font-scale, 1));
     margin-right: 12px;
     
     h2 {
       margin: 0;
-      font-size: 16px;
+      font-size: calc(16px * var(--ht-font-scale, 1));
       font-weight: 700;
       color: @text-color-dark;
     }
@@ -836,7 +836,7 @@ h1 {
   padding: 10px 16px;
   border: 1px solid @border-color;
   border-radius: 20px;
-  font-size: 13px;
+  font-size: calc(13px * var(--ht-font-scale, 1));
   width: 100%;
   background: rgba(255, 255, 255, 0.8);
   transition: all 0.2s;
@@ -867,7 +867,7 @@ h1 {
   cursor: pointer;
   border: none;
   background: transparent;
-  font-size: 11px;
+  font-size: calc(11px * var(--ht-font-scale, 1));
   transition: color 0.2s;
   
   &:hover {
@@ -912,10 +912,10 @@ h1 {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
   }
   &-time {
-    font-size: 11px;
+    font-size: calc(11px * var(--ht-font-scale, 1));
     color: #999;
   }
 }
@@ -937,7 +937,7 @@ h1 {
     border: 1px solid rgba(0, 0, 0, 0.1);
     cursor: pointer;
     padding: 5px 8px;
-    font-size: 11px;
+    font-size: calc(11px * var(--ht-font-scale, 1));
     line-height: 1.2;
     white-space: nowrap;
     border-radius: 6px;
@@ -999,7 +999,7 @@ h1 {
     color: @primary-color-start;
     padding: 4px 10px;
     border-radius: @radius-medium;
-    font-size: 10px;
+    font-size: calc(10px * var(--ht-font-scale, 1));
     font-weight: 600;
     border: 1px solid rgba(@primary-color-start, 0.2);
   }
@@ -1008,7 +1008,7 @@ h1 {
   text-align: center;
   color: @text-color-placeholder;
   padding: 40px 20px;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 500;
   display: flex;
   flex-direction: column;
@@ -1022,6 +1022,23 @@ h1 {
     opacity: 0.7;
     filter: grayscale(0.3);
   }
+}
+
+.font-scale-save-toast {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 100;
+  max-width: calc(100% - 32px);
+  padding: 7px 10px;
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #b91c1c;
+  font-size: calc(12px * var(--ht-font-scale, 1));
+  line-height: 1.4;
+  text-align: center;
+  transform: translateX(-50%);
 }
 .empty-state-container {
   display: flex;
@@ -1039,7 +1056,7 @@ h1 {
 .history-limit-hint {
   text-align: center;
   color: @text-color-placeholder;
-  font-size: 11px;
+  font-size: calc(11px * var(--ht-font-scale, 1));
   padding: 16px 0 20px;
   margin-top: 16px;
   border-top: 1px dashed @border-color;
@@ -1048,7 +1065,7 @@ h1 {
 .history-match-hint {
   text-align: center;
   color: @text-color-placeholder;
-  font-size: 11px;
+  font-size: calc(11px * var(--ht-font-scale, 1));
   padding: 4px 0 12px;
   font-weight: 500;
 }
@@ -1058,7 +1075,7 @@ h1 {
   align-items: center;
   padding: 80px 20px;
   color: @primary-color-start;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 500;
   
   &::after {
@@ -1112,13 +1129,13 @@ h1 {
 }
 
 .error-card-title {
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   font-weight: 700;
   margin-bottom: 6px;
 }
 
 .error-card-message {
-  font-size: 13px;
+  font-size: calc(13px * var(--ht-font-scale, 1));
   line-height: 1.5;
   word-break: break-word;
 }
@@ -1203,13 +1220,13 @@ h1 {
   border-left: 4px solid #f59e0b;
   box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.05);
   line-height: 1.6;
-  font-size: 14px;
+  font-size: calc(14px * var(--ht-font-scale, 1));
   color: #92400e;
   margin-bottom: 8px;
 }
 
 .expand-indicator {
-  font-size: 11px;
+  font-size: calc(11px * var(--ht-font-scale, 1));
   color: #718096;
   font-weight: normal;
   text-transform: none;
@@ -1223,7 +1240,7 @@ h1 {
   color: @primary-color-start;
   cursor: pointer;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 600;
   border-radius: @radius-small;
   transition: all 0.2s ease;
@@ -1240,7 +1257,7 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   color: #718096;
   margin-top: 8px;
   gap: 4px;
@@ -1275,7 +1292,7 @@ h1 {
   color: #6b7280;
   cursor: pointer;
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--ht-font-scale, 1));
   font-weight: 600;
   border-radius: @radius-small;
   transition: all 0.2s ease;
@@ -1316,13 +1333,13 @@ h1 {
   margin-bottom: 4px;
   
   span:first-child {
-    font-size: 14px;
+    font-size: calc(14px * var(--ht-font-scale, 1));
     font-weight: 600;
     color: #0284c7;
   }
   
   .image-hint {
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     color: #64748b;
   }
 }
@@ -1359,7 +1376,7 @@ h1 {
     color: white;
     border: none;
     cursor: pointer;
-    font-size: 12px;
+    font-size: calc(12px * var(--ht-font-scale, 1));
     line-height: 1;
     display: flex;
     align-items: center;
@@ -1372,4 +1389,3 @@ h1 {
     }
   }
 }
-

@@ -19,6 +19,8 @@ import type {
   DiagnosticSessionState,
 } from "@/entrypoints/shared/logger/types";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import { FontScaleControl } from "@/entrypoints/shared/FontScaleControl";
+import { useFontScale } from "@/entrypoints/shared/useFontScale";
 import {
   buildBackup,
   createBackupFileName,
@@ -51,9 +53,15 @@ interface Settings {
   contextualSelectionEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
+  fontScalePercent: number;
 }
 
 function Options() {
+  const {
+    fontScalePercent,
+    performFontScaleAction,
+    fontScaleSaveStatus,
+  } = useFontScale();
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
 
   const [showApiKey, setShowApiKey] = useState(false);
@@ -138,6 +146,14 @@ function Options() {
     return cleanup;
   }, [settings.theme]);
 
+  useEffect(() => {
+    setSettings((previous) =>
+      previous.fontScalePercent === fontScalePercent
+        ? previous
+        : { ...previous, fontScalePercent }
+    );
+  }, [fontScalePercent]);
+
   const applyTheme = (mode: ThemeMode) => {
     const root = document.documentElement;
     const media =
@@ -195,7 +211,9 @@ function Options() {
 
     try {
       // 使用 SettingsUtils 统一保存
-      await SettingsUtils.setSettings(settings as any);
+      const settingsWithoutFontScale = { ...settings } as Partial<Settings>;
+      delete settingsWithoutFontScale.fontScalePercent;
+      await SettingsUtils.setSettings(settingsWithoutFontScale);
 
       // 重新初始化日志系统以应用新的日志级别
       await initializeLogger("options");
@@ -506,6 +524,7 @@ function Options() {
   const handleReset = () => {
     if (confirm("确定要重置所有设置为默认值吗？")) {
       setSettings(DEFAULT_SETTINGS);
+      performFontScaleAction("reset");
     }
   };
 
@@ -759,6 +778,20 @@ function Options() {
               默认关闭。开启后，划词时会提取选区所在的有限段落（最多约 2000
               字），并在你确认发送时交给已配置的 AI 服务。页面标题和 URL
               仅用于本地来源预览。
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label>扩展字体大小</label>
+            <FontScaleControl
+              value={fontScalePercent}
+              saveStatus={fontScaleSaveStatus}
+              onDecrease={() => performFontScaleAction("decrease")}
+              onReset={() => performFontScaleAction("reset")}
+              onIncrease={() => performFontScaleAction("increase")}
+            />
+            <div className="setting-hint">
+              同步调整侧边栏、Popup、设置页和网页内扩展浮窗文字；也可使用 Command/Ctrl + 加号、减号或 0。
             </div>
           </div>
 
