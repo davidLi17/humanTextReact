@@ -3,36 +3,39 @@
  * 负责处理与外部 API 的交互
  */
 
+import { CodedError, createApiError } from "@/entrypoints/shared/errors";
+
 // 定义错误处理策略接口
 interface ErrorStrategy {
   match: (status: number) => boolean;
-  handle: (errorText: string) => never;
+  handle: (status: number, bodyText: string) => never;
 }
 
-// 各种状态码的处理策略
+// 各种状态码的处理策略：统一交给共享错误模型解析为 CodedError，
+// 状态码对应的中文文案与错误码映射由 shared/errors 的 describeApiStatus 维护（文案保持不变）
 const errorStrategies: ErrorStrategy[] = [
   {
     match: (status) => status === 401,
-    handle: () => {
-      throw new Error("API Key无效或已过期");
+    handle: (status, bodyText) => {
+      throw createApiError(status, bodyText);
     },
   },
   {
     match: (status) => status === 404,
-    handle: () => {
-      throw new Error("API地址或模型不存在");
+    handle: (status, bodyText) => {
+      throw createApiError(status, bodyText);
     },
   },
   {
     match: (status) => status === 429,
-    handle: () => {
-      throw new Error("请求频率过高，请稍后重试");
+    handle: (status, bodyText) => {
+      throw createApiError(status, bodyText);
     },
   },
   {
     match: (_status) => true, // 默认策略，建议放最后
-    handle: (errorText: string) => {
-      throw new Error(`API请求失败: ${errorText}`);
+    handle: (status, bodyText) => {
+      throw createApiError(status, bodyText);
     },
   },
 ];
@@ -47,7 +50,7 @@ export class ApiService {
     model: string
   ): Promise<boolean> {
     if (!apiKey) {
-      throw new Error("API Key不能为空");
+      throw new CodedError("API Key不能为空", "AUTH");
     }
 
     try {
@@ -72,21 +75,26 @@ export class ApiService {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
+        // 响应体尚未被消费，可安全读取，用于透出服务商返回的具体原因
+        const errorBodyText = await response.text().catch(() => "");
         // 使用策略模式处理错误
         const strategy = errorStrategies.find((s) => s.match(response.status));
         if (strategy) {
-          strategy.handle(`${response.status} ${errorText}`);
+          strategy.handle(response.status, errorBodyText);
         }
       }
 
       return true;
     } catch (error: any) {
+      // 策略表抛出的 CodedError 直接透传，避免被下方字符串判断误归类
+      if (error instanceof CodedError) {
+        throw error;
+      }
       if (error.name === "AbortError") {
-        throw new Error("请求超时");
+        throw new CodedError("请求超时", "ABORT");
       }
       if (error.message?.includes("Failed to fetch")) {
-        throw new Error("网络连接失败，请检查API地址");
+        throw new CodedError("网络连接失败，请检查API地址", "NETWORK");
       }
       throw error;
     }

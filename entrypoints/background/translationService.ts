@@ -3,6 +3,10 @@ import {
   MESSAGE_TYPES,
   THINKING_CONFIG,
 } from "@/entrypoints/shared/constants";
+import {
+  createApiError,
+  resolveUserErrorMessage,
+} from "@/entrypoints/shared/errors";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { HistoryManager } from "./historyManager";
@@ -217,7 +221,10 @@ export class TranslationService {
       });
 
       if (!response.ok) {
-        throw new Error(`API 请求失败: ${response.status}`);
+        // 走到这里时响应体尚未被流式读取消费，可安全读取；
+        // 用服务商返回的具体原因（如"余额不足""模型无权限"）构造带错误码的错误
+        const errorBodyText = await response.text().catch(() => "");
+        throw createApiError(response.status, errorBodyText, "API 请求失败");
       }
       if (!response.body) {
         throw new Error("API 响应为空，请检查接口兼容性");
@@ -355,27 +362,13 @@ export class TranslationService {
     return chunk;
   }
 
-  private static normalizeErrorMessage(error: any): string {
-    const rawMessage = error?.message || "翻译失败，请稍后重试";
-
-    if (rawMessage.includes("API Key")) return rawMessage;
-    if (rawMessage.includes("Failed to fetch")) {
-      return "网络连接失败，请检查 API 地址或网络代理";
-    }
-    if (rawMessage.includes("API 请求失败: 401")) {
-      return "API Key 无效或已过期，请到设置里更新";
-    }
-    if (rawMessage.includes("API 请求失败: 404")) {
-      return "API 地址或模型不存在，请检查设置";
-    }
-    if (
-      rawMessage.includes("API 请求失败: 429") ||
-      rawMessage.includes("rate limit")
-    ) {
-      return "请求频率过高，请稍后重试";
-    }
-
-    return rawMessage;
+  /**
+   * 归一化错误文案：优先按 CodedError.code 映射友好提示，
+   * 服务商返回的具体原因以"（服务商返回：…）"补充；
+   * 非 CodedError 的旧式错误保留字符串兜底判断（见 shared/errors）。
+   */
+  private static normalizeErrorMessage(error: unknown): string {
+    return resolveUserErrorMessage(error);
   }
 
   private static async sendTranslationError(
