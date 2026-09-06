@@ -45,6 +45,121 @@ export const WEB_READING_SYSTEM_PROMPT = `你是一个顶级的内容提炼专�
 export const MAX_PAGE_CONTENT_CHARS = 16000;
 
 /**
+ * 提取结果视为“有效长文”的最小正文字符数，低于该值视为提取失败
+ */
+export const MIN_PAGE_CONTENT_CHARS = 15;
+
+/**
+ * 页面正文提取消息的超时时间（毫秒），防止 UI 永久停留在“正在提取”状态
+ */
+export const WEB_READING_EXTRACT_TIMEOUT_MS = 10000;
+
+/**
+ * 提取超时的哨兵错误标记（sidepanel 内部用于区分“消息无响应超时”与其他失败）
+ */
+export const WEB_READING_EXTRACT_TIMEOUT_MARKER = "web-reading-extract-timeout";
+
+/**
+ * 网页内容获取失败类型（用于在聊天视图给出明确的三要素提示：
+ * 发生了什么 / 可能原因 / 用户该怎么办）
+ */
+export type WebReadFailureKind =
+  | "no-active-tab" // 拿不到活动标签页
+  | "restricted-page" // 浏览器受限页（chrome:// 等）
+  | "empty-content" // 提取成功但正文为空或过短
+  | "extract-timeout" // 提取消息无响应/超时
+  | "script-blocked" // content script 未注入且动态注入被拦截
+  | "unknown"; // 其他未知失败
+
+const WEB_READ_FAILURE_GUIDANCE: Record<
+  WebReadFailureKind,
+  (detail?: string) => string
+> = {
+  "no-active-tab": () =>
+    "未能获取网页内容：没有找到可读取的活动标签页。可能原因：当前浏览器窗口没有已打开的网页。建议：先切换或打开一个普通网页，再重新点击「通读当前网页」。",
+  "restricted-page": () =>
+    "未能获取网页内容：当前是浏览器内置页面（如 chrome:// 设置页、新标签页、扩展商店等），扩展无权读取其内容。可能原因：浏览器出于安全限制禁止扩展访问这类页面，并非功能故障。建议：切换到普通文章页面后，再点击「通读当前网页」。",
+  "empty-content": () =>
+    "未能获取网页内容：页面已打开，但只提取到极少的正文，不足以通读。可能原因：页面尚未加载完成、正文需要登录后才能查看，或该站点（在线文档、PDF 阅读器、强反爬站点等）拦截了内容读取。建议：等待页面加载完成后刷新页面重试；需要登录的页面请先登录；仍失败可换一篇普通文章页测试。",
+  "extract-timeout": () =>
+    "未能获取网页内容：向页面请求正文时长时间无响应（已超时）。可能原因：页面卡死或仍在加载中、页面脚本繁忙未能响应扩展消息。建议：刷新页面后重试；若反复出现，请到 chrome://extensions 点击本扩展的「重新加载」后再试。",
+  "script-blocked": () =>
+    "未能获取网页内容：扩展无法在该页面注入或运行提取脚本。可能原因：该站点禁止扩展注入脚本（如 Chrome 应用商店、浏览器内置 PDF 查看器），或扩展缺少对该站点的访问权限。建议：换一个普通文章页重试；若确需支持当前站点，请到 chrome://extensions 打开本扩展详情，将「站点访问权限」设为「在所有网站上」。",
+  "unknown": (detail) =>
+    `未能获取网页内容：提取过程中出现未知错误${detail ? `（${detail}）` : ""}。可能原因：页面尚未加载完成、站点限制读取，或扩展状态异常。建议：刷新页面后重试，或换一个普通文章页；若反复出现，请到 chrome://extensions 重新加载本扩展。`,
+};
+
+/**
+ * 按失败类型生成“发生了什么 + 可能原因 + 该怎么办”的中文提示
+ */
+export function describeWebReadFailure(
+  kind: WebReadFailureKind,
+  detail?: string
+): string {
+  const builder =
+    WEB_READ_FAILURE_GUIDANCE[kind] || WEB_READ_FAILURE_GUIDANCE.unknown;
+  return builder(detail);
+}
+
+/**
+ * 将底层提取链路返回的错误文案归类为失败类型（无法改动上游文件时的兜底识别）
+ */
+export function classifyWebReadExtractError(
+  error?: string
+): WebReadFailureKind {
+  if (!error) return "unknown";
+  if (error.includes("活动标签页")) return "no-active-tab";
+  if (
+    error.includes("浏览器内置系统页面") ||
+    error.includes("chrome://") ||
+    error.includes("edge://") ||
+    error.includes("about:")
+  ) {
+    return "restricted-page";
+  }
+  if (
+    error.includes("脚本被拦截") ||
+    error.includes("无法提取该网页正文") ||
+    error.includes("注入") ||
+    /cannot access contents|cannot access a /i.test(error)
+  ) {
+    return "script-blocked";
+  }
+  return "unknown";
+}
+
+/**
+ * 按单段最大字符数计算长文的总段数（约数）
+ */
+export function getWebReadingSegmentCount(totalChars: number): number {
+  if (!Number.isFinite(totalChars) || totalChars <= 0) return 1;
+  return Math.ceil(totalChars / MAX_PAGE_CONTENT_CHARS);
+}
+
+/**
+ * 构建“继续解读剩余部分”的续读 User Prompt（同一会话上下文内顺序解读，不做分块汇总）
+ */
+export function buildWebReadingContinuationPrompt(params: {
+  title: string;
+  segmentContent: string;
+  /** 当前段序号（从 1 开始） */
+  segmentIndex: number;
+  /** 总段数（约数） */
+  totalSegments: number;
+}): string {
+  const title = (params.title || "未知网页标题").trim();
+  return `【网页标题】: ${title}
+【续读进度】: 第 ${params.segmentIndex} 段 / 共约 ${params.totalSegments} 段（每段约 ${MAX_PAGE_CONTENT_CHARS} 字符）
+
+【本段正文内容】：
+\`\`\`text
+${params.segmentContent}
+\`\`\`
+
+这是此前已经开始通读的网页《${title}》的后续部分。请继续按照系统提示词的四个板块（💡 一句话大白话总览、📖 核心黑话/专业术语速查表、🎯 要点与行动项提炼、💬 深度追问指引），用通俗易懂的人话解读本段内容，并注意与前文已输出的速读报告保持连贯；若这是最后一段，请在结尾补充一句对全文的整体收束。`;
+}
+
+/**
  * 构建长文人话通读的 User Prompt
  */
 export function buildWebReadingUserPrompt(page: WebPageMetadata): string {
