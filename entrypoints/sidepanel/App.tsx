@@ -16,6 +16,7 @@ import {
   watchSystemTheme,
 } from "@/entrypoints/shared/theme";
 import {
+  buildHistoryPayload,
   ChatMessage,
   ChatSession,
 } from "@/entrypoints/shared/chatTypes";
@@ -36,6 +37,24 @@ import {
   webReadFailureKindFromStage,
   WebReadExtractStage,
 } from "@/entrypoints/shared/webReadingPrompt";
+import {
+  beginWebReadingSegment,
+  buildReplayableWebReadingPrompt,
+  buildWebReadingHistoryPayload,
+  cancelWebReadingProgressByRequest,
+  createInitialWebReadingProgress,
+  createWebReadingPageMeta,
+  getActiveSidepanelRequestOwner,
+  invalidateActiveSidepanelRequest,
+  isSuccessfulWebReadingResponse,
+  isWebReadingContinueReady,
+  rewindWebReadingProgressForReplay,
+  settleWebReadingSegment,
+  shouldShowWebReadingContinue,
+  type ActiveSidepanelRequest,
+  type WebReadingProgressState,
+  type WebReadingResponse,
+} from "@/entrypoints/shared/webReadingState";
 import {
   ExtractActiveTabResult,
   extractActiveTabContent,
@@ -123,23 +142,6 @@ const QUICK_PROMPTS = [
   "指出这段描述中有哪些容易踩坑或含糊不清的地方",
 ];
 
-/**
- * 长文分段续读的进度状态（仅存内存，按会话 ID 隔离，属最轻实现：
- * 不做 map-reduce 汇总、不引入后台任务队列；侧边栏关闭后自然丢弃）
- */
-interface WebReadingProgressState {
-  title: string;
-  url: string;
-  fullContent: string;
-  totalSegments: number;
-  /** 下一个待解读段（从 1 开始计） */
-  segmentIndex: number;
-  /** 下一段在 fullContent 中的起始下标 */
-  nextStart: number;
-  /** 最近一次通读回复的消息 ID，用于把续读按钮挂在正确的 AI 回复下方 */
-  lastAssistantMessageId: string;
-}
-
 export default function SidePanelApp() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(THEME_MODES.SYSTEM);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -192,6 +194,9 @@ export default function SidePanelApp() {
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<string | undefined>(undefined);
+  const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
+    undefined
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -212,6 +217,88 @@ export default function SidePanelApp() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const registerActiveRequest = (owner: ActiveSidepanelRequest) => {
+    activeRequestIdRef.current = owner.requestId;
+    activeRequestOwnerRef.current = owner;
+  };
+
+  const clearActiveRequest = (requestId: string): boolean => {
+    const transition = invalidateActiveSidepanelRequest(
+      {
+        activeRequestId: activeRequestIdRef.current,
+        owner: activeRequestOwnerRef.current,
+      },
+      requestId
+    );
+    if (!transition.invalidated) return false;
+    activeRequestIdRef.current = transition.activeRequestId;
+    activeRequestOwnerRef.current = transition.owner;
+    return transition.invalidated;
+  };
+
+  const settleSessionWebReadingProgress = (
+    sessionId: string,
+    requestId: string,
+    response?: WebReadingResponse
+  ) => {
+    setWebReadingProgressMap((prev) => {
+      const current = prev.get(sessionId);
+      if (!current) return prev;
+      const settled = settleWebReadingSegment(current, requestId, response);
+      if (settled === current) return prev;
+      const next = new Map(prev);
+      if (settled) next.set(sessionId, settled);
+      else next.delete(sessionId);
+      return next;
+    });
+  };
+
+  const rewindSessionWebReadingProgress = (
+    sessionId: string,
+    message: ChatMessage,
+    requestId: string,
+    assistantMessageId: string
+  ) => {
+    const meta = message.pageMeta;
+    if (!meta?.isWebPageReading) return;
+    setWebReadingProgressMap((prev) => {
+      const current = prev.get(sessionId);
+      if (!current) return prev;
+      const rewound = rewindWebReadingProgressForReplay(current, {
+        title: meta.title,
+        url: meta.url,
+        segmentIndex: meta.segmentIndex || 1,
+        requestId,
+        assistantMessageId,
+      });
+      if (rewound === current) return prev;
+      const next = new Map(prev);
+      next.set(sessionId, rewound);
+      return next;
+    });
+  };
+
+  const markAssistantMessageAsError = (
+    sessionId: string,
+    assistantMessageId: string,
+    errorMessage: string,
+    requestId: string
+  ) => {
+    if (!clearActiveRequest(requestId)) return;
+    setIsStreaming(false);
+    setSessions((prev) =>
+      prev.map((session) => {
+        if (session.id !== sessionId) return session;
+        const messages = session.messages.map((message) =>
+          message.id === assistantMessageId && message.role === "assistant"
+            ? { ...message, status: "error" as const, errorMessage }
+            : message
+        );
+        return { ...session, messages, updatedAt: Date.now() };
+      })
+    );
   };
 
   // 初始化代码复制与日志
@@ -458,8 +545,13 @@ export default function SidePanelApp() {
         });
 
         if (done) {
-          setIsStreaming(false);
-          activeRequestIdRef.current = undefined;
+          const completedRequestId = requestId || activeRequestIdRef.current;
+          if (
+            completedRequestId &&
+            clearActiveRequest(completedRequestId)
+          ) {
+            setIsStreaming(false);
+          }
         }
       }
     };
@@ -642,6 +734,15 @@ export default function SidePanelApp() {
   const handleReadCurrentPage = async () => {
     if (isStreaming || isExtractingPage) return;
 
+    let activeWebRequest:
+      | {
+          sessionId: string;
+          requestId: string;
+          assistantMessageId: string;
+          hasProgress: boolean;
+        }
+      | undefined;
+
     setActiveView("chat");
     setExtractError(null);
     setIsExtractingPage(true);
@@ -736,19 +837,28 @@ export default function SidePanelApp() {
       const userMessageId = createRequestId();
       const assistantMessageId = createRequestId();
       const currentRequestId = createRequestId();
-      activeRequestIdRef.current = currentRequestId;
+      const totalSegments = getWebReadingSegmentCount(pageData.content.length);
+      registerActiveRequest({
+        requestId: currentRequestId,
+        sessionId: targetSession.id,
+        assistantMessageId,
+      });
+      activeWebRequest = {
+        sessionId: targetSession.id,
+        requestId: currentRequestId,
+        assistantMessageId,
+        hasProgress: totalSegments > 1,
+      };
 
       // 组装代表“通读网页”的用户消息卡片
       const userMessage: ChatMessage = {
         id: userMessageId,
         role: "user",
         content: `通读网页: 《${pageData.title}》`,
-        pageMeta: {
-          title: pageData.title,
-          url: pageData.url,
-          wordCount: pageData.wordCount,
-          isWebPageReading: true,
-        },
+        pageMeta: createWebReadingPageMeta(pageData, {
+          segmentIndex: 1,
+          totalSegments,
+        }),
         createdAt: Date.now(),
         status: "completed",
       };
@@ -779,18 +889,14 @@ export default function SidePanelApp() {
       setSessions(nextSessions);
       void saveSessionsToStorage(nextSessions);
 
-      // 长文被截断时记录分段进度，供 AI 回复下方的“继续解读剩余部分”按钮使用
-      const totalSegments = getWebReadingSegmentCount(pageData.content.length);
+      // 首段先登记为 pending；只有业务成功且结果非空后，才开放第二段续读。
       if (totalSegments > 1) {
-        const progressState: WebReadingProgressState = {
-          title: pageData.title,
-          url: pageData.url,
-          fullContent: pageData.content,
+        const progressState = createInitialWebReadingProgress({
+          page: pageData,
           totalSegments,
-          segmentIndex: 2,
-          nextStart: MAX_PAGE_CONTENT_CHARS,
-          lastAssistantMessageId: assistantMessageId,
-        };
+          requestId: currentRequestId,
+          assistantMessageId,
+        });
         setWebReadingProgressMap((prev) => {
           const next = new Map(prev);
           next.set(targetSession.id, progressState);
@@ -809,7 +915,7 @@ export default function SidePanelApp() {
         { role: "user" as const, content: userPrompt },
       ];
 
-      await browser.runtime.sendMessage({
+      const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -817,20 +923,53 @@ export default function SidePanelApp() {
         sessionId: targetSession.id,
         messages: messagesPayload,
         thinkingEnabled,
-      });
+      })) as WebReadingResponse;
+      if (activeWebRequest.hasProgress) {
+        settleSessionWebReadingProgress(
+          activeWebRequest.sessionId,
+          activeWebRequest.requestId,
+          response
+        );
+      }
+      if (!isSuccessfulWebReadingResponse(response)) {
+        markAssistantMessageAsError(
+          activeWebRequest.sessionId,
+          activeWebRequest.assistantMessageId,
+          response?.error || "网页通读未返回有效结果，请重试",
+          activeWebRequest.requestId
+        );
+      }
     } catch (error: any) {
       // 提取链路失败均已提前 return，走到这里的异常属于会话组装或 AI 请求发送环节
       logger.error("通读网页请求失败:", {
         stage: "ai-request",
         detail: error?.message,
       });
-      setIsExtractingPage(false);
-      setIsStreaming(false);
-      setExtractError(
-        `${error?.message || "通读网页请求失败，请检查网络或 API 设置"}（${
-          WEB_READ_STAGE_LABELS["ai-request"]
-        }）`
-      );
+      if (
+        !activeWebRequest ||
+        activeRequestIdRef.current === activeWebRequest.requestId
+      ) {
+        setIsExtractingPage(false);
+        setExtractError(
+          `${error?.message || "通读网页请求失败，请检查网络或 API 设置"}（${
+            WEB_READ_STAGE_LABELS["ai-request"]
+          }）`
+        );
+      }
+      if (activeWebRequest?.hasProgress) {
+        settleSessionWebReadingProgress(
+          activeWebRequest.sessionId,
+          activeWebRequest.requestId
+        );
+      }
+      if (activeWebRequest) {
+        markAssistantMessageAsError(
+          activeWebRequest.sessionId,
+          activeWebRequest.assistantMessageId,
+          error?.message || "通读网页请求失败，请检查网络或 API 设置",
+          activeWebRequest.requestId
+        );
+      }
     }
   };
 
@@ -838,7 +977,7 @@ export default function SidePanelApp() {
   const handleContinueWebReading = async () => {
     if (isStreaming || isExtractingPage || !activeSession) return;
     const progress = webReadingProgressMap.get(activeSession.id);
-    if (!progress || progress.segmentIndex > progress.totalSegments) return;
+    if (!isWebReadingContinueReady(progress)) return;
 
     const segmentIndex = progress.segmentIndex;
     const segmentEnd = Math.min(
@@ -861,12 +1000,25 @@ export default function SidePanelApp() {
     const userMessageId = createRequestId();
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
-    activeRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: activeSession.id,
+      assistantMessageId,
+    });
 
     const userMessage: ChatMessage = {
       id: userMessageId,
       role: "user",
       content: `继续解读《${progress.title}》第 ${segmentIndex} 段 / 共约 ${progress.totalSegments} 段`,
+      pageMeta: createWebReadingPageMeta(
+        {
+          title: progress.title,
+          url: progress.url,
+          content: segmentContent,
+          wordCount: progress.wordCount,
+        },
+        { segmentIndex, totalSegments: progress.totalSegments }
+      ),
       createdAt: Date.now(),
       status: "completed",
     };
@@ -893,20 +1045,20 @@ export default function SidePanelApp() {
     setSessions(nextSessions);
     void saveSessionsToStorage(nextSessions);
 
-    // 推进分段进度；最后一段派发后移除进度（续读按钮随之消失）
-    const isLastSegment = segmentIndex >= progress.totalSegments;
+    // 请求期间只记录 pending，不提前推进，避免失败后跳段或末段入口消失。
     setWebReadingProgressMap((prev) => {
+      const current = prev.get(activeSession.id);
+      if (!current) return prev;
       const next = new Map(prev);
-      if (isLastSegment) {
-        next.delete(activeSession.id);
-      } else {
-        next.set(activeSession.id, {
-          ...progress,
-          segmentIndex: segmentIndex + 1,
+      next.set(
+        activeSession.id,
+        beginWebReadingSegment(current, {
+          requestId: currentRequestId,
+          segmentIndex,
           nextStart: segmentEnd,
-          lastAssistantMessageId: assistantMessageId,
-        });
-      }
+          assistantMessageId,
+        })
+      );
       return next;
     });
 
@@ -915,12 +1067,16 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const historyPayload = activeSession.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      }));
+      const historyPayload = buildWebReadingHistoryPayload(
+        activeSession.messages
+      );
+      const hasSystem = historyPayload.some(
+        (message) => message.role === "system"
+      );
       const messagesPayload = [
-        { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
+        ...(hasSystem
+          ? []
+          : [{ role: "system" as const, content: WEB_READING_SYSTEM_PROMPT }]),
         ...historyPayload,
         {
           role: "user" as const,
@@ -933,7 +1089,7 @@ export default function SidePanelApp() {
         },
       ];
 
-      await browser.runtime.sendMessage({
+      const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -941,25 +1097,28 @@ export default function SidePanelApp() {
         sessionId: activeSession.id,
         messages: messagesPayload,
         thinkingEnabled,
-      });
+      })) as WebReadingResponse;
+      settleSessionWebReadingProgress(
+        activeSession.id,
+        currentRequestId,
+        response
+      );
+      if (!isSuccessfulWebReadingResponse(response)) {
+        markAssistantMessageAsError(
+          activeSession.id,
+          assistantMessageId,
+          response?.error || "续读未返回有效结果，请重试当前分段",
+          currentRequestId
+        );
+      }
     } catch (error: any) {
       logger.error("发送续读请求失败:", error);
-      setIsStreaming(false);
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSession.id) return s;
-          const msgs = [...s.messages];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant") {
-            msgs[msgs.length - 1] = {
-              ...last,
-              status: "error",
-              errorMessage:
-                error?.message || "续读请求发送失败，请检查网络或设置",
-            };
-          }
-          return { ...s, messages: msgs };
-        })
+      settleSessionWebReadingProgress(activeSession.id, currentRequestId);
+      markAssistantMessageAsError(
+        activeSession.id,
+        assistantMessageId,
+        error?.message || "续读请求发送失败，请检查网络或设置",
+        currentRequestId
       );
     }
   };
@@ -973,7 +1132,11 @@ export default function SidePanelApp() {
     const userMessageId = createRequestId();
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
-    activeRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: activeSession.id,
+      assistantMessageId,
+    });
 
     const userMessage: ChatMessage = {
       id: userMessageId,
@@ -1015,7 +1178,6 @@ export default function SidePanelApp() {
     setSessions(nextSessions);
     void saveSessionsToStorage(nextSessions);
 
-    const imagesToSend = images;
     setInputText("");
     setActiveQuotedText(null);
     setImages([]);
@@ -1024,13 +1186,11 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const historyPayload = [
-        ...activeSession.messages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        { role: "user" as const, content: text },
-      ];
+      const historyPayload = buildHistoryPayload(activeSession.messages, {
+        role: "user",
+        content: text,
+        images: userMessage.images,
+      });
 
       await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
@@ -1039,27 +1199,15 @@ export default function SidePanelApp() {
         source: "sidepanel",
         sessionId: activeSession.id,
         messages: historyPayload,
-        images: imagesToSend,
         thinkingEnabled,
       });
     } catch (error: any) {
       logger.error("发送翻译请求失败:", error);
-      setIsStreaming(false);
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSession.id) return s;
-          const msgs = [...s.messages];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant") {
-            msgs[msgs.length - 1] = {
-              ...last,
-              status: "error",
-              errorMessage:
-                error?.message || "请求发送失败，请检查网络或设置",
-            };
-          }
-          return { ...s, messages: msgs };
-        })
+      markAssistantMessageAsError(
+        activeSession.id,
+        assistantMessageId,
+        error?.message || "请求发送失败，请检查网络或设置",
+        currentRequestId
       );
     }
   };
@@ -1115,17 +1263,40 @@ export default function SidePanelApp() {
     if (userMsgIndex === -1) return;
 
     const oldUserMsg = activeSession.messages[userMsgIndex];
+    const isWebReadingMessage = oldUserMsg.pageMeta?.isWebPageReading === true;
+    const userInstruction =
+      isWebReadingMessage && text !== oldUserMsg.content
+        ? text
+        : oldUserMsg.pageMeta?.userInstruction;
+    const replayPrompt = isWebReadingMessage
+      ? buildReplayableWebReadingPrompt(oldUserMsg, userInstruction)
+      : undefined;
+    if (replayPrompt && !replayPrompt.success) {
+      setExtractError(replayPrompt.error);
+      showToast(replayPrompt.error);
+      return;
+    }
+
     // 截断该消息之后的所有历史轮次
     const preservedHistory = activeSession.messages.slice(0, userMsgIndex);
 
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
-    activeRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: activeSession.id,
+      assistantMessageId,
+    });
 
     const updatedUserMsg: ChatMessage = {
       ...oldUserMsg,
       content: text,
-      pageMeta: oldUserMsg.pageMeta,
+      pageMeta: oldUserMsg.pageMeta
+        ? {
+            ...oldUserMsg.pageMeta,
+            userInstruction: userInstruction?.trim() || undefined,
+          }
+        : undefined,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -1173,57 +1344,75 @@ export default function SidePanelApp() {
     setExtractError(null);
     scrollToBottom(true);
 
+    if (replayPrompt?.success) {
+      rewindSessionWebReadingProgress(
+        activeSession.id,
+        updatedUserMsg,
+        currentRequestId,
+        assistantMessageId
+      );
+    }
+
     try {
       let messagesPayload: any[];
-      if (updatedUserMsg.pageMeta?.isWebPageReading) {
-        const userPrompt = buildWebReadingUserPrompt({
-          title: updatedUserMsg.pageMeta.title,
-          url: updatedUserMsg.pageMeta.url,
-          content: updatedUserMsg.pageMeta.excerpt || text,
-          wordCount: updatedUserMsg.pageMeta.wordCount,
-        });
+      if (replayPrompt?.success) {
+        const historyPayload = buildWebReadingHistoryPayload(preservedHistory);
+        const hasSystem = historyPayload.some(
+          (message) => message.role === "system"
+        );
         messagesPayload = [
-          { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
-          { role: "user" as const, content: userPrompt },
+          ...(hasSystem
+            ? []
+            : [
+                {
+                  role: "system" as const,
+                  content: WEB_READING_SYSTEM_PROMPT,
+                },
+              ]),
+          ...historyPayload,
+          { role: "user" as const, content: replayPrompt.prompt },
         ];
       } else {
-        messagesPayload = [
-          ...preservedHistory.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          { role: "user" as const, content: text },
-        ];
+        messagesPayload = buildHistoryPayload(
+          preservedHistory,
+          updatedUserMsg
+        );
       }
 
-      await browser.runtime.sendMessage({
+      const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
         sessionId: activeSession.id,
         messages: messagesPayload,
-        images: updatedUserMsg.images,
         thinkingEnabled,
-      });
+      })) as WebReadingResponse;
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          currentRequestId,
+          response
+        );
+        if (!isSuccessfulWebReadingResponse(response)) {
+          markAssistantMessageAsError(
+            activeSession.id,
+            assistantMessageId,
+            response?.error || "网页通读未返回有效结果，请重试",
+            currentRequestId
+          );
+        }
+      }
     } catch (error: any) {
       logger.error("重新发送编辑消息失败:", error);
-      setIsStreaming(false);
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSession.id) return s;
-          const msgs = [...s.messages];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant") {
-            msgs[msgs.length - 1] = {
-              ...last,
-              status: "error",
-              errorMessage:
-                error?.message || "请求发送失败，请检查网络或设置",
-            };
-          }
-          return { ...s, messages: msgs };
-        })
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(activeSession.id, currentRequestId);
+      }
+      markAssistantMessageAsError(
+        activeSession.id,
+        assistantMessageId,
+        error?.message || "请求发送失败，请检查网络或设置",
+        currentRequestId
       );
     }
   };
@@ -1244,11 +1433,24 @@ export default function SidePanelApp() {
     const prevUserMsg = historyMessages[historyMessages.length - 1];
     if (prevUserMsg.role !== "user") return;
 
+    const replayPrompt = prevUserMsg.pageMeta?.isWebPageReading
+      ? buildReplayableWebReadingPrompt(prevUserMsg)
+      : undefined;
+    if (replayPrompt && !replayPrompt.success) {
+      setExtractError(replayPrompt.error);
+      showToast(replayPrompt.error);
+      return;
+    }
+
     setRegeneratingId(assistantMessageId);
     setTimeout(() => setRegeneratingId(null), 800);
 
     const currentRequestId = createRequestId();
-    activeRequestIdRef.current = currentRequestId;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: activeSession.id,
+      assistantMessageId,
+    });
 
     const newAssistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -1277,72 +1479,123 @@ export default function SidePanelApp() {
     setExtractError(null);
     scrollToBottom(true);
 
+    if (replayPrompt?.success) {
+      rewindSessionWebReadingProgress(
+        activeSession.id,
+        prevUserMsg,
+        currentRequestId,
+        assistantMessageId
+      );
+    }
+
     try {
       let messagesPayload: any[];
-      if (prevUserMsg.pageMeta?.isWebPageReading) {
-        const userPrompt = buildWebReadingUserPrompt({
-          title: prevUserMsg.pageMeta.title,
-          url: prevUserMsg.pageMeta.url,
-          content: prevUserMsg.pageMeta.excerpt || prevUserMsg.content,
-          wordCount: prevUserMsg.pageMeta.wordCount,
-        });
+      if (replayPrompt?.success) {
+        const earlierHistoryPayload = buildWebReadingHistoryPayload(
+          historyMessages.slice(0, -1)
+        );
+        const hasSystem = earlierHistoryPayload.some(
+          (message) => message.role === "system"
+        );
         messagesPayload = [
-          { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
-          { role: "user" as const, content: userPrompt },
+          ...(hasSystem
+            ? []
+            : [
+                {
+                  role: "system" as const,
+                  content: WEB_READING_SYSTEM_PROMPT,
+                },
+              ]),
+          ...earlierHistoryPayload,
+          { role: "user" as const, content: replayPrompt.prompt },
         ];
       } else {
-        messagesPayload = historyMessages.map((m) => ({
-          role: m.role,
-          content: m.content,
-        }));
+        messagesPayload = buildHistoryPayload(historyMessages);
       }
 
-      await browser.runtime.sendMessage({
+      const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
         sessionId: activeSession.id,
         messages: messagesPayload,
-        images: prevUserMsg.images,
         thinkingEnabled,
-      });
+      })) as WebReadingResponse;
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(
+          activeSession.id,
+          currentRequestId,
+          response
+        );
+        if (!isSuccessfulWebReadingResponse(response)) {
+          markAssistantMessageAsError(
+            activeSession.id,
+            assistantMessageId,
+            response?.error || "网页通读未返回有效结果，请重试",
+            currentRequestId
+          );
+        }
+      }
     } catch (error: any) {
       logger.error("重新生成回答失败:", error);
-      setIsStreaming(false);
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id !== activeSession.id) return s;
-          const msgs = [...s.messages];
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === "assistant") {
-            msgs[msgs.length - 1] = {
-              ...last,
-              status: "error",
-              errorMessage:
-                error?.message || "重新生成失败，请检查网络或设置",
-            };
-          }
-          return { ...s, messages: msgs };
-        })
+      if (replayPrompt?.success) {
+        settleSessionWebReadingProgress(activeSession.id, currentRequestId);
+      }
+      markAssistantMessageAsError(
+        activeSession.id,
+        assistantMessageId,
+        error?.message || "重新生成失败，请检查网络或设置",
+        currentRequestId
       );
     }
   };
 
   // 中止当前生成
   const handleStopGenerating = async () => {
-    if (activeRequestIdRef.current) {
-      try {
-        await browser.runtime.sendMessage({
-          action: MESSAGE_TYPES.CLEANUP,
-          requestId: activeRequestIdRef.current,
-          source: "sidepanel",
+    const stoppedRequestId = activeRequestIdRef.current;
+    if (!stoppedRequestId) return;
+    const stoppedOwner = getActiveSidepanelRequestOwner(
+      stoppedRequestId,
+      activeRequestOwnerRef.current
+    );
+
+    // 先同步失效本地归属和 pending；后台清理完成后不再改动任何前台状态。
+    clearActiveRequest(stoppedRequestId);
+    setIsStreaming(false);
+    setWebReadingProgressMap((prev) =>
+      cancelWebReadingProgressByRequest(prev, stoppedRequestId)
+    );
+    if (stoppedOwner) {
+      setSessions((prev) => {
+        const updated = prev.map((session) => {
+          if (session.id !== stoppedOwner.sessionId) return session;
+          const messages = session.messages.map((message) =>
+            message.id === stoppedOwner.assistantMessageId &&
+            message.role === "assistant" &&
+            message.status === "streaming"
+              ? {
+                  ...message,
+                  status: "error" as const,
+                  errorMessage: "生成已停止，可点击重试继续当前内容。",
+                }
+              : message
+          );
+          return { ...session, messages, updatedAt: Date.now() };
         });
-      } catch (error) {
-        logger.error("清理请求失败:", error);
-      }
-      activeRequestIdRef.current = undefined;
-      setIsStreaming(false);
+        void saveSessionsToStorage(updated);
+        return updated;
+      });
+    }
+
+    try {
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.CLEANUP,
+        requestId: stoppedRequestId,
+        source: "sidepanel",
+      });
+    } catch (error) {
+      logger.error("清理请求失败:", error);
     }
   };
 
@@ -1352,10 +1605,12 @@ export default function SidePanelApp() {
       void handleStopGenerating();
     }
     const fresh = createNewSession();
-    const updated = [fresh, ...sessions];
-    setSessions(updated);
+    setSessions((prev) => {
+      const updated = [fresh, ...prev];
+      void saveSessionsToStorage(updated);
+      return updated;
+    });
     setActiveSessionId(fresh.id);
-    void saveSessionsToStorage(updated);
     void saveActiveSessionId(fresh.id);
     setActiveView("chat");
     setShowDrawer(false);
@@ -1367,6 +1622,29 @@ export default function SidePanelApp() {
   // 删除会话
   const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const ownedRequest = getActiveSidepanelRequestOwner(
+      activeRequestIdRef.current,
+      activeRequestOwnerRef.current
+    );
+    const requestIdToCancel =
+      ownedRequest?.sessionId === sessionId ? ownedRequest.requestId : undefined;
+    if (requestIdToCancel) {
+      clearActiveRequest(requestIdToCancel);
+      setIsStreaming(false);
+      void browser.runtime
+        .sendMessage({
+          action: MESSAGE_TYPES.CLEANUP,
+          requestId: requestIdToCancel,
+          source: "sidepanel",
+        })
+        .catch((error) => logger.error("删除会话时清理请求失败:", error));
+    }
+    setWebReadingProgressMap((prev) => {
+      if (!prev.has(sessionId)) return prev;
+      const next = new Map(prev);
+      next.delete(sessionId);
+      return next;
+    });
     const filtered = sessions.filter((s) => s.id !== sessionId);
     if (filtered.length === 0) {
       const fresh = createNewSession();
@@ -2266,10 +2544,11 @@ export default function SidePanelApp() {
 
                   {/* 长文分段续读：进度提示与“继续解读剩余部分”入口 */}
                   {message.role === "assistant" &&
-                    message.status === "completed" &&
                     activeWebReadingProgress &&
-                    activeWebReadingProgress.lastAssistantMessageId ===
-                      message.id && (
+                    shouldShowWebReadingContinue(
+                      activeWebReadingProgress,
+                      message
+                    ) && (
                       <div
                         className="web-reading-continue-bar"
                         style={{
@@ -2295,7 +2574,11 @@ export default function SidePanelApp() {
                         <button
                           type="button"
                           className="continue-reading-btn"
-                          disabled={isStreaming || isExtractingPage}
+                          disabled={
+                            isStreaming ||
+                            isExtractingPage ||
+                            Boolean(activeWebReadingProgress.pendingRequestId)
+                          }
                           style={{
                             border: "none",
                             borderRadius: 999,
@@ -2304,10 +2587,17 @@ export default function SidePanelApp() {
                             fontWeight: 600,
                             whiteSpace: "nowrap",
                             cursor:
-                              isStreaming || isExtractingPage
+                              isStreaming ||
+                              isExtractingPage ||
+                              activeWebReadingProgress.pendingRequestId
                                 ? "not-allowed"
                                 : "pointer",
-                            opacity: isStreaming || isExtractingPage ? 0.55 : 1,
+                            opacity:
+                              isStreaming ||
+                              isExtractingPage ||
+                              activeWebReadingProgress.pendingRequestId
+                                ? 0.55
+                                : 1,
                             background: "var(--color-primary)",
                             color: "#ffffff",
                           }}

@@ -103,6 +103,14 @@ export interface ChatMessage {
     wordCount?: number;
     excerpt?: string;
     isWebPageReading?: boolean;
+    /** 当前网页通读消息可重放的原文片段，最多保存一段。 */
+    sourceContent?: string;
+    /** 当前原文片段在整篇网页中的序号，从 1 开始。 */
+    segmentIndex?: number;
+    /** 整篇网页预计分段数。 */
+    totalSegments?: number;
+    /** 编辑网页消息时保存的用户补充指令，与原文分开存储。 */
+    userInstruction?: string;
   };
   suggestedQuestions?: string[];
   createdAt: number;

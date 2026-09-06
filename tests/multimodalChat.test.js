@@ -3,6 +3,7 @@ import {
   buildMessagesPayload,
   formatMultimodalContent,
 } from "../entrypoints/background/translationService.ts";
+import { buildHistoryPayload } from "../entrypoints/shared/chatTypes.ts";
 
 describe("Multimodal Chat & History Payload Processing", () => {
   const mockImage1 = {
@@ -53,6 +54,29 @@ describe("Multimodal Chat & History Payload Processing", () => {
   });
 
   describe("buildMessagesPayload (TranslationService Multimodal Processing)", () => {
+    test("sidepanel production history helper preserves historical/current images once and keeps one system", () => {
+      const sidepanelHistory = buildHistoryPayload(
+        [
+          { role: "system", content: "网页通读系统提示词" },
+          { role: "user", content: "第一轮看图", images: [mockImage1] },
+          { role: "assistant", content: "第一轮回答" },
+        ],
+        { role: "user", content: "第二轮看图", images: [mockImage2] }
+      );
+
+      const payload = buildMessagesPayload({
+        messages: sidepanelHistory,
+        promptTemplate: "不应重复添加的默认提示词",
+      });
+      const serialized = JSON.stringify(payload);
+
+      expect(
+        payload.filter((message) => message.role === "system")
+      ).toHaveLength(1);
+      expect(serialized.split(mockImage1.data)).toHaveLength(2);
+      expect(serialized.split(mockImage2.data)).toHaveLength(2);
+    });
+
     test("single-turn: formats text + images into system + user multimodal array", () => {
       const payload = buildMessagesPayload({
         text: "这是啥",
