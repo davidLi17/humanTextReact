@@ -151,6 +151,13 @@ describe("resolveUserErrorMessage: 按 code 映射展示文案", () => {
     );
   });
 
+  test("TIMEOUT 保留分阶段超时说明", () => {
+    const message = "模型输出空闲超时，已生成内容已保留，请手动重试。";
+    expect(resolveUserErrorMessage(new CodedError(message, "TIMEOUT"))).toBe(
+      message
+    );
+  });
+
   test("SERVER → 保留原始 message（含状态码与服务商原因）", () => {
     const error = createApiError(500, '{"error":{"message":"boom"}}');
     expect(resolveUserErrorMessage(error)).toBe("API请求失败: 500 - boom");

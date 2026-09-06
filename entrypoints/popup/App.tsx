@@ -172,7 +172,11 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
             isTranslating: false,
             showResult: true,
             errorMessage: request.error,
-            translatedText: prev.translatedText,
+            translatedText: request.content || prev.translatedText,
+            reasoningText:
+              request.reasoningContent || prev.reasoningText,
+            hasReasoning:
+              Boolean(request.reasoningContent) || prev.hasReasoning,
           }));
         } else {
           logger.log("✅ [Popup App] 更新翻译状态", {
@@ -693,6 +697,5 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
 }
 
 export default App;
-
 
 

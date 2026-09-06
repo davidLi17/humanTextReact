@@ -18,6 +18,10 @@ import {
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
 import { RequestManager, type RequestContext } from "./requestManager";
+import {
+  isRequestTimeoutError,
+  RequestTimeoutGuard,
+} from "@/entrypoints/shared/requestTimeout";
 
 const logger = createLogger("translation-service", "🌐");
 
@@ -49,6 +53,26 @@ interface StreamChunk {
   content: string;
   reasoningContent: string;
   done: boolean;
+}
+
+function releaseStreamReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  cancel: boolean
+): void {
+  if (cancel) {
+    try {
+      void Promise.resolve(reader.cancel()).catch((error) =>
+        logger.warn("取消响应流失败:", error)
+      );
+    } catch (error) {
+      logger.warn("取消响应流失败:", error);
+    }
+  }
+  try {
+    reader.releaseLock();
+  } catch {
+    // read/cancel 尚未结算时可能无法释放锁；已挂接拒绝处理，不阻塞上层结束。
+  }
 }
 
 /**
@@ -235,6 +259,13 @@ export class TranslationService {
       thinkingEnabled = false,
     } = params;
     const { requestId, target, controller } = requestContext;
+    const timeoutGuard = new RequestTimeoutGuard(controller, {
+      thinkingEnabled,
+    });
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    let streamFinished = false;
+    let result = "";
+    let reasoningContent = "";
 
     logger.log("🚀 [TranslationService] 开始翻译", {
       requestId,
@@ -247,7 +278,7 @@ export class TranslationService {
     });
 
     try {
-      const config = await SettingsUtils.getSettings();
+      const config = await timeoutGuard.run(SettingsUtils.getSettings());
       const apiKey = params.apiKey || config.apiKey;
       if (!apiKey) {
         throw new Error("请先在设置中配置 API Key");
@@ -279,35 +310,50 @@ export class TranslationService {
           : THINKING_CONFIG.DISABLED,
       };
 
-      const response = await fetch(config.baseUrl || DEFAULT_SETTINGS.baseUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      });
+      timeoutGuard.startFetchHeadersTimeout();
+      let response: Response;
+      try {
+        response = await timeoutGuard.run(
+          fetch(config.baseUrl || DEFAULT_SETTINGS.baseUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          })
+        );
+      } finally {
+        timeoutGuard.markFetchHeadersReceived();
+      }
 
       if (!response.ok) {
         // 走到这里时响应体尚未被流式读取消费，可安全读取；
         // 用服务商返回的具体原因（如"余额不足""模型无权限"）构造带错误码的错误
-        const errorBodyText = await response.text().catch(() => "");
+        const errorBodyText = await timeoutGuard
+          .runStage(response.text(), "error-body")
+          .catch((error) => {
+            if (isRequestTimeoutError(error) || error?.name === "AbortError") {
+              throw error;
+            }
+            return "";
+          });
+        timeoutGuard.completeStream();
         throw createApiError(response.status, errorBodyText, "API 请求失败");
       }
       if (!response.body) {
+        timeoutGuard.completeStream();
         throw new Error("API 响应为空，请检查接口兼容性");
       }
 
-      const reader = response.body.getReader();
+      const streamReader = response.body.getReader();
+      reader = streamReader;
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
-      let result = "";
-      let reasoningContent = "";
-      let streamFinished = false;
 
       while (!streamFinished) {
-        const { value, done } = await reader.read();
+        const { value, done } = await timeoutGuard.run(streamReader.read());
 
         if (value) {
           buffer += decoder.decode(value, { stream: true });
@@ -324,11 +370,20 @@ export class TranslationService {
           result += currentChunk.content;
           reasoningContent += currentChunk.reasoningContent;
 
-          const delivered = await this.sendTranslationUpdate(
-            requestContext,
-            result,
-            reasoningContent,
-            false
+          if (
+            currentChunk.content.trim() ||
+            currentChunk.reasoningContent.trim()
+          ) {
+            timeoutGuard.markMeaningfulOutput();
+          }
+
+          const delivered = await timeoutGuard.run(
+            this.sendTranslationUpdate(
+              requestContext,
+              result,
+              reasoningContent,
+              false
+            )
           );
           if (!delivered) {
             logger.log("翻译接收端已关闭或请求已过期", { requestId });
@@ -339,13 +394,12 @@ export class TranslationService {
 
         streamFinished = done || currentChunk.done;
         if (currentChunk.done && !done) {
-          try {
-            await reader.cancel();
-          } catch (error) {
-            logger.warn("关闭已完成的响应流失败:", error);
-          }
+          releaseStreamReader(streamReader, true);
+          reader = undefined;
         }
       }
+
+      timeoutGuard.completeStream();
 
       if (!result.trim()) {
         throw new Error("模型未返回可显示内容，请检查模型或接口兼容性");
@@ -376,6 +430,23 @@ export class TranslationService {
 
       return result;
     } catch (error: any) {
+      if (isRequestTimeoutError(error)) {
+        const message = this.normalizeErrorMessage(error);
+        logger.error("🚀lhg[TranslationService][请求超时]", {
+          requestId,
+          stage: error.stage,
+          target,
+        });
+        if (RequestManager.isActiveRequest(requestId)) {
+          await this.sendTranslationError(
+            requestContext,
+            message,
+            result,
+            reasoningContent
+          );
+        }
+        throw error;
+      }
       if (error.name === "AbortError") {
         logger.log("翻译请求已中止", { requestId });
         return;
@@ -388,6 +459,10 @@ export class TranslationService {
       }
       throw new Error(message);
     } finally {
+      if (reader) {
+        releaseStreamReader(reader, !streamFinished);
+      }
+      timeoutGuard.dispose();
       RequestManager.completeRequest(requestId);
     }
   }
@@ -442,7 +517,9 @@ export class TranslationService {
 
   private static async sendTranslationError(
     requestContext: RequestContext,
-    error: string
+    error: string,
+    content = "",
+    reasoningContent = ""
   ): Promise<boolean> {
     const { requestId, target } = requestContext;
     let action: string;
@@ -459,6 +536,9 @@ export class TranslationService {
       requestId,
       sessionId: target.kind === "sidepanel" ? target.sessionId : undefined,
       error,
+      content: content || undefined,
+      reasoningContent: reasoningContent || undefined,
+      hasReasoning: reasoningContent.length > 0,
       done: true,
     };
 

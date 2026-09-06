@@ -12,6 +12,7 @@ export type ErrorCode =
   | "NETWORK" // 网络不通
   | "SERVER" // 服务端错误或其他 HTTP 错误
   | "ABORT" // 请求被主动中止
+  | "TIMEOUT" // 请求超过阶段或总时限
   | "UNKNOWN"; // 未归类错误
 
 /**
@@ -25,6 +26,7 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   NETWORK: "网络连接失败，请检查 API 地址或网络代理",
   SERVER: "",
   ABORT: "请求已取消",
+  TIMEOUT: "",
   UNKNOWN: "",
 };
 

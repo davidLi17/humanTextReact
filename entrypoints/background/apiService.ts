@@ -4,6 +4,7 @@
  */
 
 import { CodedError, createApiError } from "@/entrypoints/shared/errors";
+import { RequestTimeoutGuard } from "@/entrypoints/shared/requestTimeout";
 
 // 定义错误处理策略接口
 interface ErrorStrategy {
@@ -53,38 +54,52 @@ export class ApiService {
       throw new CodedError("API Key不能为空", "AUTH");
     }
 
+    const controller = new AbortController();
+    const timeoutGuard = new RequestTimeoutGuard(controller, {
+      armStreamingTimeouts: false,
+    });
     try {
       // 发送一个简单的测试请求
-      const response = await fetch(baseUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            {
-              role: "user",
-              content: "test",
+      return await timeoutGuard.runStage(
+        (async () => {
+          const response = await fetch(baseUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
             },
-          ],
-          temperature: 0.1,
-          max_tokens: 5,
-        }),
-      });
+            body: JSON.stringify({
+              model: model,
+              messages: [
+                {
+                  role: "user",
+                  content: "test",
+                },
+              ],
+              temperature: 0.1,
+              max_tokens: 5,
+            }),
+            signal: controller.signal,
+          });
 
-      if (!response.ok) {
-        // 响应体尚未被消费，可安全读取，用于透出服务商返回的具体原因
-        const errorBodyText = await response.text().catch(() => "");
-        // 使用策略模式处理错误
-        const strategy = errorStrategies.find((s) => s.match(response.status));
-        if (strategy) {
-          strategy.handle(response.status, errorBodyText);
-        }
-      }
+          if (!response.ok) {
+            // 连接测试的 15 秒总边界同时覆盖错误响应体读取。
+            const errorBodyText = await response.text().catch((error) => {
+              if (controller.signal.aborted) throw error;
+              return "";
+            });
+            const strategy = errorStrategies.find((s) =>
+              s.match(response.status)
+            );
+            if (strategy) {
+              strategy.handle(response.status, errorBodyText);
+            }
+          }
 
-      return true;
+          return true;
+        })(),
+        "connection-test"
+      );
     } catch (error: any) {
       // 策略表抛出的 CodedError 直接透传，避免被下方字符串判断误归类
       if (error instanceof CodedError) {
@@ -97,6 +112,8 @@ export class ApiService {
         throw new CodedError("网络连接失败，请检查API地址", "NETWORK");
       }
       throw error;
+    } finally {
+      timeoutGuard.dispose();
     }
   }
 }

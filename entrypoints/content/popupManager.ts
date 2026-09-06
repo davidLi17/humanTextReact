@@ -28,6 +28,15 @@ import {
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
 
+export function formatPopupTranslationError(error: string): string {
+  return error.includes("API Key") ||
+    error.includes("API 请求失败") ||
+    error.includes("超时") ||
+    error.includes("rate limit")
+    ? "翻译失败：" + error
+    : "翻译失败，请重试";
+}
+
 export function getReplacedPopupRequestId(
   hasPopup: boolean,
   requestFinished: boolean,
@@ -207,6 +216,12 @@ export class PopupManager {
     // 处理翻译错误或更新翻译结果
     if (request.error) {
       logger.log("❌ [PopupManager] 处理翻译错误");
+      if (request.content || request.reasoningContent) {
+        this.handleTranslationUpdate(
+          { ...request, done: false },
+          elements
+        );
+      }
       this.handleTranslationError(request.error);
     } else {
       logger.log("✅ [PopupManager] 处理翻译更新");
@@ -944,12 +959,7 @@ export class PopupManager {
   private handleTranslationError(error: string) {
     logger.log("翻译发生错误:", error);
     // 根据错误类型显示不同的错误信息
-    const message =
-      error.includes("API Key") ||
-      error.includes("API 请求失败") ||
-      error.includes("rate limit")
-        ? "翻译失败：" + error
-        : "翻译失败，请重试";
+    const message = formatPopupTranslationError(error);
 
     const elements = this.getPopupElements();
     if (!elements.loadingEl) return;
