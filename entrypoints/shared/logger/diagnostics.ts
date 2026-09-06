@@ -14,9 +14,9 @@ export const MAX_DIAGNOSTIC_BYTES = 512 * 1024;
 
 const REDACTED_VALUE = "[REDACTED]";
 const SENSITIVE_KEY_PATTERN =
-  /(api.?key|authorization|token|cookie|password|secret)/i;
+  /(api.?key|authorization|token|cookie|password|secret|selection.?context)/i;
 const PRIVATE_TEXT_KEY_PATTERN =
-  /(selection.?text|text.?preview|prompt.?template|reasoning.?content|image.?data|base64)/i;
+  /(selection.?text|paragraph|text.?preview|prompt.?template|reasoning.?content|image.?data|base64)/i;
 const LOGGER_METHODS = new Set<LoggerMethod>([
   "log",
   "info",

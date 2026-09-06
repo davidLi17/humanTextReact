@@ -5,6 +5,7 @@ import {
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { ContextMenuHandler } from "./contextMenuHandler";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 
 const logger = createLogger("shortcuts", "⌨️");
 
@@ -196,9 +197,17 @@ export class ShortcutManager {
         (globalThis as any).browser || (globalThis as any).chrome;
       let response: any;
       try {
+        const settings = await SettingsUtils.getSettings();
+        const includeSelectionContext =
+          settings.contextualSelectionEnabled === true;
         response = await browserApi.tabs.sendMessage(tab.id, {
           action: MESSAGE_TYPES.GET_SELECTED_TEXT,
+          ...(includeSelectionContext ? { includeSelectionContext: true } : {}),
         });
+        response = {
+          ...response,
+          selectionContextCaptured: includeSelectionContext,
+        };
       } catch (sendErr) {
         logger.warn("⚠️ [ShortcutManager] 发送获取选中文本消息失败:", sendErr);
         return;
@@ -218,6 +227,12 @@ export class ShortcutManager {
           {
             menuItemId: "translateSelection",
             selectionText: response.selectedText,
+            ...(response.selectionContext
+              ? { selectionContext: response.selectionContext }
+              : {}),
+            ...(response.selectionContextCaptured
+              ? { selectionContextCaptured: true }
+              : {}),
           },
           tab
         );

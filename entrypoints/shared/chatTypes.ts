@@ -1,3 +1,5 @@
+import type { SelectionContext } from "./selectionContext";
+
 export type ChatRole = "system" | "user" | "assistant";
 
 export interface ChatImageContent {
@@ -24,6 +26,7 @@ export interface ChatPayloadMessage {
   role: ChatRole;
   content: string | MultimodalContentItem[];
   images?: ChatImageContent[];
+  selectionContext?: SelectionContext;
 }
 
 /**
@@ -33,20 +36,25 @@ export function formatMessageForPayload(message: {
   role: ChatRole;
   content: string | any[];
   images?: ChatImageContent[];
+  selectionContext?: SelectionContext;
 }): ChatPayloadMessage {
+  const selectionContext = message.selectionContext;
+  const content = message.content;
   const images = message.images;
   if (!images || images.length === 0) {
     return {
       role: message.role,
-      content: message.content,
+      content,
+      ...(selectionContext ? { selectionContext } : {}),
     };
   }
 
-  if (Array.isArray(message.content)) {
+  if (Array.isArray(content)) {
     return {
       role: message.role,
-      content: message.content,
+      content,
       images,
+      ...(selectionContext ? { selectionContext } : {}),
     };
   }
 
@@ -57,7 +65,7 @@ export function formatMessageForPayload(message: {
     })),
     {
       type: "text" as const,
-      text: typeof message.content === "string" ? message.content : "",
+      text: typeof content === "string" ? content : "",
     },
   ];
 
@@ -65,6 +73,7 @@ export function formatMessageForPayload(message: {
     role: message.role,
     content: multimodalContent,
     images,
+    ...(selectionContext ? { selectionContext } : {}),
   };
 }
 
@@ -76,11 +85,13 @@ export function buildHistoryPayload(
     role: ChatRole;
     content: string | any[];
     images?: ChatImageContent[];
+    selectionContext?: SelectionContext;
   }>,
   currentMessage?: {
     role: ChatRole;
     content: string | any[];
     images?: ChatImageContent[];
+    selectionContext?: SelectionContext;
   }
 ): ChatPayloadMessage[] {
   const payload = messages.map(formatMessageForPayload);
@@ -97,6 +108,7 @@ export interface ChatMessage {
   reasoningContent?: string;
   hasReasoning?: boolean;
   images?: ChatImageContent[];
+  selectionContext?: SelectionContext;
   pageMeta?: {
     title: string;
     url: string;

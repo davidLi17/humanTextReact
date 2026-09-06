@@ -330,6 +330,70 @@ export const POPUP_STYLES = /*css*/ `
     box-shadow: 0 4px 12px rgba(52, 199, 89, 0.3);
   }
 
+  .translator-popup .translator-context-preview {
+    margin: 0 16px 12px;
+    padding: 12px;
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    border-radius: 10px;
+    background: rgba(79, 70, 229, 0.05);
+  }
+
+  .translator-popup .translator-context-preview-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #3730a3;
+  }
+
+  .translator-popup .translator-context-source {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 11px;
+  }
+
+  .translator-popup .translator-context-source span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .translator-popup .translator-context-source a {
+    color: #4f46e5;
+    text-decoration: underline;
+    white-space: nowrap;
+  }
+
+  .translator-popup .translator-context-paragraph {
+    max-height: 84px;
+    margin-top: 8px;
+    overflow: auto;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .translator-popup .translator-context-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .translator-popup .translator-context-actions button {
+    padding: 6px 10px;
+    border: 1px solid rgba(79, 70, 229, 0.28);
+    border-radius: 7px;
+    background: #fff;
+    color: #4338ca;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .translator-popup .translator-context-actions .translator-context-btn {
+    background: #4f46e5;
+    color: #fff;
+  }
+
   .translator-popup.resizing-left {
     cursor: w-resize;
     user-select: none;
@@ -378,6 +442,26 @@ export const POPUP_STYLES = /*css*/ `
   .translator-popup[data-theme="dark"] .translator-section {
     background: #1f2937;
     border-color: rgba(255, 255, 255, 0.08);
+  }
+  .translator-popup[data-theme="dark"] .translator-context-preview {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(129, 140, 248, 0.35);
+  }
+  .translator-popup[data-theme="dark"] .translator-context-preview-title,
+  .translator-popup[data-theme="dark"] .translator-context-source a {
+    color: #a5b4fc;
+  }
+  .translator-popup[data-theme="dark"] .translator-context-source,
+  .translator-popup[data-theme="dark"] .translator-context-paragraph {
+    color: #cbd5e1;
+  }
+  .translator-popup[data-theme="dark"] .translator-context-actions button {
+    background: #1f2937;
+    color: #c7d2fe;
+  }
+  .translator-popup[data-theme="dark"] .translator-context-actions .translator-context-btn {
+    background: #6366f1;
+    color: #fff;
   }
   .translator-popup[data-theme="dark"] .translator-title,
   .translator-popup[data-theme="dark"] .translator-text,

@@ -19,8 +19,22 @@ import {
 import { initializeCodeCopy, parseMarkdown } from "@/shared/utils/markdown"; // Markdown解析工具
 import { PopupEventHandler } from "./popupEventHandler";
 import { applyPopupTheme } from "./styles";
+import {
+  getSafeHttpUrl,
+  getSafeSourceHostname,
+  normalizeSelectionContext,
+  type SelectionContext,
+} from "@/entrypoints/shared/selectionContext";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
+
+export function getReplacedPopupRequestId(
+  hasPopup: boolean,
+  requestFinished: boolean,
+  requestId?: string
+): string | undefined {
+  return hasPopup && !requestFinished && requestId ? requestId : undefined;
+}
 
 // 弹窗管理类，负责创建、显示、更新和删除翻译弹窗
 export class PopupManager {
@@ -46,6 +60,8 @@ export class PopupManager {
   private themeMode: ThemeMode = THEME_MODES.SYSTEM;
   // 当前弹窗对应的划词原文，用于失败后重试
   private lastSelectionText = "";
+  private lastSelectionContext: SelectionContext | undefined;
+  private deferredStartInProgress = false;
   // 系统主题和菜单事件的清理函数
   private systemThemeCleanup: (() => void) | null = null;
   private themeMenuCleanup: (() => void) | null = null;
@@ -64,7 +80,9 @@ export class PopupManager {
   public showPopup(
     selection: string,
     requestId: string,
-    allowLegacyMessages = false
+    allowLegacyMessages = false,
+    selectionContext?: SelectionContext,
+    deferTranslation = false
   ): HTMLElement {
     logger.log("显示弹窗", {
       requestId,
@@ -74,16 +92,40 @@ export class PopupManager {
       timestamp: new Date().toISOString(),
     });
 
+    const replacedRequestId = getReplacedPopupRequestId(
+      Boolean(this.currentPopup),
+      this.requestFinished,
+      this.currentRequestId
+    );
+    if (replacedRequestId) {
+      void browser.runtime
+        .sendMessage({
+          action: MESSAGE_TYPES.CLEANUP,
+          requestId: replacedRequestId,
+        })
+        .catch((error) => logger.error("替换浮窗时清理旧请求失败:", error));
+    }
+
     // 清理可能存在的旧弹窗
     this.removeCurrentPopup();
 
     // 创建新的弹窗元素
-    const popup = this.createPopupElement(selection);
+    const normalizedContext = normalizeSelectionContext(
+      selectionContext,
+      selection
+    );
+    const popup = this.createPopupElement(
+      selection,
+      normalizedContext,
+      deferTranslation
+    );
     this.currentPopup = popup;
     this.currentRequestId = requestId;
     this.allowLegacyMessages = allowLegacyMessages;
     this.requestFinished = false;
     this.lastSelectionText = selection;
+    this.lastSelectionContext = normalizedContext;
+    this.deferredStartInProgress = false;
 
     // 将弹窗添加到页面中
     document.body.appendChild(popup);
@@ -198,10 +240,16 @@ export class PopupManager {
     this.allowLegacyMessages = false;
     this.requestFinished = false;
     this.lastSelectionText = "";
+    this.lastSelectionContext = undefined;
+    this.deferredStartInProgress = false;
   }
 
   // 创建弹窗元素方法，接收用户选中的文本
-  private createPopupElement(selection: string): HTMLElement {
+  private createPopupElement(
+    selection: string,
+    selectionContext?: SelectionContext,
+    deferTranslation = false
+  ): HTMLElement {
     // 创建div元素作为弹窗容器
     const popup = document.createElement("div");
     popup.className = "translator-popup"; // 设置CSS类名
@@ -261,8 +309,17 @@ export class PopupManager {
       <div class="translator-content">
         <div class="translator-section">
           <div class="translator-label">原文</div>
-          <div class="translator-text">${selection}</div>
+          <div class="translator-text"></div>
           <button class="translator-copy-original-btn">复制</button>
+        </div>
+        <div class="translator-context-preview" style="display: none;">
+          <div class="translator-context-preview-title">将结合当前段落解释</div>
+          <div class="translator-context-source"></div>
+          <div class="translator-context-paragraph"></div>
+          <div class="translator-context-actions">
+            <button type="button" class="translator-context-btn">结合本段解释</button>
+            <button type="button" class="translator-text-only-btn">仅解释选中文字</button>
+          </div>
         </div>
         <div class="translator-section translator-section-reasoning" style="display: none;">
           <div class="translator-label">思维链</div>
@@ -294,6 +351,39 @@ export class PopupManager {
       </div>
       <button class="translator-copy-btn">复制译文</button>
     `;
+    const originalText = popup.querySelector(".translator-text");
+    if (originalText) originalText.textContent = selection;
+
+    if (selectionContext) {
+      const preview = popup.querySelector(
+        ".translator-context-preview"
+      ) as HTMLElement | null;
+      const paragraph = popup.querySelector(".translator-context-paragraph");
+      const source = popup.querySelector(".translator-context-source");
+      if (paragraph) paragraph.textContent = selectionContext.paragraph;
+      if (source) {
+        const safeUrl = getSafeHttpUrl(selectionContext.source?.url);
+        const sourceTitle = selectionContext.source?.title?.trim();
+        if (sourceTitle) {
+          const title = document.createElement("span");
+          title.textContent = sourceTitle;
+          source.appendChild(title);
+        }
+        if (safeUrl) {
+          const link = document.createElement("a");
+          link.href = safeUrl;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = getSafeSourceHostname(safeUrl) || "查看来源";
+          source.appendChild(link);
+        }
+      }
+      if (preview) preview.style.display = deferTranslation ? "" : "none";
+    }
+    if (deferTranslation) {
+      const loading = popup.querySelector(".translator-loading") as HTMLElement;
+      if (loading) loading.style.display = "none";
+    }
     applyPopupTheme(popup, this.themeMode);
     this.updateThemeControls(popup);
 
@@ -374,22 +464,63 @@ export class PopupManager {
         void this.retryTranslation();
       });
 
+    popup
+      .querySelector(".translator-context-btn")
+      ?.addEventListener("click", () => void this.startDeferredTranslation(true));
+    popup
+      .querySelector(".translator-text-only-btn")
+      ?.addEventListener("click", () => void this.startDeferredTranslation(false));
+
     // 侧边栏追问按钮点击事件
     popup
       .querySelector(".translator-sidepanel-btn")
       ?.addEventListener("click", async () => {
+        const sourcePopup = this.currentPopup;
+        const sourceRequestId = this.currentRequestId;
         const originalText =
           popup.querySelector(".translator-text")?.textContent;
         if (originalText) {
           try {
+            const selectionContext = this.lastSelectionContext;
+            const envelopeId = sourceRequestId || createRequestId();
+            const pendingValue = {
+              text: originalText,
+              selectionContext,
+              envelopeId,
+              timestamp: Date.now(),
+            };
             await browser.storage.local.set({
-              pendingSidepanelText: {
-                text: originalText,
-                timestamp: Date.now(),
-              },
+              pendingSidepanelText: pendingValue,
+            });
+            if (
+              this.currentPopup !== sourcePopup ||
+              this.currentRequestId !== sourceRequestId
+            ) {
+              const stored = (await browser.storage.local.get(
+                "pendingSidepanelText"
+              )) as {
+                pendingSidepanelText?: { timestamp?: number };
+              };
+              if (
+                stored.pendingSidepanelText?.timestamp ===
+                pendingValue.timestamp
+              ) {
+                await browser.storage.local.remove("pendingSidepanelText");
+              }
+              return;
+            }
+            await browser.runtime.sendMessage({
+              action: MESSAGE_TYPES.CLEANUP,
+              requestId: sourceRequestId,
             });
             await browser.runtime.sendMessage({
               action: MESSAGE_TYPES.OPEN_SIDEPANEL,
+            });
+            await browser.runtime.sendMessage({
+              action: "sendToSidepanel",
+              text: originalText,
+              selectionContext,
+              envelopeId,
             });
             this.removeCurrentPopup();
           } catch (error) {
@@ -681,6 +812,8 @@ export class PopupManager {
 
     const text = this.lastSelectionText?.trim();
     if (!text) return;
+    const popup = this.currentPopup;
+    const selectionContext = this.lastSelectionContext;
 
     const requestId = createRequestId();
     this.currentRequestId = requestId;
@@ -704,7 +837,10 @@ export class PopupManager {
       const settings = await SettingsUtils.getSettings();
 
       // 读取设置期间弹窗被关闭时，取消刚创建的请求
-      if (!this.currentPopup) {
+      if (
+        this.currentPopup !== popup ||
+        this.currentRequestId !== requestId
+      ) {
         browser.runtime
           .sendMessage({ action: MESSAGE_TYPES.CLEANUP, requestId })
           .catch(() => {});
@@ -715,6 +851,7 @@ export class PopupManager {
         action: MESSAGE_TYPES.TRANSLATE,
         requestId,
         text,
+        selectionContext,
         thinkingEnabled: settings.thinkingEnabled ?? false,
       });
 
@@ -729,12 +866,77 @@ export class PopupManager {
       }
     } catch (error: any) {
       logger.error("重试翻译失败:", error);
-      if (this.currentRequestId === requestId) {
+      if (
+        this.currentPopup === popup &&
+        this.currentRequestId === requestId
+      ) {
         this.requestFinished = true;
         this.handleTranslationError(
           error?.message || "翻译失败，请重试"
         );
       }
+    }
+  }
+
+  private async startDeferredTranslation(useContext: boolean) {
+    if (
+      !this.currentPopup ||
+      this.requestFinished ||
+      this.deferredStartInProgress
+    ) return;
+    this.deferredStartInProgress = true;
+    const popup = this.currentPopup;
+    const text = this.lastSelectionText.trim();
+    const requestId = this.currentRequestId;
+    const selectionContext = this.lastSelectionContext;
+    if (!text || !requestId) return;
+
+    const contextActions = popup.querySelector(
+      ".translator-context-actions"
+    ) as HTMLElement | null;
+    if (contextActions) contextActions.style.display = "none";
+    const contextTitle = popup.querySelector(
+      ".translator-context-preview-title"
+    );
+    if (contextTitle) {
+      contextTitle.textContent = useContext
+        ? "已结合当前段落解释"
+        : "本次仅解释选中文字（段落未发送）";
+    }
+    const elements = this.getPopupElements();
+    if (elements.loadingEl) elements.loadingEl.style.display = "";
+    this.updateStatusRow(elements, "正在翻译...", {
+      showStop: true,
+      showRetry: false,
+    });
+    if (!useContext) this.lastSelectionContext = undefined;
+
+    try {
+      const settings = await SettingsUtils.getSettings();
+      if (
+        this.currentPopup !== popup ||
+        this.currentRequestId !== requestId ||
+        this.requestFinished
+      ) {
+        return;
+      }
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId,
+        text,
+        selectionContext: useContext ? selectionContext : undefined,
+        thinkingEnabled: settings.thinkingEnabled ?? false,
+      });
+    } catch (error: any) {
+      if (
+        this.currentPopup !== popup ||
+        this.currentRequestId !== requestId
+      ) {
+        return;
+      }
+      logger.error("发送划词解释请求失败:", error);
+      this.requestFinished = true;
+      this.handleTranslationError(error?.message || "翻译失败，请重试");
     }
   }
 

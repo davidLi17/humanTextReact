@@ -2,6 +2,8 @@ import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import type { PopupManager } from "./popupManager";
+import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import { extractSelectionContext } from "./selectionContextExtractor";
 
 const logger = createLogger("content-shortcuts", "⌨️");
 
@@ -67,6 +69,13 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
   let lastTranslateTriggerTime = 0;
   let lastSidepanelTriggerTime = 0;
   const THROTTLE_MS = 350;
+  let contextualSelectionEnabled = false;
+  void SettingsUtils.getSettings().then((settings) => {
+    contextualSelectionEnabled = settings.contextualSelectionEnabled === true;
+  });
+  const unsubscribeSettings = SettingsUtils.onSettingsChanged((settings) => {
+    contextualSelectionEnabled = settings.contextualSelectionEnabled === true;
+  });
 
   const handleKeyDown = async (e: KeyboardEvent) => {
     const now = Date.now();
@@ -90,8 +99,22 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
         e.stopPropagation();
 
         const requestId = createRequestId();
-        // 立即在当前页面展现翻译弹窗
-        popupManager.showPopup(selectedText, requestId);
+        const selectionContext = contextualSelectionEnabled
+          ? extractSelectionContext(document, window, selectedText)
+          : undefined;
+        const settings = await SettingsUtils.getSettings();
+        const useContext = Boolean(
+          settings.contextualSelectionEnabled && selectionContext
+        );
+        popupManager.showPopup(
+          selectedText,
+          requestId,
+          false,
+          useContext ? selectionContext : undefined,
+          useContext
+        );
+
+        if (useContext) return;
 
         // 向后台发起翻译请求
         const browserApi =
@@ -122,14 +145,23 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
       e.stopPropagation();
 
       const selectedText = getSelectedTextFromPage();
+      const selectionContext = selectedText && contextualSelectionEnabled
+        ? extractSelectionContext(document, window, selectedText)
+        : undefined;
       const browserApi =
         (globalThis as any).browser || (globalThis as any).chrome;
 
       try {
         if (selectedText && browserApi?.storage?.local) {
+          const settings = await SettingsUtils.getSettings();
+          const envelopeId = createRequestId();
           await browserApi.storage.local.set({
             pendingSidepanelText: {
               text: selectedText,
+              selectionContext: settings.contextualSelectionEnabled
+                ? selectionContext
+                : undefined,
+              envelopeId,
               timestamp: Date.now(),
             },
           });
@@ -150,5 +182,6 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
 
   return () => {
     window.removeEventListener("keydown", handleKeyDown, true);
+    unsubscribeSettings();
   };
 }

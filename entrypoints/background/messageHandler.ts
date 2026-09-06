@@ -26,6 +26,7 @@ import {
   type TranslationTarget,
 } from "@/entrypoints/shared/requestProtocol";
 import { isNil } from "lodash-es";
+import { normalizeSelectionContext } from "@/entrypoints/shared/selectionContext";
 
 function getRequestTarget(
   request: any,
@@ -108,6 +109,13 @@ export class MessageHandler {
           temperature: request.temperature,
           promptTemplate: request.promptTemplate,
           apiKey: request.apiKey,
+          selectionContext:
+            target.kind === "sidepanel"
+              ? normalizeSelectionContext(request.selectionContext)
+              : normalizeSelectionContext(
+                  request.selectionContext,
+                  request.text
+                ),
         };
 
         const result = await TranslationService.translateText(
@@ -277,4 +285,3 @@ export class MessageHandler {
     return true; // 表示异步响应
   }
 }
-

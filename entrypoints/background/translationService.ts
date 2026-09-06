@@ -9,6 +9,12 @@ import {
 } from "@/entrypoints/shared/errors";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
+import {
+  buildContextualSystemPrompt,
+  buildContextualUserText,
+  normalizeSelectionContext,
+  type SelectionContext,
+} from "@/entrypoints/shared/selectionContext";
 import { HistoryManager } from "./historyManager";
 import { MessageUtils } from "./messageUtils";
 import { RequestManager, type RequestContext } from "./requestManager";
@@ -25,6 +31,7 @@ export interface ChatRoleMessage {
   role: "system" | "user" | "assistant";
   content: string | any[];
   images?: ImageContent[];
+  selectionContext?: SelectionContext;
 }
 
 export interface TranslationParams {
@@ -35,6 +42,7 @@ export interface TranslationParams {
   temperature?: number;
   promptTemplate?: string;
   apiKey?: string;
+  selectionContext?: SelectionContext;
 }
 
 interface StreamChunk {
@@ -95,6 +103,7 @@ export function buildMessagesPayload(
     messages?: ChatRoleMessage[];
     images?: ImageContent[];
     promptTemplate?: string;
+    selectionContext?: SelectionContext;
   }
 ): any[] {
   const {
@@ -102,7 +111,22 @@ export function buildMessagesPayload(
     messages: chatMessages,
     images = [],
     promptTemplate = DEFAULT_SETTINGS.promptTemplate,
+    selectionContext,
   } = params;
+
+  const normalizedTopLevelContext = normalizeSelectionContext(selectionContext);
+  const normalizedMessageContexts =
+    chatMessages?.map((message) =>
+      message.role === "user"
+        ? normalizeSelectionContext(message.selectionContext)
+        : undefined
+    ) || [];
+  const hasContext = Boolean(
+    normalizedTopLevelContext || normalizedMessageContexts.some(Boolean)
+  );
+  const systemPrompt = hasContext
+    ? buildContextualSystemPrompt(promptTemplate)
+    : promptTemplate;
 
   if (chatMessages && chatMessages.length > 0) {
     const hasSystem = chatMessages.some((m) => m.role === "system");
@@ -119,6 +143,38 @@ export function buildMessagesPayload(
 
     chatMessages.forEach((msg, idx) => {
       const isLastUser = idx === lastUserIndex;
+      const messageContext =
+        normalizedMessageContexts[idx] ||
+        (isLastUser ? normalizedTopLevelContext : undefined);
+      let contextualContent = msg.content;
+      if (messageContext && typeof msg.content === "string") {
+        contextualContent = buildContextualUserText(msg.content, messageContext);
+      } else if (messageContext && Array.isArray(msg.content)) {
+        let contextApplied = false;
+        contextualContent = msg.content.map((item) => {
+          if (
+            !contextApplied &&
+            item?.type === "text" &&
+            typeof item.text === "string"
+          ) {
+            contextApplied = true;
+            return {
+              ...item,
+              text: buildContextualUserText(item.text, messageContext),
+            };
+          }
+          return item;
+        });
+        if (!contextApplied) {
+          contextualContent = [
+            ...contextualContent,
+            {
+              type: "text",
+              text: buildContextualUserText("", messageContext),
+            },
+          ];
+        }
+      }
       // 合并当前轮次自身的 msg.images 和顶层传入的 params.images（如果是最后一条 user 消息）
       const combinedImages: ImageContent[] = [
         ...(msg.images || []),
@@ -133,18 +189,30 @@ export function buildMessagesPayload(
 
       formattedMessages.push({
         role: msg.role,
-        content: formatMultimodalContent(msg.content, uniqueImages),
+        content: formatMultimodalContent(contextualContent, uniqueImages),
       });
     });
 
+    if (hasContext) {
+      const existingSystem = formattedMessages.find(
+        (message) => message.role === "system" && typeof message.content === "string"
+      );
+      if (existingSystem) {
+        existingSystem.content = buildContextualSystemPrompt(existingSystem.content);
+      }
+    }
+
     return hasSystem
       ? formattedMessages
-      : [{ role: "system", content: promptTemplate }, ...formattedMessages];
+      : [{ role: "system", content: systemPrompt }, ...formattedMessages];
   }
 
-  const formattedUserContent = formatMultimodalContent(text, images);
+  const userText = normalizedTopLevelContext
+    ? buildContextualUserText(text, normalizedTopLevelContext)
+    : text;
+  const formattedUserContent = formatMultimodalContent(userText, images);
   return [
-    { role: "system", content: promptTemplate },
+    { role: "system", content: systemPrompt },
     {
       role: "user",
       content: formattedUserContent,
@@ -195,6 +263,7 @@ export class TranslationService {
         messages: chatMessages,
         images,
         promptTemplate,
+        selectionContext: params.selectionContext,
       });
 
       const requestBody: any = {

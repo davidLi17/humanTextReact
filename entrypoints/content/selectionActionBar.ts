@@ -12,6 +12,11 @@ import {
 } from "@/entrypoints/shared/theme";
 import type { PopupManager } from "./popupManager";
 import { applyPopupTheme } from "./styles";
+import {
+  createSelectionEnvelope,
+  type SelectionContext,
+} from "@/entrypoints/shared/selectionContext";
+import { extractSelectionContext } from "./selectionContextExtractor";
 
 const logger = createLogger("selection-action-bar", "✨");
 
@@ -231,8 +236,14 @@ export function calculateActionBarPosition(
 }
 
 export interface SelectionActionBarCallbacks {
-  onTranslatePopup?: (text: string) => void | Promise<void>;
-  onOpenSidepanel?: (text: string) => void | Promise<void>;
+  onTranslatePopup?: (
+    text: string,
+    selectionContext?: SelectionContext
+  ) => void | Promise<void>;
+  onOpenSidepanel?: (
+    text: string,
+    selectionContext?: SelectionContext
+  ) => void | Promise<void>;
 }
 
 /**
@@ -241,6 +252,8 @@ export interface SelectionActionBarCallbacks {
 export class SelectionActionBar {
   private container: HTMLElement | null = null;
   private currentSelectedText = "";
+  private currentSelectionContext: SelectionContext | undefined;
+  private contextualSelectionEnabled = false;
   private isVisible = false;
   private themeMode: ThemeMode = THEME_MODES.SYSTEM;
   private settingsCleanup: (() => void) | null = null;
@@ -295,11 +308,17 @@ export class SelectionActionBar {
       targetDocument || (typeof document !== "undefined" ? document : undefined);
     if (!doc) return;
 
-    this.currentSelectedText = text;
-    const bar = this.ensureContainer(doc);
-
     const win =
       targetWindow || (typeof window !== "undefined" ? window : undefined);
+    const envelope = createSelectionEnvelope(
+      text,
+      this.contextualSelectionEnabled && win
+        ? extractSelectionContext(doc, win, text)
+        : undefined
+    );
+    this.currentSelectedText = envelope.text;
+    this.currentSelectionContext = envelope.selectionContext;
+    const bar = this.ensureContainer(doc);
     const viewport: ViewportLike = {
       width: win?.innerWidth || 1024,
       height: win?.innerHeight || 768,
@@ -339,6 +358,7 @@ export class SelectionActionBar {
     }
     this.isVisible = false;
     this.currentSelectedText = "";
+    this.currentSelectionContext = undefined;
     logger.log("隐藏快捷操作条");
   }
 
@@ -448,6 +468,7 @@ export class SelectionActionBar {
 
   private async handleTranslatePopupClick(): Promise<void> {
     const text = this.currentSelectedText;
+    const selectionContext = this.currentSelectionContext;
     this.hide();
 
     if (!isValidSelectionText(text)) return;
@@ -455,16 +476,29 @@ export class SelectionActionBar {
     logger.log("触发浮窗翻译", { textLength: text.length });
 
     if (this.customCallbacks?.onTranslatePopup) {
-      await this.customCallbacks.onTranslatePopup(text);
+      await this.customCallbacks.onTranslatePopup(text, selectionContext);
       return;
     }
 
     if (this.popupManager) {
       const requestId = createRequestId();
-      this.popupManager.showPopup(text, requestId);
 
       try {
         const settings = await SettingsUtils.getSettings();
+        const useContext = Boolean(
+          settings.contextualSelectionEnabled && selectionContext
+        );
+        if (useContext) {
+          this.popupManager.showPopup(
+            text,
+            requestId,
+            false,
+            selectionContext,
+            true
+          );
+          return;
+        }
+        this.popupManager.showPopup(text, requestId);
         await browser.runtime.sendMessage({
           action: MESSAGE_TYPES.TRANSLATE,
           requestId,
@@ -479,6 +513,7 @@ export class SelectionActionBar {
 
   private async handleOpenSidepanelClick(): Promise<void> {
     const text = this.currentSelectedText;
+    const selectionContext = this.currentSelectionContext;
     this.hide();
 
     if (!isValidSelectionText(text)) return;
@@ -486,15 +521,22 @@ export class SelectionActionBar {
     logger.log("触发侧边栏人话", { textLength: text.length });
 
     if (this.customCallbacks?.onOpenSidepanel) {
-      await this.customCallbacks.onOpenSidepanel(text);
+      await this.customCallbacks.onOpenSidepanel(text, selectionContext);
       return;
     }
 
     try {
+      const settings = await SettingsUtils.getSettings();
+      const contextToSend = settings.contextualSelectionEnabled
+        ? selectionContext
+        : undefined;
+      const envelopeId = createRequestId();
       if (typeof browser !== "undefined" && browser?.storage?.local) {
         await browser.storage.local.set({
           pendingSidepanelText: {
             text,
+            selectionContext: contextToSend,
+            envelopeId,
             timestamp: Date.now(),
           },
         });
@@ -508,6 +550,8 @@ export class SelectionActionBar {
           .sendMessage({
             action: "sendToSidepanel",
             text,
+            selectionContext: contextToSend,
+            envelopeId,
           })
           .catch(() => {});
       }
@@ -662,10 +706,14 @@ export class SelectionActionBar {
   private initTheme(): void {
     void SettingsUtils.getSettings().then((settings) => {
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.contextualSelectionEnabled =
+        settings.contextualSelectionEnabled === true;
     });
 
     this.settingsCleanup = SettingsUtils.onSettingsChanged((settings) => {
       this.setThemeMode(normalizeThemeMode(settings.theme));
+      this.contextualSelectionEnabled =
+        settings.contextualSelectionEnabled === true;
     });
   }
 

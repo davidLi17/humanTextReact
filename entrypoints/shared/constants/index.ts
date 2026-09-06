@@ -75,6 +75,7 @@ export const DEFAULT_SETTINGS = {
   apiKey: "your_api_key",
   thinkingEnabled: false,
   showSelectionToolbar: true,
+  contextualSelectionEnabled: false,
   logLevel: LOG_LEVELS.OFF as LogLevel,
   theme: THEME_MODES.SYSTEM as ThemeMode,
 } as const;
@@ -129,4 +130,8 @@ export interface TranslationRequest {
   hasReasoning?: boolean;
   done?: boolean;
   error?: string;
+  selectionContext?: import("../selectionContext").SelectionContext;
+  deferTranslation?: boolean;
+  expectedSelectedText?: string;
+  includeSelectionContext?: boolean;
 }

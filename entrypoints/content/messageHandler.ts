@@ -6,6 +6,8 @@ import { createLogger } from "@/entrypoints/shared/logger";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import { PopupManager } from "./popupManager";
 import { extractPageData } from "./pageExtractor";
+import { extractSelectionContext } from "./selectionContextExtractor";
+import { createSelectionEnvelope } from "@/entrypoints/shared/selectionContext";
 
 const logger = createLogger("content-message", "📨");
 
@@ -44,7 +46,7 @@ export class MessageHandler {
 
         case MESSAGE_TYPES.GET_SELECTED_TEXT:
           logger.info("处理获取选中文本");
-          return this.handleGetSelectedText(sendResponse);
+          return this.handleGetSelectedText(request, sendResponse);
 
         case MESSAGE_TYPES.EXTRACT_PAGE_CONTENT:
           logger.info("处理提取网页正文请求");
@@ -108,7 +110,9 @@ export class MessageHandler {
     this.popupManager.showPopup(
       request.text,
       displayRequestId,
-      !request.requestId
+      !request.requestId,
+      request.selectionContext,
+      request.deferTranslation === true
     );
 
     sendResponse({ success: true, requestId: request.requestId });
@@ -135,10 +139,12 @@ export class MessageHandler {
   }
 
   private handleGetSelectedText(
+    request: TranslationRequest,
     sendResponse: (response?: any) => void
   ): boolean {
     logger.log("📝 [Content MessageHandler] 收到获取选中文本的消息");
     const selectedText = window.getSelection()?.toString().trim();
+    const expectedSelectedText = request.expectedSelectedText;
     logger.log("📋 [Content MessageHandler] 选中的文本", {
       hasText: !!selectedText,
       textLength: selectedText?.length || 0,
@@ -146,9 +152,20 @@ export class MessageHandler {
     });
 
     // 只返回选中的文本，不直接显示弹窗
+    const selectionEnvelope = selectedText
+      ? createSelectionEnvelope(
+          selectedText,
+          request.includeSelectionContext === true &&
+            (!expectedSelectedText ||
+              selectedText === expectedSelectedText.trim())
+            ? extractSelectionContext(document, window, selectedText)
+            : undefined
+        )
+      : undefined;
     sendResponse({
       success: true,
-      selectedText: selectedText || null,
+      selectedText: selectionEnvelope?.text || null,
+      selectionContext: selectionEnvelope?.selectionContext,
     });
     return true;
   }

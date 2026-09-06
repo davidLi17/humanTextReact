@@ -54,6 +54,8 @@ describe("diagnostic redaction", () => {
       apiKey: "secret-key",
       headers: { Authorization: "Bearer abc123" },
       selectionText: "private source text",
+      selectionContext: { paragraph: "hidden page paragraph" },
+      paragraph: "another private paragraph",
       textLength: 19,
       baseUrl: "https://api.example.com/v1/chat?token=secret",
     });
@@ -61,6 +63,8 @@ describe("diagnostic redaction", () => {
     expect(sanitized.apiKey).toBe("[REDACTED]");
     expect(sanitized.headers.Authorization).toBe("[REDACTED]");
     expect(sanitized.selectionText).toBe("[REDACTED_TEXT length=19]");
+    expect(sanitized.selectionContext).toBe("[REDACTED]");
+    expect(sanitized.paragraph).toBe("[REDACTED_TEXT length=25]");
     expect(sanitized.textLength).toBe(19);
     expect(sanitized.baseUrl).toBe("https://api.example.com");
   });

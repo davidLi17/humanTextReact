@@ -118,11 +118,68 @@ import {
   getResetScrollFollowState,
   getScrollFollowState,
 } from "./scrollState";
+import {
+  getSafeHttpUrl,
+  getSafeSourceHostname,
+  normalizeSelectionContext,
+  type SelectionContext,
+} from "@/entrypoints/shared/selectionContext";
+import {
+  restoreComposerDraft,
+  saveComposerDraft,
+  type SidepanelComposerDraft,
+} from "./composerDraft";
 
 const logger = createLogger("sidepanel-app", "💬");
 
 const SESSIONS_STORAGE_KEY = "sidepanel_chat_sessions";
 const ACTIVE_SESSION_STORAGE_KEY = "sidepanel_active_session_id";
+
+interface PendingSidepanelEnvelope {
+  text: string;
+  selectionContext?: SelectionContext;
+  envelopeId?: string;
+  timestamp?: number;
+}
+
+function SelectionContextDetails({
+  context,
+  compact = false,
+  onClear,
+}: {
+  context: SelectionContext;
+  compact?: boolean;
+  onClear?: () => void;
+}) {
+  const safeUrl = getSafeHttpUrl(context.source?.url);
+  const hostname = getSafeSourceHostname(safeUrl);
+  return (
+    <div className={`selection-context-card ${compact ? "compact" : ""}`}>
+      <div className="selection-context-header">
+        <span>当前段落上下文</span>
+        {onClear && (
+          <button type="button" onClick={onClear} aria-label="移除段落上下文">
+            ✕
+          </button>
+        )}
+      </div>
+      {(context.source?.title || safeUrl) && (
+        <div className="selection-context-source">
+          {context.source?.title && <span>{context.source.title}</span>}
+          {safeUrl && (
+            <a href={safeUrl} target="_blank" rel="noreferrer">
+              {hostname || "查看来源"}
+            </a>
+          )}
+        </div>
+      )}
+      <details open={!compact}>
+        <summary>查看段落</summary>
+        <div className="selection-context-text">{context.paragraph}</div>
+      </details>
+    </div>
+  );
+}
 
 function createNewSession(initialTitle = "新对话"): ChatSession {
   const now = Date.now();
@@ -148,6 +205,8 @@ export default function SidePanelApp() {
   const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [inputText, setInputText] = useState<string>("");
   const [images, setImages] = useState<ChatMessage["images"]>([]);
+  const [pendingSelectionContext, setPendingSelectionContext] =
+    useState<SelectionContext>();
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isExtractingPage, setIsExtractingPage] = useState<boolean>(false);
   const [extractError, setExtractError] = useState<string | null>(null);
@@ -201,9 +260,69 @@ export default function SidePanelApp() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const composerDraftsRef = useRef<Map<string, SidepanelComposerDraft>>(
+    new Map()
+  );
+  const consumedEnvelopeIdsRef = useRef<Set<string>>(new Set());
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
+
+  const activateSessionWithDraft = (
+    nextSessionId: string,
+    saveCurrent = true
+  ) => {
+    if (saveCurrent && activeSessionId) {
+      saveComposerDraft(composerDraftsRef.current, activeSessionId, {
+        inputText,
+        images,
+        selectionContext: pendingSelectionContext,
+      });
+    }
+    const nextDraft = restoreComposerDraft(
+      composerDraftsRef.current,
+      nextSessionId
+    );
+    setActiveSessionId(nextSessionId);
+    setInputText(nextDraft.inputText);
+    setImages(nextDraft.images);
+    setPendingSelectionContext(nextDraft.selectionContext);
+    setActiveQuotedText(null);
+  };
+
+  const consumeSidepanelEnvelope = (envelope: PendingSidepanelEnvelope) => {
+    if (
+      envelope.envelopeId &&
+      consumedEnvelopeIdsRef.current.has(envelope.envelopeId)
+    ) {
+      return false;
+    }
+    if (envelope.envelopeId) {
+      consumedEnvelopeIdsRef.current.add(envelope.envelopeId);
+      if (consumedEnvelopeIdsRef.current.size > 50) {
+        const oldest = consumedEnvelopeIdsRef.current.values().next().value;
+        if (oldest) consumedEnvelopeIdsRef.current.delete(oldest);
+      }
+    }
+    setActiveView("chat");
+    setInputText(envelope.text);
+    setImages([]);
+    setPendingSelectionContext(
+      normalizeSelectionContext(envelope.selectionContext)
+    );
+    inputRef.current?.focus();
+    return true;
+  };
+
+  const removePendingEnvelopeIfMatches = async (envelopeId?: string) => {
+    if (!envelopeId || !browser?.storage?.local) return;
+    const stored = (await browser.storage.local.get(
+      "pendingSidepanelText"
+    )) as { pendingSidepanelText?: PendingSidepanelEnvelope };
+    if (stored.pendingSidepanelText?.envelopeId === envelopeId) {
+      await browser.storage.local.remove("pendingSidepanelText");
+    }
+  };
 
   // 长文分段续读进度（按会话 ID 隔离；会话切换后各自状态互不影响）
   const [
@@ -447,13 +566,15 @@ export default function SidePanelApp() {
         ]);
 
         const pendingText = stored.pendingSidepanelText as
-          | { text: string; timestamp: number }
+          | PendingSidepanelEnvelope
           | undefined;
-        if (pendingText && Date.now() - pendingText.timestamp < 10000) {
-          setActiveView("chat");
-          setInputText(pendingText.text);
+        if (
+          pendingText &&
+          typeof pendingText.timestamp === "number" &&
+          Date.now() - pendingText.timestamp < 10000
+        ) {
+          consumeSidepanelEnvelope(pendingText);
           await browser.storage.local.remove("pendingSidepanelText");
-          inputRef.current?.focus();
         }
 
         const pendingRead = stored.pendingWebPageRead as
@@ -476,9 +597,9 @@ export default function SidePanelApp() {
   useEffect(() => {
     const messageListener = (message: any) => {
       if (message.action === "sendToSidepanel" && message.text) {
-        setActiveView("chat");
-        setInputText(message.text);
-        inputRef.current?.focus();
+        if (consumeSidepanelEnvelope(message)) {
+          void removePendingEnvelopeIfMatches(message.envelopeId);
+        }
         return;
       }
 
@@ -827,7 +948,7 @@ export default function SidePanelApp() {
         );
         const updatedSessions = [targetSession, ...sessions];
         setSessions(updatedSessions);
-        setActiveSessionId(targetSession.id);
+        activateSessionWithDraft(targetSession.id);
         void saveSessionsToStorage(updatedSessions);
         void saveActiveSessionId(targetSession.id);
       } else if (targetSession) {
@@ -1143,6 +1264,7 @@ export default function SidePanelApp() {
       role: "user",
       content: text,
       images: images && images.length > 0 ? images : undefined,
+      selectionContext: pendingSelectionContext,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -1181,6 +1303,8 @@ export default function SidePanelApp() {
     setInputText("");
     setActiveQuotedText(null);
     setImages([]);
+    setPendingSelectionContext(undefined);
+    composerDraftsRef.current.delete(activeSession.id);
     setIsStreaming(true);
     setExtractError(null);
     scrollToBottom(true);
@@ -1190,6 +1314,7 @@ export default function SidePanelApp() {
         role: "user",
         content: text,
         images: userMessage.images,
+        selectionContext: userMessage.selectionContext,
       });
 
       await browser.runtime.sendMessage({
@@ -1610,7 +1735,7 @@ export default function SidePanelApp() {
       void saveSessionsToStorage(updated);
       return updated;
     });
-    setActiveSessionId(fresh.id);
+    activateSessionWithDraft(fresh.id);
     void saveActiveSessionId(fresh.id);
     setActiveView("chat");
     setShowDrawer(false);
@@ -1646,17 +1771,18 @@ export default function SidePanelApp() {
       return next;
     });
     const filtered = sessions.filter((s) => s.id !== sessionId);
+    composerDraftsRef.current.delete(sessionId);
     if (filtered.length === 0) {
       const fresh = createNewSession();
       setSessions([fresh]);
-      setActiveSessionId(fresh.id);
+      activateSessionWithDraft(fresh.id, false);
       void saveSessionsToStorage([fresh]);
       void saveActiveSessionId(fresh.id);
     } else {
       setSessions(filtered);
       void saveSessionsToStorage(filtered);
       if (activeSessionId === sessionId) {
-        setActiveSessionId(filtered[0].id);
+        activateSessionWithDraft(filtered[0].id, false);
         void saveActiveSessionId(filtered[0].id);
       }
     }
@@ -2125,7 +2251,9 @@ export default function SidePanelApp() {
                           : ""
                       }`}
                       onClick={() => {
-                        setActiveSessionId(session.id);
+                        if (session.id !== activeSessionId) {
+                          activateSessionWithDraft(session.id);
+                        }
                         void saveActiveSessionId(session.id);
                         setActiveView("chat");
                         setShowDrawer(false);
@@ -2401,6 +2529,12 @@ export default function SidePanelApp() {
                                   ))}
                                 </div>
                               )}
+                              {message.selectionContext && (
+                                <SelectionContextDetails
+                                  context={message.selectionContext}
+                                  compact
+                                />
+                              )}
                               <div className="user-text">{message.content}</div>
                             </div>
                           )}
@@ -2675,6 +2809,13 @@ export default function SidePanelApp() {
               <QuoteInputCapsule
                 quotedText={activeQuotedText}
                 onClear={handleClearQuote}
+              />
+            )}
+
+            {pendingSelectionContext && (
+              <SelectionContextDetails
+                context={pendingSelectionContext}
+                onClear={() => setPendingSelectionContext(undefined)}
               />
             )}
 

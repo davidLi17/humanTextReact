@@ -15,6 +15,7 @@ export interface UserSettings {
   apiKey: string;
   thinkingEnabled: boolean;
   showSelectionToolbar: boolean;
+  contextualSelectionEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
 }
@@ -235,6 +236,10 @@ export class SettingsUtils {
     callback: (settings: UserSettings) => void
   ): () => void {
     const browserAPI = this.getBrowserAPI();
+    const onChanged = browserAPI.storage?.onChanged;
+    if (!onChanged?.addListener || !onChanged?.removeListener) {
+      return () => {};
+    }
 
     const listener = (changes: any) => {
       if (changes.settings) {
@@ -250,11 +255,11 @@ export class SettingsUtils {
       }
     };
 
-    browserAPI.storage.onChanged.addListener(listener);
+    onChanged.addListener(listener);
 
     // 返回取消监听的函数
     return () => {
-      browserAPI.storage.onChanged.removeListener(listener);
+      onChanged.removeListener(listener);
     };
   }
 }
@@ -279,4 +284,3 @@ export const getShowSelectionToolbar = (): Promise<boolean> => {
 export const getUserSettings = (): Promise<UserSettings> => {
   return SettingsUtils.getSettings();
 };
-

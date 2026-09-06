@@ -48,6 +48,7 @@ interface Settings {
   promptTemplate: string;
   thinkingEnabled: boolean;
   showSelectionToolbar: boolean;
+  contextualSelectionEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
 }
@@ -731,6 +732,33 @@ function Options() {
             </div>
             <div className="setting-hint">
               划选网页文本时，在选区附近显示快捷操作条（人话翻译、追问、收藏）
+            </div>
+          </div>
+
+          <div className="setting-item">
+            <label htmlFor="contextualSelectionEnabled">结合当前段落解释</label>
+            <div className="switch-container">
+              <input
+                type="checkbox"
+                id="contextualSelectionEnabled"
+                checked={settings.contextualSelectionEnabled}
+                onChange={(e) =>
+                  handleInputChange(
+                    "contextualSelectionEnabled",
+                    e.target.checked
+                  )
+                }
+                className="switch-input"
+              />
+              <label
+                htmlFor="contextualSelectionEnabled"
+                className="switch-label"
+              ></label>
+            </div>
+            <div className="setting-hint">
+              默认关闭。开启后，划词时会提取选区所在的有限段落（最多约 2000
+              字），并在你确认发送时交给已配置的 AI 服务。页面标题和 URL
+              仅用于本地来源预览。
             </div>
           </div>
 

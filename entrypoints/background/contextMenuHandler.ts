@@ -9,8 +9,42 @@ import {
   createRequestId,
   createSelectionTarget,
 } from "@/entrypoints/shared/requestProtocol";
+import {
+  normalizeSelectionContext,
+  type SelectionContext,
+} from "@/entrypoints/shared/selectionContext";
 
 const logger = createLogger("context-menu", "🖱️");
+
+export async function getSelectionContextForFrame(
+  info: any,
+  tabId: number,
+  selectedText: string
+): Promise<SelectionContext | undefined> {
+  const supplied = normalizeSelectionContext(info.selectionContext, selectedText);
+  if (supplied) return supplied;
+  if (info.selectionContextCaptured === true) return undefined;
+
+  try {
+    const browserApi =
+      (globalThis as any).browser || (globalThis as any).chrome;
+    const message = {
+      action: MESSAGE_TYPES.GET_SELECTED_TEXT,
+      expectedSelectedText: selectedText,
+      includeSelectionContext: true,
+    };
+    const response =
+      typeof info.frameId === "number"
+        ? await browserApi.tabs.sendMessage(tabId, message, {
+            frameId: info.frameId,
+          })
+        : await browserApi.tabs.sendMessage(tabId, message);
+    if (response?.selectedText !== selectedText.trim()) return undefined;
+    return normalizeSelectionContext(response.selectionContext, selectedText);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * 右键菜单处理器
@@ -53,11 +87,20 @@ export class ContextMenuHandler {
       tab?.windowId
     ) {
       try {
-        await openSidePanel({ windowId: tab.windowId });
+        const openPromise = openSidePanel({ windowId: tab.windowId });
+        const settings = await SettingsUtils.getSettings();
+        const selectionContext =
+          settings.contextualSelectionEnabled && info.selectionText && tab.id
+            ? await getSelectionContextForFrame(info, tab.id, info.selectionText)
+            : undefined;
+        const envelopeId = createRequestId();
+        await openPromise;
         if (info.selectionText) {
           await browser.storage.local.set({
             pendingSidepanelText: {
               text: info.selectionText,
+              selectionContext,
+              envelopeId,
               timestamp: Date.now(),
             },
           });
@@ -65,6 +108,8 @@ export class ContextMenuHandler {
           void MessageUtils.sendRuntimeMessage({
             action: "sendToSidepanel",
             text: info.selectionText,
+            selectionContext,
+            envelopeId,
           });
         }
       } catch (error) {
@@ -90,6 +135,9 @@ export class ContextMenuHandler {
 
           // 获取当前设置，确保思维链状态正确
           const settings = await SettingsUtils.getSettings();
+          const selectionContext = settings.contextualSelectionEnabled
+            ? await getSelectionContextForFrame(info, tab.id, selectedText)
+            : undefined;
           logger.log("⚙️ [ContextMenuHandler] 获取设置", {
             thinkingEnabled: settings.thinkingEnabled,
             hasApiKey: !!settings.apiKey,
@@ -110,10 +158,17 @@ export class ContextMenuHandler {
               action: MESSAGE_TYPES.SHOW_TRANSLATION_POPUP,
               requestId,
               text: selectedText,
+              selectionContext,
+              deferTranslation: Boolean(selectionContext),
             });
           if (!popupDelivery.delivered) {
             logger.warn("页面无法接收翻译弹窗消息，终止本次翻译");
             RequestManager.cleanupRequest(requestId);
+            return;
+          }
+
+          if (selectionContext) {
+            // 浮窗内由用户选择“结合本段”或“仅解释文字”后再领取请求。
             return;
           }
 
@@ -140,6 +195,7 @@ export class ContextMenuHandler {
               text: selectedText,
               images: [],
               thinkingEnabled: settings.thinkingEnabled ?? false,
+              selectionContext,
             },
             requestContext
           );

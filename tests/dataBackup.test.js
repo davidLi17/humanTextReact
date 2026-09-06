@@ -106,6 +106,7 @@ const settingsFixture = {
   promptTemplate: "用大白话解释 {text}",
   thinkingEnabled: true,
   showSelectionToolbar: false,
+  contextualSelectionEnabled: false,
   logLevel: "debug",
   theme: "dark",
 };
