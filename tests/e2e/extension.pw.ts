@@ -1,0 +1,437 @@
+import { expect, test as base, chromium, type BrowserContext } from "@playwright/test";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+interface RecordedModelRequest {
+  authorization?: string;
+  body: any;
+}
+
+interface LocalFixtureServer {
+  baseUrl: string;
+  modelRequests: RecordedModelRequest[];
+  close(): Promise<void>;
+}
+
+interface ExtensionHarness {
+  context: BrowserContext;
+  extensionId: string;
+  server: LocalFixtureServer;
+  unexpectedExternalRequests: string[];
+}
+
+const SELECTED_TEXT = "对齐颗粒度并形成增长飞轮";
+
+function longArticleHtml() {
+  const paragraphs = Array.from({ length: 560 }, (_, index) =>
+    `<p>第 ${index + 1} 段阶段三长文正文：围绕用户价值、交付节奏和反馈闭环展开，保留唯一段落序号以验证真实分段恢复和继续通读流程。</p>`
+  ).join("");
+  return `<!doctype html>
+    <html lang="zh-CN">
+      <head><meta charset="utf-8"><title>阶段三长文</title></head>
+      <body><article><h1>阶段三长文</h1>${paragraphs}</article></body>
+    </html>`;
+}
+
+async function startFixtureServer(): Promise<LocalFixtureServer> {
+  const modelRequests: RecordedModelRequest[] = [];
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url || "/", "http://127.0.0.1");
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      });
+      response.end();
+      return;
+    }
+
+    if (url.pathname === "/article") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html>
+        <html lang="zh-CN">
+          <head>
+            <meta charset="utf-8">
+            <title>阶段三本地文章</title>
+            <style>#selection { font-size: 20px; line-height: 1.8; }</style>
+          </head>
+          <body>
+            <main>
+              <h1>阶段三本地文章</h1>
+              <p id="selection">${SELECTED_TEXT}</p>
+              <p>这是完全由本地测试服务提供的文章，不访问外部内容。</p>
+            </main>
+          </body>
+        </html>`);
+      return;
+    }
+
+    if (url.pathname === "/long-article") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(longArticleHtml());
+      return;
+    }
+
+    if (url.pathname === "/v1/chat/completions" && request.method === "POST") {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      modelRequests.push({
+        authorization: request.headers.authorization,
+        body,
+      });
+      const serialized = JSON.stringify(body);
+      const content = serialized.includes("【续读进度】: 第 2 段")
+        ? "本地长文第二段结果"
+        : serialized.includes("阶段三长文")
+        ? "本地长文首段结果"
+        : "本地浮窗翻译结果";
+
+      response.writeHead(200, {
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache",
+        "Content-Type": "text/event-stream; charset=utf-8",
+      });
+      response.write(
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`
+      );
+      response.end("data: [DONE]\n\n");
+      return;
+    }
+
+    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Not Found");
+  });
+
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", () => resolveListen());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("本地测试服务没有获得 TCP 端口");
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    modelRequests,
+    close: () =>
+      new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => (error ? rejectClose(error) : resolveClose()));
+      }),
+  };
+}
+
+async function configureExtension(
+  harness: Pick<ExtensionHarness, "context" | "extensionId" | "server">
+) {
+  const page = await harness.context.newPage();
+  await page.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  await page.evaluate(async (baseUrl) => {
+    const chromeApi = (globalThis as any).chrome;
+    await chromeApi.storage.local.clear();
+    await chromeApi.storage.sync.clear();
+    await chromeApi.storage.sync.set({
+      settings: {
+        apiKey: "fixture-only-key",
+        baseUrl: `${baseUrl}/v1/chat/completions`,
+        model: "fixture-model",
+        temperature: 0,
+        promptTemplate: "只返回本地测试内容",
+        thinkingEnabled: false,
+        showSelectionToolbar: true,
+        contextualSelectionEnabled: false,
+        logLevel: "off",
+        theme: "light",
+        fontScalePercent: 100,
+      },
+    });
+    await chromeApi.storage.local.set({ fontScalePercent: 100 });
+  }, harness.server.baseUrl);
+  await page.close();
+}
+
+const test = base.extend<{ harness: ExtensionHarness }>({
+  harness: async ({}, use, testInfo) => {
+    const extensionPath = resolve(".output/chrome-mv3");
+    await access(join(extensionPath, "manifest.json"));
+    const userDataDir = await mkdtemp(join(tmpdir(), "humantext-e2e-"));
+    const server = await startFixtureServer();
+    let context: BrowserContext | undefined;
+    let tracingStarted = false;
+
+    try {
+      context = await chromium.launchPersistentContext(userDataDir, {
+        channel: "chromium",
+        headless: true,
+        args: [
+          `--disable-extensions-except=${extensionPath}`,
+          `--load-extension=${extensionPath}`,
+          "--disable-background-networking",
+          "--disable-component-update",
+          "--no-first-run",
+        ],
+      });
+      await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+      tracingStarted = true;
+
+      const unexpectedExternalRequests: string[] = [];
+      await context.route("**/*", async (route) => {
+        const url = new URL(route.request().url());
+        if (
+          (url.protocol === "http:" || url.protocol === "https:") &&
+          url.hostname !== "127.0.0.1" &&
+          url.hostname !== "localhost"
+        ) {
+          unexpectedExternalRequests.push(url.href);
+          await route.abort("blockedbyclient");
+          return;
+        }
+        await route.continue();
+      });
+
+      let serviceWorker = context.serviceWorkers()[0];
+      if (!serviceWorker) serviceWorker = await context.waitForEvent("serviceworker");
+      const extensionId = new URL(serviceWorker.url()).hostname;
+      const harness = { context, extensionId, server, unexpectedExternalRequests };
+      await configureExtension(harness);
+      await use(harness);
+    } finally {
+      try {
+        const failed = testInfo.status !== testInfo.expectedStatus;
+        if (context && failed) {
+          for (const [index, page] of context.pages().entries()) {
+            const screenshotPath = testInfo.outputPath(
+              `failure-page-${index + 1}.png`
+            );
+            try {
+              await page.screenshot({ path: screenshotPath, fullPage: true });
+              await testInfo.attach(`failure-page-${index + 1}`, {
+                path: screenshotPath,
+                contentType: "image/png",
+              });
+            } catch {
+              // 页面可能已由测试关闭；继续保存其他页面和 Trace。
+            }
+          }
+        }
+        if (context && tracingStarted) {
+          if (failed) {
+            const tracePath = testInfo.outputPath("trace.zip");
+            await context.tracing.stop({ path: tracePath });
+            await testInfo.attach("trace", {
+              path: tracePath,
+              contentType: "application/zip",
+            });
+          } else {
+            await context.tracing.stop();
+          }
+        }
+      } finally {
+        try {
+          await context?.close();
+        } finally {
+          try {
+            await server.close();
+          } finally {
+            await rm(userDataDir, { recursive: true, force: true });
+          }
+        }
+      }
+    }
+  },
+});
+
+async function createVisibleRangeSelection(page: import("@playwright/test").Page) {
+  await expect(page.locator("#translator-popup-style")).toHaveCount(1);
+  await page.locator("#selection").evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await expect(page.locator(".translator-action-bar")).toBeVisible();
+}
+
+test("真实选区经过 Content、Background 和本地 SSE 显示浮窗结果", async ({ harness }) => {
+  const article = await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/article`);
+  await createVisibleRangeSelection(article);
+
+  await article.getByRole("button", { name: "浮窗翻译" }).click();
+  await expect(article.locator(".translator-popup")).toBeVisible();
+  await expect(article.locator(".translator-translated-text")).toContainText(
+    "本地浮窗翻译结果"
+  );
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+
+  const request = harness.server.modelRequests[0];
+  expect(request.authorization).toBe("Bearer fixture-only-key");
+  expect(JSON.stringify(request.body.messages)).toContain(SELECTED_TEXT);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("真实长文首段完成后关闭并重开 Sidepanel，恢复后继续第二段", async ({ harness }) => {
+  const article = await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/long-article`);
+  const sidepanel = await harness.context.newPage();
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  const readButton = sidepanel.getByRole("button", { name: /通读当前网页/ }).first();
+  await expect(readButton).toBeEnabled();
+
+  await article.bringToFront();
+  await readButton.evaluate((element) => (element as HTMLButtonElement).click());
+  await expect(sidepanel.getByText("本地长文首段结果")).toBeVisible();
+  const continueButton = sidepanel.getByRole("button", {
+    name: /继续解读剩余部分（第 2 段）/,
+  });
+  await expect(continueButton).toBeVisible();
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+  await expect
+    .poll(() =>
+      sidepanel.evaluate(async () => {
+        const chromeApi = (globalThis as any).chrome;
+        const stored = await chromeApi.storage.local.get(
+          "sidepanel_web_reading_progress_v1"
+        );
+        return JSON.stringify(stored.sidepanel_web_reading_progress_v1 || null);
+      })
+    )
+    .toContain('"segmentIndex":2');
+
+  await sidepanel.close();
+  const restoredSidepanel = await harness.context.newPage();
+  await restoredSidepanel.goto(
+    `chrome-extension://${harness.extensionId}/sidepanel.html`
+  );
+  await expect(restoredSidepanel.getByText("本地长文首段结果")).toBeVisible();
+  const restoredContinueButton = restoredSidepanel.getByRole("button", {
+    name: /继续解读剩余部分（第 2 段）/,
+  });
+  await expect(restoredContinueButton).toBeVisible();
+
+  await article.bringToFront();
+  await restoredContinueButton.evaluate((element) =>
+    (element as HTMLButtonElement).click()
+  );
+  await expect(restoredSidepanel.getByText("本地长文第二段结果")).toBeVisible();
+  await expect.poll(() => harness.server.modelRequests.length).toBe(2);
+  const firstUserContent = harness.server.modelRequests[0].body.messages.at(-1)
+    .content as string;
+  const secondUserContent = harness.server.modelRequests[1].body.messages.at(-1)
+    .content as string;
+  expect(firstUserContent).not.toContain("【续读进度】");
+  expect(secondUserContent).toContain("【续读进度】: 第 2 段");
+  expect(secondUserContent).toContain("【本段正文内容】");
+  expect(secondUserContent).not.toBe(firstUserContent);
+  const secondSegmentMarker = secondUserContent.match(
+    /第 \d+ 段阶段三长文正文/
+  )?.[0];
+  expect(secondSegmentMarker).toBeDefined();
+  expect(firstUserContent).not.toContain(secondSegmentMarker);
+  await expect(restoredSidepanel.getByText(/已读至第 2 段/)).toBeVisible();
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("字体设置通过 Storage 事件同步三个扩展页面和 Content 浮层", async ({ harness }) => {
+  const article = await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/article`);
+  await createVisibleRangeSelection(article);
+  await article.getByRole("button", { name: "浮窗翻译" }).click();
+  await expect(article.locator(".translator-popup")).toBeVisible();
+  await expect(article.locator(".translator-translated-text")).toContainText(
+    "本地浮窗翻译结果"
+  );
+  const options = await harness.context.newPage();
+  const sidepanel = await harness.context.newPage();
+  const popup = await harness.context.newPage();
+  await Promise.all([
+    options.goto(`chrome-extension://${harness.extensionId}/options.html`),
+    sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`),
+    popup.goto(`chrome-extension://${harness.extensionId}/popup.html`),
+  ]);
+
+  const readScale = (page: import("@playwright/test").Page) =>
+    page.evaluate(() =>
+      document.documentElement.style.getPropertyValue("--ht-font-scale")
+    );
+  const hostFontBefore = await article
+    .locator("#selection")
+    .evaluate((element) => getComputedStyle(element).fontSize);
+  const actionFontBefore = await article
+    .locator(".translator-action-text")
+    .first()
+    .evaluate((element) => getComputedStyle(element).fontSize);
+  const translationPopupFontBefore = await article
+    .locator(".translator-translated-text")
+    .evaluate((element) => getComputedStyle(element).fontSize);
+
+  await options.getByRole("button", { name: "增大扩展字体" }).click();
+  await expect.poll(() => readScale(options)).toBe("1.1");
+  await expect.poll(() => readScale(sidepanel)).toBe("1.1");
+  await expect.poll(() => readScale(popup)).toBe("1.1");
+  await expect
+    .poll(() =>
+      article.locator(".translator-action-bar").evaluate((element) =>
+        (element as HTMLElement).style.getPropertyValue("--ht-font-scale")
+      )
+    )
+    .toBe("1.1");
+  await expect
+    .poll(() =>
+      article.locator(".translator-popup").evaluate((element) =>
+        (element as HTMLElement).style.getPropertyValue("--ht-font-scale")
+      )
+    )
+    .toBe("1.1");
+
+  const actionFontAfter = await article
+    .locator(".translator-action-text")
+    .first()
+    .evaluate((element) => getComputedStyle(element).fontSize);
+  expect(Number.parseFloat(actionFontAfter)).toBeGreaterThan(
+    Number.parseFloat(actionFontBefore)
+  );
+  const translationPopupFontAfter = await article
+    .locator(".translator-translated-text")
+    .evaluate((element) => getComputedStyle(element).fontSize);
+  expect(Number.parseFloat(translationPopupFontAfter)).toBeGreaterThan(
+    Number.parseFloat(translationPopupFontBefore)
+  );
+  await expect
+    .poll(() =>
+      article
+        .locator("#selection")
+        .evaluate((element) => getComputedStyle(element).fontSize)
+    )
+    .toBe(hostFontBefore);
+
+  await sidepanel.getByRole("button", { name: "增大扩展字体" }).click();
+  await expect.poll(() => readScale(options)).toBe("1.2");
+  await expect.poll(() => readScale(popup)).toBe("1.2");
+
+  await popup.keyboard.press("Meta+0");
+  await expect.poll(() => readScale(options)).toBe("1");
+  await expect.poll(() => readScale(sidepanel)).toBe("1");
+  await expect.poll(() => readScale(popup)).toBe("1");
+  await expect
+    .poll(() =>
+      article.locator(".translator-action-bar").evaluate((element) =>
+        (element as HTMLElement).style.getPropertyValue("--ht-font-scale")
+      )
+    )
+    .toBe("1");
+  await expect
+    .poll(() =>
+      article.locator(".translator-popup").evaluate((element) =>
+        (element as HTMLElement).style.getPropertyValue("--ht-font-scale")
+      )
+    )
+    .toBe("1");
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});

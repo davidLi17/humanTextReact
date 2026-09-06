@@ -12,7 +12,16 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun run test:fast && bun run test:components",
+    "test:fast": "bun test tests/unit tests/contracts tests/integration tests/helpers",
+    "test:unit": "bun test tests/unit",
+    "test:contract": "bun test tests/contracts",
+    "test:integration": "bun test tests/integration",
+    "test:shared": "bun test tests/unit tests/contracts tests/integration tests/helpers --parallel=1 --no-isolate --randomize --seed ${TEST_SEED:-$RANDOM}",
+    "test:components": "bun test --preload=./tests/components/preload.ts --parallel=1 --no-isolate --randomize --seed ${TEST_SEED:-$RANDOM} ./tests/components/*.component.tsx",
+    "test:coverage": "bun test tests/unit tests/contracts tests/integration tests/helpers --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage",
+    "test:e2e": "bun run build && bunx playwright test",
+    "test:e2e:built": "bunx playwright test",
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },
@@ -28,6 +37,10 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.14.0",
+    "@playwright/test": "^1.63.0",
+    "@testing-library/react": "^16.3.3",
+    "@types/bun": "1.4.1",
     "@types/lodash-es": "^4.17.12",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.3",

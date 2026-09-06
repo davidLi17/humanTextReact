@@ -199,11 +199,31 @@ bun run dev:firefox
 
 ```bash
 bun run compile
-bun test
+bun run test
+bun run test:fast
+bun run test:unit
+bun run test:contract
+bun run test:integration
+bun run test:shared
+bun run test:components
+bun run test:coverage
+bunx playwright install chromium
+bun run test:e2e
+bun run test:e2e:built
 ```
 
-测试覆盖快捷键双通道保活、请求生命周期管理、侧边栏滚动状态、
-划词操作栏、生词本数据模型、Markdown XSS 转义、诊断日志等模块。
+`test` 会依次执行 312 个快速测试和独立的 Sidepanel React 组件测试。
+`test:shared` 会在单 Worker 共享进程中随机测试顺序；可通过
+`TEST_SEED=123456 bun run test:shared` 指定种子复现问题。覆盖率只统计测试实际
+加载到的生产文件，并通过 `bunfig.toml` 排除 `tests/**`。当前生产代码基线为函数
+70.86%、行 72.49%；组件 Runner、未加载的浏览器入口和真实扩展生命周期不属于全量覆盖率。
+分层职责、隔离规范和浏览器回归盲区见 [`tests/README.md`](tests/README.md)。
+
+`test:e2e` 会先构建 Chrome MV3 扩展，再使用 Playwright 的临时独立 Chromium
+Profile 和本地 HTTP/SSE 夹具验证三条真实扩展流程。它不会连接日常 Chrome，也不会调用真实模型服务。
+Linux 或 CI 首次安装使用 `bunx playwright install --with-deps chromium`。
+参考 [Bun 官方代码覆盖率指南](https://bun.com/docs/test/code-coverage)和
+[Playwright 官方 Chrome 扩展测试指南](https://playwright.dev/docs/chrome-extensions)。
 
 `docs/` 目录收录了开发回顾、请求 ID 重构方案、翻译链路修复方案
 和 Chrome 诊断日志使用指南。
