@@ -514,6 +514,26 @@ body {
   font-weight: 500;
 }
 
+.backup-file-input {
+  display: none;
+}
+
+.backup-message {
+  margin-top: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+  word-break: break-word;
+
+  &.success {
+    color: #16a363;
+  }
+
+  &.error {
+    color: #b42318;
+  }
+}
+
 [data-theme="dark"] {
   .diagnostic-status {
     color: #e5e7eb;
@@ -526,6 +546,16 @@ body {
   .diagnostic-summary,
   .diagnostic-message {
     color: #cbd5e1;
+  }
+
+  .backup-message {
+    &.success {
+      color: #6ee7b7;
+    }
+
+    &.error {
+      color: #fecaca;
+    }
   }
 
   .diagnostic-btn.secondary {
