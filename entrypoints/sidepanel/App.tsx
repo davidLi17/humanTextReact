@@ -20,12 +20,24 @@ import {
   ChatSession,
 } from "@/entrypoints/shared/chatTypes";
 import {
+  buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
+  classifyWebReadExtractError,
+  describeWebReadFailure,
   extractSuggestedQuestions,
+  getWebReadingSegmentCount,
+  MAX_PAGE_CONTENT_CHARS,
+  MIN_PAGE_CONTENT_CHARS,
+  WEB_READ_STAGE_LABELS,
+  WEB_READING_EXTRACT_TIMEOUT_MARKER,
+  WEB_READING_EXTRACT_TIMEOUT_MS,
   WEB_READING_SYSTEM_PROMPT,
   WebPageMetadata,
+  webReadFailureKindFromStage,
+  WebReadExtractStage,
 } from "@/entrypoints/shared/webReadingPrompt";
 import {
+  ExtractActiveTabResult,
   extractActiveTabContent,
   getActiveTab,
 } from "@/entrypoints/shared/sidepanelUtils";
@@ -111,6 +123,23 @@ const QUICK_PROMPTS = [
   "指出这段描述中有哪些容易踩坑或含糊不清的地方",
 ];
 
+/**
+ * 长文分段续读的进度状态（仅存内存，按会话 ID 隔离，属最轻实现：
+ * 不做 map-reduce 汇总、不引入后台任务队列；侧边栏关闭后自然丢弃）
+ */
+interface WebReadingProgressState {
+  title: string;
+  url: string;
+  fullContent: string;
+  totalSegments: number;
+  /** 下一个待解读段（从 1 开始计） */
+  segmentIndex: number;
+  /** 下一段在 fullContent 中的起始下标 */
+  nextStart: number;
+  /** 最近一次通读回复的消息 ID，用于把续读按钮挂在正确的 AI 回复下方 */
+  lastAssistantMessageId: string;
+}
+
 export default function SidePanelApp() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(THEME_MODES.SYSTEM);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -170,6 +199,15 @@ export default function SidePanelApp() {
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
+
+  // 长文分段续读进度（按会话 ID 隔离；会话切换后各自状态互不影响）
+  const [
+    webReadingProgressMap,
+    setWebReadingProgressMap,
+  ] = useState<Map<string, WebReadingProgressState>>(new Map());
+  const activeWebReadingProgress = activeSession
+    ? webReadingProgressMap.get(activeSession.id)
+    : undefined;
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -615,21 +653,67 @@ export default function SidePanelApp() {
         url: activeTab?.url,
       });
 
-      const extractResult = await extractActiveTabContent();
+      // 失败路径：提取消息无响应/超时（标记环节 cs-inject），避免“正在提取”永久悬挂
+      let extractTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      const extractResult = await Promise.race([
+        extractActiveTabContent(),
+        new Promise<ExtractActiveTabResult>((resolve) => {
+          extractTimeoutId = setTimeout(() => {
+            resolve({
+              success: false,
+              error: WEB_READING_EXTRACT_TIMEOUT_MARKER,
+              stage: "cs-inject",
+            });
+          }, WEB_READING_EXTRACT_TIMEOUT_MS);
+        }),
+      ]);
+      if (extractTimeoutId) clearTimeout(extractTimeoutId);
 
       if (!extractResult.success || !extractResult.data) {
+        // 失败分类与环节定位：stage 缺失时退回按错误文案归类（防御性，正常链路 stage 恒有值）
+        const failureDetail = extractResult.error;
+        const isTimeout = failureDetail === WEB_READING_EXTRACT_TIMEOUT_MARKER;
+        const failureStage: WebReadExtractStage =
+          extractResult.stage ?? "fallback-extract";
+        const failureKind = isTimeout
+          ? "extract-timeout"
+          : extractResult.stage
+          ? webReadFailureKindFromStage(extractResult.stage)
+          : classifyWebReadExtractError(failureDetail);
+        const shouldEmbedDetail =
+          failureKind === "cs-extract-failed" ||
+          failureKind === "script-blocked" ||
+          failureKind === "unknown";
         setExtractError(
-          extractResult.error || "无法提取当前网页正文，请确保网页已加载并重试。"
+          describeWebReadFailure(
+            failureKind,
+            !isTimeout && shouldEmbedDetail ? failureDetail : undefined,
+            failureStage
+          )
         );
+        logger.error("网页通读提取正文失败:", {
+          stage: failureStage,
+          kind: failureKind,
+          detail: failureDetail,
+        });
         setIsExtractingPage(false);
         return;
       }
 
       const pageData: WebPageMetadata = extractResult.data;
-      if (!pageData.content || pageData.content.trim().length < 15) {
+
+      // 失败路径：正文为空或过短，视为无效提取（环节 content-too-short）
+      if (
+        !pageData.content ||
+        pageData.content.trim().length < MIN_PAGE_CONTENT_CHARS
+      ) {
         setExtractError(
-          "当前网页正文内容过少或受到防盗链限制，未能提取到有效长文。"
+          describeWebReadFailure("empty-content", undefined, "content-too-short")
         );
+        logger.error("网页通读提取正文失败:", {
+          stage: "content-too-short",
+          contentLength: pageData.content?.trim().length ?? 0,
+        });
         setIsExtractingPage(false);
         return;
       }
@@ -695,6 +779,25 @@ export default function SidePanelApp() {
       setSessions(nextSessions);
       void saveSessionsToStorage(nextSessions);
 
+      // 长文被截断时记录分段进度，供 AI 回复下方的“继续解读剩余部分”按钮使用
+      const totalSegments = getWebReadingSegmentCount(pageData.content.length);
+      if (totalSegments > 1) {
+        const progressState: WebReadingProgressState = {
+          title: pageData.title,
+          url: pageData.url,
+          fullContent: pageData.content,
+          totalSegments,
+          segmentIndex: 2,
+          nextStart: MAX_PAGE_CONTENT_CHARS,
+          lastAssistantMessageId: assistantMessageId,
+        };
+        setWebReadingProgressMap((prev) => {
+          const next = new Map(prev);
+          next.set(targetSession.id, progressState);
+          return next;
+        });
+      }
+
       setIsExtractingPage(false);
       setIsStreaming(true);
       scrollToBottom(true);
@@ -716,11 +819,147 @@ export default function SidePanelApp() {
         thinkingEnabled,
       });
     } catch (error: any) {
-      logger.error("通读网页请求失败:", error);
+      // 提取链路失败均已提前 return，走到这里的异常属于会话组装或 AI 请求发送环节
+      logger.error("通读网页请求失败:", {
+        stage: "ai-request",
+        detail: error?.message,
+      });
       setIsExtractingPage(false);
       setIsStreaming(false);
       setExtractError(
-        error?.message || "通读网页请求失败，请检查网络或 API 设置"
+        `${error?.message || "通读网页请求失败，请检查网络或 API 设置"}（${
+          WEB_READ_STAGE_LABELS["ai-request"]
+        }）`
+      );
+    }
+  };
+
+  // 继续解读网页长文的剩余分段（同会话上下文顺序解读，直至读完）
+  const handleContinueWebReading = async () => {
+    if (isStreaming || isExtractingPage || !activeSession) return;
+    const progress = webReadingProgressMap.get(activeSession.id);
+    if (!progress || progress.segmentIndex > progress.totalSegments) return;
+
+    const segmentIndex = progress.segmentIndex;
+    const segmentEnd = Math.min(
+      progress.nextStart + MAX_PAGE_CONTENT_CHARS,
+      progress.fullContent.length
+    );
+    const segmentContent = progress.fullContent.slice(
+      progress.nextStart,
+      segmentEnd
+    );
+    if (!segmentContent.trim()) {
+      setWebReadingProgressMap((prev) => {
+        const next = new Map(prev);
+        next.delete(activeSession.id);
+        return next;
+      });
+      return;
+    }
+
+    const userMessageId = createRequestId();
+    const assistantMessageId = createRequestId();
+    const currentRequestId = createRequestId();
+    activeRequestIdRef.current = currentRequestId;
+
+    const userMessage: ChatMessage = {
+      id: userMessageId,
+      role: "user",
+      content: `继续解读《${progress.title}》第 ${segmentIndex} 段 / 共约 ${progress.totalSegments} 段`,
+      createdAt: Date.now(),
+      status: "completed",
+    };
+
+    const assistantMessage: ChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
+      hasReasoning: false,
+      createdAt: Date.now(),
+      status: "streaming",
+    };
+
+    const updatedSession: ChatSession = {
+      ...activeSession,
+      messages: [...activeSession.messages, userMessage, assistantMessage],
+      updatedAt: Date.now(),
+    };
+
+    const nextSessions = sessions.map((s) =>
+      s.id === activeSession.id ? updatedSession : s
+    );
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+
+    // 推进分段进度；最后一段派发后移除进度（续读按钮随之消失）
+    const isLastSegment = segmentIndex >= progress.totalSegments;
+    setWebReadingProgressMap((prev) => {
+      const next = new Map(prev);
+      if (isLastSegment) {
+        next.delete(activeSession.id);
+      } else {
+        next.set(activeSession.id, {
+          ...progress,
+          segmentIndex: segmentIndex + 1,
+          nextStart: segmentEnd,
+          lastAssistantMessageId: assistantMessageId,
+        });
+      }
+      return next;
+    });
+
+    setIsStreaming(true);
+    setExtractError(null);
+    scrollToBottom(true);
+
+    try {
+      const historyPayload = activeSession.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      const messagesPayload = [
+        { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
+        ...historyPayload,
+        {
+          role: "user" as const,
+          content: buildWebReadingContinuationPrompt({
+            title: progress.title,
+            segmentContent,
+            segmentIndex,
+            totalSegments: progress.totalSegments,
+          }),
+        },
+      ];
+
+      await browser.runtime.sendMessage({
+        action: MESSAGE_TYPES.TRANSLATE,
+        requestId: currentRequestId,
+        targetKind: "sidepanel",
+        source: "sidepanel",
+        sessionId: activeSession.id,
+        messages: messagesPayload,
+        thinkingEnabled,
+      });
+    } catch (error: any) {
+      logger.error("发送续读请求失败:", error);
+      setIsStreaming(false);
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id !== activeSession.id) return s;
+          const msgs = [...s.messages];
+          const last = msgs[msgs.length - 1];
+          if (last && last.role === "assistant") {
+            msgs[msgs.length - 1] = {
+              ...last,
+              status: "error",
+              errorMessage:
+                error?.message || "续读请求发送失败，请检查网络或设置",
+            };
+          }
+          return { ...s, messages: msgs };
+        })
       );
     }
   };
@@ -2024,6 +2263,61 @@ export default function SidePanelApp() {
                       </div>
                     )}
                   </div>
+
+                  {/* 长文分段续读：进度提示与“继续解读剩余部分”入口 */}
+                  {message.role === "assistant" &&
+                    message.status === "completed" &&
+                    activeWebReadingProgress &&
+                    activeWebReadingProgress.lastAssistantMessageId ===
+                      message.id && (
+                      <div
+                        className="web-reading-continue-bar"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: 8,
+                          margin: "8px 0 4px",
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          border: "1px dashed var(--color-primary)",
+                          background: "var(--color-primary-light)",
+                          fontSize: 12,
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        <span>
+                          📄 长文已分段解读：已读至第{" "}
+                          {activeWebReadingProgress.segmentIndex - 1} 段 / 共约{" "}
+                          {activeWebReadingProgress.totalSegments} 段
+                        </span>
+                        <button
+                          type="button"
+                          className="continue-reading-btn"
+                          disabled={isStreaming || isExtractingPage}
+                          style={{
+                            border: "none",
+                            borderRadius: 999,
+                            padding: "5px 12px",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                            cursor:
+                              isStreaming || isExtractingPage
+                                ? "not-allowed"
+                                : "pointer",
+                            opacity: isStreaming || isExtractingPage ? 0.55 : 1,
+                            background: "var(--color-primary)",
+                            color: "#ffffff",
+                          }}
+                          onClick={handleContinueWebReading}
+                        >
+                          继续解读剩余部分（第{" "}
+                          {activeWebReadingProgress.segmentIndex} 段）
+                        </button>
+                      </div>
+                    )}
 
                   {/* 深度追问指引 Pills */}
                   {message.role === "assistant" &&

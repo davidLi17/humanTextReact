@@ -1,9 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import {
   WEB_READING_SYSTEM_PROMPT,
+  WEB_READ_STAGE_LABELS,
+  buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
+  classifyWebReadExtractError,
+  describeWebReadFailure,
   extractSuggestedQuestions,
+  getWebReadingSegmentCount,
   MAX_PAGE_CONTENT_CHARS,
+  MIN_PAGE_CONTENT_CHARS,
+  WEB_READING_EXTRACT_TIMEOUT_MARKER,
+  webReadFailureKindFromStage,
 } from "../entrypoints/shared/webReadingPrompt.ts";
 
 describe("Web Reading Prompt Engineering", () => {
@@ -180,6 +188,201 @@ describe("Web Reading Prompt Engineering", () => {
       expect(questions[0]).toContain("小白视角");
       expect(questions[1]).toContain("局限性");
       expect(questions[2]).toContain("行动项");
+    });
+  });
+
+  describe("web reading failure guidance (任务1: 失败必须给明确提示)", () => {
+    const ALL_KINDS = [
+      "no-active-tab",
+      "restricted-page",
+      "empty-content",
+      "extract-timeout",
+      "cs-extract-failed",
+      "script-blocked",
+      "unknown",
+    ];
+
+    test("every failure kind explains what happened, possible causes and what to do", () => {
+      for (const kind of ALL_KINDS) {
+        const message = describeWebReadFailure(kind);
+        // 要素一：发生了什么（统一以“未能获取网页内容”开头，明确是页面问题而非 AI 问题）
+        expect(message).toContain("未能获取网页内容");
+        // 要素二：可能原因
+        expect(message).toContain("可能原因");
+        // 要素三：用户该怎么办
+        expect(message).toContain("建议");
+        // 必须是明确的中文说明而非泛泛的“翻译失败”
+        expect(message).not.toContain("翻译失败");
+        expect(message.length).toBeGreaterThan(40);
+      }
+    });
+
+    test("page-related guidance points users to concrete recovery actions", () => {
+      expect(describeWebReadFailure("restricted-page")).toContain(
+        "切换到普通文章页面"
+      );
+      expect(describeWebReadFailure("empty-content")).toContain("刷新页面");
+      expect(describeWebReadFailure("extract-timeout")).toContain(
+        "chrome://extensions"
+      );
+      expect(describeWebReadFailure("script-blocked")).toContain("站点访问权限");
+    });
+
+    test("unknown failure embeds the raw detail when provided", () => {
+      const message = describeWebReadFailure("unknown", "Something broke");
+      expect(message).toContain("Something broke");
+      expect(message).toContain("可能原因");
+    });
+
+    test("classifyWebReadExtractError maps upstream extraction errors to kinds", () => {
+      expect(
+        classifyWebReadExtractError("无法获取当前活动标签页，请确保有打开的网页标签。")
+      ).toBe("no-active-tab");
+      expect(
+        classifyWebReadExtractError(
+          "浏览器内置系统页面（如 chrome:// 等）不支持提取正文，请切换到常规网页重试。"
+        )
+      ).toBe("restricted-page");
+      expect(
+        classifyWebReadExtractError(
+          "无法提取该网页正文，页面可能尚未完全加载或脚本被拦截。"
+        )
+      ).toBe("script-blocked");
+      expect(
+        classifyWebReadExtractError(
+          "Cannot access contents of url \"chrome-web-store\"."
+        )
+      ).toBe("script-blocked");
+      expect(classifyWebReadExtractError("提取网页正文失败，请刷新网页后再试。")).toBe(
+        "unknown"
+      );
+      expect(classifyWebReadExtractError(undefined)).toBe("unknown");
+      expect(classifyWebReadExtractError("")).toBe("unknown");
+    });
+
+    test("timeout marker is a non-empty sentinel distinct from user-facing text", () => {
+      expect(typeof WEB_READING_EXTRACT_TIMEOUT_MARKER).toBe("string");
+      expect(WEB_READING_EXTRACT_TIMEOUT_MARKER.length).toBeGreaterThan(0);
+      expect(describeWebReadFailure("extract-timeout")).not.toContain(
+        WEB_READING_EXTRACT_TIMEOUT_MARKER
+      );
+    });
+
+    test("every chain stage has a Chinese 环节 label appended to guidance (需求升级: 定位链路环节)", () => {
+      const ALL_STAGES = [
+        "tab",
+        "restricted",
+        "cs-inject",
+        "cs-extract",
+        "fallback-extract",
+        "content-too-short",
+        "ai-request",
+      ];
+      for (const stage of ALL_STAGES) {
+        expect(WEB_READ_STAGE_LABELS[stage]).toMatch(/^环节：/);
+        const message = describeWebReadFailure("unknown", undefined, stage);
+        expect(message).toContain(WEB_READ_STAGE_LABELS[stage]);
+      }
+      // 未提供 stage 时不得追加空标签
+      expect(describeWebReadFailure("unknown")).not.toContain("环节：");
+    });
+
+    test("webReadFailureKindFromStage maps chain stages to failure kinds", () => {
+      expect(webReadFailureKindFromStage("tab")).toBe("no-active-tab");
+      expect(webReadFailureKindFromStage("restricted")).toBe("restricted-page");
+      expect(webReadFailureKindFromStage("cs-inject")).toBe("script-blocked");
+      expect(webReadFailureKindFromStage("cs-extract")).toBe(
+        "cs-extract-failed"
+      );
+      expect(webReadFailureKindFromStage("fallback-extract")).toBe(
+        "script-blocked"
+      );
+      expect(webReadFailureKindFromStage("content-too-short")).toBe(
+        "empty-content"
+      );
+      expect(webReadFailureKindFromStage("ai-request")).toBe("unknown");
+    });
+
+    test("cs-extract-failed guidance distinguishes in-page extraction errors from injection failures", () => {
+      const message = describeWebReadFailure(
+        "cs-extract-failed",
+        "Cannot read properties of undefined",
+        "cs-extract"
+      );
+      expect(message).toContain("提取脚本运行出错");
+      expect(message).toContain("Cannot read properties of undefined");
+      expect(message).toContain("环节：正文提取（内容脚本）");
+      // 与“未注入（走兜底）”环节的文案区分开
+      expect(message).not.toContain("注入或运行提取脚本");
+    });
+  });
+
+  describe("web reading segmentation (任务2: 继续解读剩余部分)", () => {
+    test("MIN_PAGE_CONTENT_CHARS keeps the effective-content threshold", () => {
+      expect(MIN_PAGE_CONTENT_CHARS).toBe(15);
+    });
+
+    test("getWebReadingSegmentCount computes ceil-based segment totals", () => {
+      expect(getWebReadingSegmentCount(0)).toBe(1);
+      expect(getWebReadingSegmentCount(-5)).toBe(1);
+      expect(getWebReadingSegmentCount(1)).toBe(1);
+      expect(getWebReadingSegmentCount(MAX_PAGE_CONTENT_CHARS)).toBe(1);
+      expect(getWebReadingSegmentCount(MAX_PAGE_CONTENT_CHARS + 1)).toBe(2);
+      expect(getWebReadingSegmentCount(MAX_PAGE_CONTENT_CHARS * 2)).toBe(2);
+      expect(getWebReadingSegmentCount(MAX_PAGE_CONTENT_CHARS * 3 + 1)).toBe(4);
+    });
+
+    test("buildWebReadingContinuationPrompt embeds progress, content and continuity instruction", () => {
+      const prompt = buildWebReadingContinuationPrompt({
+        title: "超长行业报告",
+        segmentContent: "第二段的具体正文内容",
+        segmentIndex: 2,
+        totalSegments: 4,
+      });
+
+      expect(prompt).toContain("【网页标题】: 超长行业报告");
+      expect(prompt).toContain("第 2 段 / 共约 4 段");
+      expect(prompt).toContain("```text\n第二段的具体正文内容\n```");
+      expect(prompt).toContain("四个板块");
+      expect(prompt).toContain("保持连贯");
+      // 最后一段时要求收束全文
+      const lastPrompt = buildWebReadingContinuationPrompt({
+        title: "超长行业报告",
+        segmentContent: "最后一段内容",
+        segmentIndex: 4,
+        totalSegments: 4,
+      });
+      expect(lastPrompt).toContain("最后一段");
+      expect(lastPrompt).toContain("收束");
+    });
+
+    test("continuation prompt falls back to default title for empty title", () => {
+      const prompt = buildWebReadingContinuationPrompt({
+        title: "",
+        segmentContent: "内容",
+        segmentIndex: 1,
+        totalSegments: 2,
+      });
+      expect(prompt).toContain("【网页标题】: 未知网页标题");
+    });
+
+    test("segment slicing guided by getWebReadingSegmentCount stays within MAX chars per segment", () => {
+      const fullContent = "A".repeat(MAX_PAGE_CONTENT_CHARS * 2 + 123);
+      const totalSegments = getWebReadingSegmentCount(fullContent.length);
+      expect(totalSegments).toBe(3);
+
+      let start = 0;
+      for (let i = 1; i <= totalSegments; i++) {
+        const end = Math.min(
+          start + MAX_PAGE_CONTENT_CHARS,
+          fullContent.length
+        );
+        const segment = fullContent.slice(start, end);
+        expect(segment.length).toBeGreaterThan(0);
+        expect(segment.length).toBeLessThanOrEqual(MAX_PAGE_CONTENT_CHARS);
+        start = end;
+      }
+      expect(start).toBe(fullContent.length);
     });
   });
 });
