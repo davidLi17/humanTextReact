@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   WEB_READING_SYSTEM_PROMPT,
+  WEB_READ_STAGE_LABELS,
   buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
   classifyWebReadExtractError,
@@ -10,6 +11,7 @@ import {
   MAX_PAGE_CONTENT_CHARS,
   MIN_PAGE_CONTENT_CHARS,
   WEB_READING_EXTRACT_TIMEOUT_MARKER,
+  webReadFailureKindFromStage,
 } from "../entrypoints/shared/webReadingPrompt.ts";
 
 describe("Web Reading Prompt Engineering", () => {
@@ -195,6 +197,7 @@ describe("Web Reading Prompt Engineering", () => {
       "restricted-page",
       "empty-content",
       "extract-timeout",
+      "cs-extract-failed",
       "script-blocked",
       "unknown",
     ];
@@ -263,6 +266,54 @@ describe("Web Reading Prompt Engineering", () => {
       expect(describeWebReadFailure("extract-timeout")).not.toContain(
         WEB_READING_EXTRACT_TIMEOUT_MARKER
       );
+    });
+
+    test("every chain stage has a Chinese 环节 label appended to guidance (需求升级: 定位链路环节)", () => {
+      const ALL_STAGES = [
+        "tab",
+        "restricted",
+        "cs-inject",
+        "cs-extract",
+        "fallback-extract",
+        "content-too-short",
+        "ai-request",
+      ];
+      for (const stage of ALL_STAGES) {
+        expect(WEB_READ_STAGE_LABELS[stage]).toMatch(/^环节：/);
+        const message = describeWebReadFailure("unknown", undefined, stage);
+        expect(message).toContain(WEB_READ_STAGE_LABELS[stage]);
+      }
+      // 未提供 stage 时不得追加空标签
+      expect(describeWebReadFailure("unknown")).not.toContain("环节：");
+    });
+
+    test("webReadFailureKindFromStage maps chain stages to failure kinds", () => {
+      expect(webReadFailureKindFromStage("tab")).toBe("no-active-tab");
+      expect(webReadFailureKindFromStage("restricted")).toBe("restricted-page");
+      expect(webReadFailureKindFromStage("cs-inject")).toBe("script-blocked");
+      expect(webReadFailureKindFromStage("cs-extract")).toBe(
+        "cs-extract-failed"
+      );
+      expect(webReadFailureKindFromStage("fallback-extract")).toBe(
+        "script-blocked"
+      );
+      expect(webReadFailureKindFromStage("content-too-short")).toBe(
+        "empty-content"
+      );
+      expect(webReadFailureKindFromStage("ai-request")).toBe("unknown");
+    });
+
+    test("cs-extract-failed guidance distinguishes in-page extraction errors from injection failures", () => {
+      const message = describeWebReadFailure(
+        "cs-extract-failed",
+        "Cannot read properties of undefined",
+        "cs-extract"
+      );
+      expect(message).toContain("提取脚本运行出错");
+      expect(message).toContain("Cannot read properties of undefined");
+      expect(message).toContain("环节：正文提取（内容脚本）");
+      // 与“未注入（走兜底）”环节的文案区分开
+      expect(message).not.toContain("注入或运行提取脚本");
     });
   });
 

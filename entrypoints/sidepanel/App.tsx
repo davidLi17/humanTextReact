@@ -28,15 +28,18 @@ import {
   getWebReadingSegmentCount,
   MAX_PAGE_CONTENT_CHARS,
   MIN_PAGE_CONTENT_CHARS,
+  WEB_READ_STAGE_LABELS,
   WEB_READING_EXTRACT_TIMEOUT_MARKER,
   WEB_READING_EXTRACT_TIMEOUT_MS,
   WEB_READING_SYSTEM_PROMPT,
   WebPageMetadata,
+  webReadFailureKindFromStage,
+  WebReadExtractStage,
 } from "@/entrypoints/shared/webReadingPrompt";
 import {
+  ExtractActiveTabResult,
   extractActiveTabContent,
   getActiveTab,
-  isRestrictedUrl,
 } from "@/entrypoints/shared/sidepanelUtils";
 import {
   inferJargonDetails,
@@ -650,61 +653,67 @@ export default function SidePanelApp() {
         url: activeTab?.url,
       });
 
-      // 失败路径 1：拿不到活动标签页
-      if (!activeTab || typeof activeTab.id !== "number") {
-        setExtractError(describeWebReadFailure("no-active-tab"));
-        setIsExtractingPage(false);
-        return;
-      }
-
-      // 失败路径 2：浏览器受限页（chrome:// 等），扩展无权读取
-      if (isRestrictedUrl(activeTab.url)) {
-        setExtractError(describeWebReadFailure("restricted-page"));
-        setIsExtractingPage(false);
-        return;
-      }
-
-      // 失败路径 3：提取消息无响应/超时，避免“正在提取”永久悬挂
+      // 失败路径：提取消息无响应/超时（标记环节 cs-inject），避免“正在提取”永久悬挂
       let extractTimeoutId: ReturnType<typeof setTimeout> | undefined;
       const extractResult = await Promise.race([
         extractActiveTabContent(),
-        new Promise<{ success: false; data?: undefined; error: string }>(
-          (resolve) => {
-            extractTimeoutId = setTimeout(() => {
-              resolve({
-                success: false,
-                error: WEB_READING_EXTRACT_TIMEOUT_MARKER,
-              });
-            }, WEB_READING_EXTRACT_TIMEOUT_MS);
-          }
-        ),
+        new Promise<ExtractActiveTabResult>((resolve) => {
+          extractTimeoutId = setTimeout(() => {
+            resolve({
+              success: false,
+              error: WEB_READING_EXTRACT_TIMEOUT_MARKER,
+              stage: "cs-inject",
+            });
+          }, WEB_READING_EXTRACT_TIMEOUT_MS);
+        }),
       ]);
       if (extractTimeoutId) clearTimeout(extractTimeoutId);
 
       if (!extractResult.success || !extractResult.data) {
+        // 失败分类与环节定位：stage 缺失时退回按错误文案归类（防御性，正常链路 stage 恒有值）
         const failureDetail = extractResult.error;
         const isTimeout = failureDetail === WEB_READING_EXTRACT_TIMEOUT_MARKER;
+        const failureStage: WebReadExtractStage =
+          extractResult.stage ?? "fallback-extract";
         const failureKind = isTimeout
           ? "extract-timeout"
+          : extractResult.stage
+          ? webReadFailureKindFromStage(extractResult.stage)
           : classifyWebReadExtractError(failureDetail);
+        const shouldEmbedDetail =
+          failureKind === "cs-extract-failed" ||
+          failureKind === "script-blocked" ||
+          failureKind === "unknown";
         setExtractError(
           describeWebReadFailure(
             failureKind,
-            failureKind === "unknown" ? failureDetail : undefined
+            !isTimeout && shouldEmbedDetail ? failureDetail : undefined,
+            failureStage
           )
         );
+        logger.error("网页通读提取正文失败:", {
+          stage: failureStage,
+          kind: failureKind,
+          detail: failureDetail,
+        });
         setIsExtractingPage(false);
         return;
       }
 
       const pageData: WebPageMetadata = extractResult.data;
 
-      // 失败路径 4：正文为空或过短，视为无效提取
+      // 失败路径：正文为空或过短，视为无效提取（环节 content-too-short）
       if (
         !pageData.content ||
         pageData.content.trim().length < MIN_PAGE_CONTENT_CHARS
       ) {
-        setExtractError(describeWebReadFailure("empty-content"));
+        setExtractError(
+          describeWebReadFailure("empty-content", undefined, "content-too-short")
+        );
+        logger.error("网页通读提取正文失败:", {
+          stage: "content-too-short",
+          contentLength: pageData.content?.trim().length ?? 0,
+        });
         setIsExtractingPage(false);
         return;
       }
@@ -810,11 +819,17 @@ export default function SidePanelApp() {
         thinkingEnabled,
       });
     } catch (error: any) {
-      logger.error("通读网页请求失败:", error);
+      // 提取链路失败均已提前 return，走到这里的异常属于会话组装或 AI 请求发送环节
+      logger.error("通读网页请求失败:", {
+        stage: "ai-request",
+        detail: error?.message,
+      });
       setIsExtractingPage(false);
       setIsStreaming(false);
       setExtractError(
-        error?.message || "通读网页请求失败，请检查网络或 API 设置"
+        `${error?.message || "通读网页请求失败，请检查网络或 API 设置"}（${
+          WEB_READ_STAGE_LABELS["ai-request"]
+        }）`
       );
     }
   };

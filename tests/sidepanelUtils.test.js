@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  extractActiveTabContent,
   openSidePanel,
   toggleSidePanel,
 } from "../entrypoints/shared/sidepanelUtils.ts";
@@ -105,5 +106,139 @@ describe("sidepanel utilities", () => {
     };
 
     expect(await toggleSidePanel({ windowId: 9204 })).toBe(false);
+  });
+});
+
+describe("extractActiveTabContent failure stages (任务1: 失败可定位链路环节)", () => {
+  afterEach(() => {
+    globalThis.browser = originalBrowser;
+    globalThis.chrome = originalChrome;
+  });
+
+  function mockTab(url) {
+    return {
+      tabs: {
+        query: async () => [{ id: 7, url, title: "测试页" }],
+      },
+    };
+  }
+
+  test("missing active tab reports stage 'tab'", async () => {
+    globalThis.browser = {
+      tabs: { query: async () => [] },
+    };
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe("tab");
+    expect(result.error).toContain("活动标签页");
+  });
+
+  test("restricted browser page reports stage 'restricted'", async () => {
+    globalThis.browser = mockTab("chrome://settings/");
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe("restricted");
+    expect(result.error).toContain("浏览器内置系统页面");
+  });
+
+  test("explicit content-script failure propagates the reason as stage 'cs-extract' without silent fallback", async () => {
+    let fallbackCalled = false;
+    globalThis.browser = {
+      ...mockTab("https://example.com/article"),
+      scripting: {
+        executeScript: async () => {
+          fallbackCalled = true;
+          return [];
+        },
+      },
+    };
+    globalThis.browser.tabs.sendMessage = async () => ({
+      success: false,
+      error: "页面解析算法抛错",
+    });
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe("cs-extract");
+    expect(result.error).toContain("页面解析算法抛错");
+    expect(fallbackCalled).toBe(false);
+  });
+
+  test("successful content-script response maps page data through", async () => {
+    globalThis.browser = mockTab("https://example.com/article");
+    globalThis.browser.tabs.sendMessage = async () => ({
+      success: true,
+      data: {
+        title: "文章标题",
+        url: "https://example.com/article",
+        content: "正文内容",
+        excerpt: "正文内容",
+        wordCount: 4,
+      },
+    });
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(true);
+    expect(result.data.title).toBe("文章标题");
+    expect(result.data.content).toBe("正文内容");
+  });
+
+  test("uninjected content script falls back to executeScript successfully", async () => {
+    globalThis.browser = mockTab("https://example.com/article");
+    globalThis.browser.tabs.sendMessage = async () => {
+      throw new Error("Could not establish connection");
+    };
+    globalThis.browser.scripting = {
+      executeScript: async () => [
+        {
+          result: {
+            title: "兜底标题",
+            url: "https://example.com/article",
+            content: "兜底正文",
+            wordCount: 4,
+          },
+        },
+      ],
+    };
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(true);
+    expect(result.data.title).toBe("兜底标题");
+  });
+
+  test("executeScript rejection by permissions reports stage 'fallback-extract' with a specific reason", async () => {
+    globalThis.browser = mockTab("https://example.com/article");
+    globalThis.browser.tabs.sendMessage = async () => {
+      throw new Error("Could not establish connection");
+    };
+    globalThis.browser.scripting = {
+      executeScript: async () => {
+        throw new Error(
+          'Cannot access contents of url "https://example.com". Extend the manifest permissions...'
+        );
+      },
+    };
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe("fallback-extract");
+    expect(result.error).toContain("禁止扩展注入");
+  });
+
+  test("executeScript empty result reports stage 'fallback-extract'", async () => {
+    globalThis.browser = mockTab("https://example.com/article");
+    globalThis.browser.tabs.sendMessage = async () => {
+      throw new Error("Receiving end does not exist");
+    };
+    globalThis.browser.scripting = {
+      executeScript: async () => [{}],
+    };
+
+    const result = await extractActiveTabContent();
+    expect(result.success).toBe(false);
+    expect(result.stage).toBe("fallback-extract");
+    expect(result.error).toContain("动态注入兜底");
   });
 });

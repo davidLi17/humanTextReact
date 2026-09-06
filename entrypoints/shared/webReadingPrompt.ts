@@ -60,6 +60,31 @@ export const WEB_READING_EXTRACT_TIMEOUT_MS = 10000;
 export const WEB_READING_EXTRACT_TIMEOUT_MARKER = "web-reading-extract-timeout";
 
 /**
+ * 网页内容获取链路的环节标记（用于错误文案定位环节 + 日志 stage 字段）
+ */
+export type WebReadExtractStage =
+  | "tab" // 获取活动标签页
+  | "restricted" // 受限页识别拦截
+  | "cs-inject" // content script 未注入/无响应
+  | "cs-extract" // content script 内正文提取失败
+  | "fallback-extract" // 动态注入兜底提取失败
+  | "content-too-short" // 提取成功但正文过短
+  | "ai-request"; // AI 请求环节（透传现有错误，不做细分）
+
+/**
+ * 环节标记的中文标签，展示在错误文案末尾方便用户定位问题环节
+ */
+export const WEB_READ_STAGE_LABELS: Record<WebReadExtractStage, string> = {
+  "tab": "环节：获取标签页",
+  "restricted": "环节：受限页拦截",
+  "cs-inject": "环节：内容脚本未注入",
+  "cs-extract": "环节：正文提取（内容脚本）",
+  "fallback-extract": "环节：正文提取（动态注入兜底）",
+  "content-too-short": "环节：正文过少",
+  "ai-request": "环节：AI 请求",
+};
+
+/**
  * 网页内容获取失败类型（用于在聊天视图给出明确的三要素提示：
  * 发生了什么 / 可能原因 / 用户该怎么办）
  */
@@ -68,6 +93,7 @@ export type WebReadFailureKind =
   | "restricted-page" // 浏览器受限页（chrome:// 等）
   | "empty-content" // 提取成功但正文为空或过短
   | "extract-timeout" // 提取消息无响应/超时
+  | "cs-extract-failed" // content script 已注入但提取正文出错
   | "script-blocked" // content script 未注入且动态注入被拦截
   | "unknown"; // 其他未知失败
 
@@ -83,22 +109,51 @@ const WEB_READ_FAILURE_GUIDANCE: Record<
     "未能获取网页内容：页面已打开，但只提取到极少的正文，不足以通读。可能原因：页面尚未加载完成、正文需要登录后才能查看，或该站点（在线文档、PDF 阅读器、强反爬站点等）拦截了内容读取。建议：等待页面加载完成后刷新页面重试；需要登录的页面请先登录；仍失败可换一篇普通文章页测试。",
   "extract-timeout": () =>
     "未能获取网页内容：向页面请求正文时长时间无响应（已超时）。可能原因：页面卡死或仍在加载中、页面脚本繁忙未能响应扩展消息。建议：刷新页面后重试；若反复出现，请到 chrome://extensions 点击本扩展的「重新加载」后再试。",
-  "script-blocked": () =>
-    "未能获取网页内容：扩展无法在该页面注入或运行提取脚本。可能原因：该站点禁止扩展注入脚本（如 Chrome 应用商店、浏览器内置 PDF 查看器），或扩展缺少对该站点的访问权限。建议：换一个普通文章页重试；若确需支持当前站点，请到 chrome://extensions 打开本扩展详情，将「站点访问权限」设为「在所有网站上」。",
+  "cs-extract-failed": (detail) =>
+    `未能获取网页内容：页面内的正文提取脚本运行出错${detail ? `（${detail}）` : ""}。可能原因：页面结构特殊导致解析异常，或页面脚本与扩展相互冲突。建议：刷新页面后重试；若仍失败，请换一个普通文章页测试，或到 chrome://extensions 重新加载本扩展。`,
+  "script-blocked": (detail) =>
+    `未能获取网页内容：扩展无法在该页面注入或运行提取脚本${detail ? `（${detail}）` : ""}。可能原因：该站点禁止扩展注入脚本（如 Chrome 应用商店、浏览器内置 PDF 查看器），或扩展缺少对该站点的访问权限。建议：换一个普通文章页重试；若确需支持当前站点，请到 chrome://extensions 打开本扩展详情，将「站点访问权限」设为「在所有网站上」。`,
   "unknown": (detail) =>
     `未能获取网页内容：提取过程中出现未知错误${detail ? `（${detail}）` : ""}。可能原因：页面尚未加载完成、站点限制读取，或扩展状态异常。建议：刷新页面后重试，或换一个普通文章页；若反复出现，请到 chrome://extensions 重新加载本扩展。`,
 };
 
 /**
- * 按失败类型生成“发生了什么 + 可能原因 + 该怎么办”的中文提示
+ * 按失败类型生成“发生了什么 + 可能原因 + 该怎么办”的中文提示，
+ * 并在末尾追加环节标签（如「环节：正文提取（动态注入兜底）」）方便定位链路问题
  */
 export function describeWebReadFailure(
   kind: WebReadFailureKind,
-  detail?: string
+  detail?: string,
+  stage?: WebReadExtractStage
 ): string {
   const builder =
     WEB_READ_FAILURE_GUIDANCE[kind] || WEB_READ_FAILURE_GUIDANCE.unknown;
-  return builder(detail);
+  const base = builder(detail);
+  const stageLabel = stage ? WEB_READ_STAGE_LABELS[stage] : undefined;
+  return stageLabel ? `${base}（${stageLabel}）` : base;
+}
+
+/**
+ * 由链路环节标记推导失败类型（stage 缺失时可退回 classifyWebReadExtractError 按文案归类）
+ */
+export function webReadFailureKindFromStage(
+  stage: WebReadExtractStage
+): WebReadFailureKind {
+  switch (stage) {
+    case "tab":
+      return "no-active-tab";
+    case "restricted":
+      return "restricted-page";
+    case "cs-inject":
+    case "fallback-extract":
+      return "script-blocked";
+    case "cs-extract":
+      return "cs-extract-failed";
+    case "content-too-short":
+      return "empty-content";
+    default:
+      return "unknown";
+  }
 }
 
 /**
