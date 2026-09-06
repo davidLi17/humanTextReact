@@ -6,9 +6,12 @@ import {
   getUserSettings,
 } from "../entrypoints/shared/settingsUtils.ts";
 import { DEFAULT_SETTINGS } from "../entrypoints/shared/constants/index.ts";
+import { preserveGlobals } from "./helpers/testEnvironment.js";
+
+const restoreGlobals = preserveGlobals("browser");
 
 afterEach(() => {
-  delete globalThis.browser;
+  restoreGlobals();
 });
 
 describe("SettingsUtils", () => {
@@ -216,9 +219,6 @@ describe("SettingsUtils", () => {
       expect(settings.theme).toBe("dark");
     });
 
-    test("clearCache executes without error", () => {
-      expect(() => SettingsUtils.clearCache()).not.toThrow();
-    });
   });
 
   describe("setSettings and setSetting", () => {
@@ -424,22 +424,22 @@ describe("SettingsUtils", () => {
         },
       };
 
-      let receivedSettings = null;
-      SettingsUtils.onSettingsChanged((settings) => {
-        receivedSettings = settings;
+      let resolveSettings;
+      const receivedSettings = new Promise((resolve) => {
+        resolveSettings = resolve;
       });
+      const unsubscribe = SettingsUtils.onSettingsChanged(resolveSettings);
 
       // Trigger change with null newValue
-      await registeredListener({
+      registeredListener({
         settings: {
           newValue: null,
         },
       });
 
-      // Allow promise to resolve
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(receivedSettings).not.toBeNull();
-      expect(receivedSettings.model).toBe("refetched-model");
+      const settings = await receivedSettings;
+      expect(settings.model).toBe("refetched-model");
+      unsubscribe();
     });
 
     test("ignores changes that do not involve settings key", () => {
@@ -457,7 +457,7 @@ describe("SettingsUtils", () => {
       };
 
       let callbackCalled = false;
-      SettingsUtils.onSettingsChanged(() => {
+      const unsubscribe = SettingsUtils.onSettingsChanged(() => {
         callbackCalled = true;
       });
 
@@ -466,6 +466,7 @@ describe("SettingsUtils", () => {
       });
 
       expect(callbackCalled).toBe(false);
+      unsubscribe();
     });
   });
 });

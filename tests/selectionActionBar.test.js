@@ -6,7 +6,6 @@ import {
   isInsideTranslatorElement,
   isSelectionInsideExcludedElement,
   SelectionActionBar,
-  DEFAULT_BAR_DIMENSIONS,
 } from "../entrypoints/content/selectionActionBar.ts";
 
 // 构造简易 Mock DOM 节点
@@ -457,18 +456,7 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
     expect(bar.getContainer()).toBeNull();
   });
 
-  test("triggers popup translation callback when clicking popup button", async () => {
-    let popupCalledWith = "";
-    const callbacks = {
-      onTranslatePopup: (text) => {
-        popupCalledWith = text;
-      },
-    };
-
-    const bar = new SelectionActionBar(undefined, callbacks);
-    const mockDoc = createMockDocument();
-    const mockWin = createMockWindow(1024, 768);
-
+  test("dispatches popup and sidepanel actions with the selected text", () => {
     const mockRect = {
       top: 100,
       bottom: 120,
@@ -477,65 +465,39 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
       width: 100,
       height: 20,
     };
-
-    bar.show("业务赋能打法", mockRect, mockWin, mockDoc);
-    const container = bar.getContainer();
-    const popupBtn = container?.querySelector(".translator-action-btn-popup");
-
-    expect(popupBtn).not.toBeNull();
-    popupBtn?.dispatchEvent({
-      type: "click",
-      preventDefault: () => {},
-      stopPropagation: () => {},
-    });
-
-    // Wait microtask
-    await Promise.resolve();
-
-    expect(popupCalledWith).toBe("业务赋能打法");
-    expect(bar.getIsVisible()).toBe(false);
-
-    bar.destroy();
-  });
-
-  test("triggers sidepanel callback when clicking sidepanel button", async () => {
-    let sidepanelCalledWith = "";
-    const callbacks = {
-      onOpenSidepanel: (text) => {
-        sidepanelCalledWith = text;
+    const cases = [
+      {
+        callbackName: "onTranslatePopup",
+        selector: ".translator-action-btn-popup",
+        text: "业务赋能打法",
       },
-    };
+      {
+        callbackName: "onOpenSidepanel",
+        selector: ".translator-action-btn-sidepanel",
+        text: "心智闭环沉淀",
+      },
+    ];
 
-    const bar = new SelectionActionBar(undefined, callbacks);
-    const mockDoc = createMockDocument();
-    const mockWin = createMockWindow(1024, 768);
+    for (const { callbackName, selector, text } of cases) {
+      let calledWith = "";
+      const bar = new SelectionActionBar(undefined, {
+        [callbackName]: (value) => {
+          calledWith = value;
+        },
+      });
+      bar.show(text, mockRect, createMockWindow(), createMockDocument());
+      const button = bar.getContainer()?.querySelector(selector);
+      expect(button).not.toBeNull();
 
-    const mockRect = {
-      top: 100,
-      bottom: 120,
-      left: 100,
-      right: 200,
-      width: 100,
-      height: 20,
-    };
+      button?.dispatchEvent({
+        type: "click",
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      });
 
-    bar.show("心智闭环沉淀", mockRect, mockWin, mockDoc);
-    const container = bar.getContainer();
-    const sidepanelBtn = container?.querySelector(".translator-action-btn-sidepanel");
-
-    expect(sidepanelBtn).not.toBeNull();
-    sidepanelBtn?.dispatchEvent({
-      type: "click",
-      preventDefault: () => {},
-      stopPropagation: () => {},
-    });
-
-    // Wait microtask
-    await Promise.resolve();
-
-    expect(sidepanelCalledWith).toBe("心智闭环沉淀");
-    expect(bar.getIsVisible()).toBe(false);
-
-    bar.destroy();
+      expect(calledWith).toBe(text);
+      expect(bar.getIsVisible()).toBe(false);
+      bar.destroy();
+    }
   });
 });

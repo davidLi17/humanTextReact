@@ -18,50 +18,23 @@ import {
   DEFAULT_SETTINGS,
   MAX_HISTORY_COUNT,
 } from "../entrypoints/shared/constants/index.ts";
-
-// ---------- 测试用的内存浏览器存储 ----------
+import {
+  createMemoryBrowserStorage,
+  preserveGlobals,
+  setTestGlobal,
+} from "./helpers/testEnvironment.js";
 
 function createMockBrowser() {
-  const localStore = {};
-  const syncStore = {};
-  const makeArea = (store, overrides = {}) => ({
-    get: async (keys) => {
-      if (typeof keys === "string") {
-        return keys in store ? { [keys]: store[keys] } : {};
-      }
-      if (Array.isArray(keys)) {
-        const res = {};
-        keys.forEach((k) => {
-          if (k in store) res[k] = store[k];
-        });
-        return res;
-      }
-      return { ...store };
-    },
-    set: async (items) => {
-      Object.assign(store, items);
-    },
-    remove: async (keys) => {
-      (Array.isArray(keys) ? keys : [keys]).forEach((k) => delete store[k]);
-    },
-    ...overrides,
-  });
-  return {
-    stores: { local: localStore, sync: syncStore },
-    browser: {
-      storage: {
-        local: makeArea(localStore),
-        sync: makeArea(syncStore),
-      },
-    },
-  };
+  return createMemoryBrowserStorage();
 }
 
 function setupMockBrowser() {
   const mock = createMockBrowser();
-  globalThis.browser = mock.browser;
+  setTestGlobal("browser", mock.browser);
   return mock;
 }
+
+const restoreGlobals = preserveGlobals("browser");
 
 // ---------- 测试数据 ----------
 
@@ -142,7 +115,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete globalThis.browser;
+  restoreGlobals();
 });
 
 // ---------- 纯函数 ----------
@@ -151,9 +124,7 @@ describe("纯函数：createBackupEnvelope / sanitizeSettingsForBackup / 命名�
   test("createBackupEnvelope 补齐缺省分区并写入应用标识与版本", () => {
     const envelope = createBackupEnvelope({}, "2026-09-06T00:00:00.000Z");
     expect(envelope.version).toBe(BACKUP_VERSION);
-    expect(envelope.version).toBe(1);
     expect(envelope.app).toBe(BACKUP_APP_ID);
-    expect(envelope.app).toBe("human-text-translator");
     expect(envelope.exportedAt).toBe("2026-09-06T00:00:00.000Z");
     expect(envelope.data).toEqual({
       history: [],
@@ -404,7 +375,7 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
   test("构建 → 序列化 → 校验 → 恢复到全新存储后数据一致，且 apiKey 不被覆盖", async () => {
     // 1. 在源环境准备数据并构建备份
     const source = createMockBrowser();
-    globalThis.browser = source.browser;
+    setTestGlobal("browser", source.browser);
     source.stores.local[HISTORY_STORAGE_KEY] = historyFixture;
     source.stores.local[JARGON_STORAGE_KEY] = jargonFixture;
     source.stores.local[SESSIONS_STORAGE_KEY] = sessionsFixture;
@@ -417,7 +388,7 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
 
     // 2. 在全新目标环境反序列化、校验并恢复
     const target = createMockBrowser();
-    globalThis.browser = target.browser;
+    setTestGlobal("browser", target.browser);
     // 目标环境已有的数据与 API Key 应被「覆盖/保留」
     target.stores.local[HISTORY_STORAGE_KEY] = [
       { original: "旧历史", translated: "会被覆盖", timestamp: 1 },
@@ -517,7 +488,7 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
       }
       Object.assign(mock.stores.local, items);
     };
-    globalThis.browser = mock.browser;
+    setTestGlobal("browser", mock.browser);
 
     const envelope = createBackupEnvelope({
       history: historyFixture,

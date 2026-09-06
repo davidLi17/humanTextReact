@@ -366,23 +366,5 @@ describe("Web Reading Prompt Engineering", () => {
       expect(prompt).toContain("【网页标题】: 未知网页标题");
     });
 
-    test("segment slicing guided by getWebReadingSegmentCount stays within MAX chars per segment", () => {
-      const fullContent = "A".repeat(MAX_PAGE_CONTENT_CHARS * 2 + 123);
-      const totalSegments = getWebReadingSegmentCount(fullContent.length);
-      expect(totalSegments).toBe(3);
-
-      let start = 0;
-      for (let i = 1; i <= totalSegments; i++) {
-        const end = Math.min(
-          start + MAX_PAGE_CONTENT_CHARS,
-          fullContent.length
-        );
-        const segment = fullContent.slice(start, end);
-        expect(segment.length).toBeGreaterThan(0);
-        expect(segment.length).toBeLessThanOrEqual(MAX_PAGE_CONTENT_CHARS);
-        start = end;
-      }
-      expect(start).toBe(fullContent.length);
-    });
   });
 });

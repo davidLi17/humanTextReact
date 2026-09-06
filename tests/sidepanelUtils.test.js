@@ -73,6 +73,10 @@ describe("sidepanel utilities", () => {
   test("toggleSidePanel coalesces duplicate shortcut requests", async () => {
     let resolveOpen;
     let openCount = 0;
+    let markOpenStarted;
+    const openStarted = new Promise((resolve) => {
+      markOpenStarted = resolve;
+    });
     globalThis.browser = {
       runtime: {
         getContexts: async () => [],
@@ -80,6 +84,7 @@ describe("sidepanel utilities", () => {
       sidePanel: {
         open: () => {
           openCount += 1;
+          markOpenStarted();
           return new Promise((resolve) => {
             resolveOpen = resolve;
           });
@@ -89,7 +94,7 @@ describe("sidepanel utilities", () => {
 
     const first = toggleSidePanel({ windowId: 9203 });
     const duplicate = toggleSidePanel({ windowId: 9203 });
-    await Promise.resolve();
+    await openStarted;
     expect(openCount).toBe(1);
 
     resolveOpen();

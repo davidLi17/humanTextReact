@@ -2,10 +2,41 @@ import { describe, expect, test } from "bun:test";
 import {
   formatQuoteMarkdown,
   extractQuotePreview,
+  isNodeInMessageBubble,
+  isValidMessageSelection,
   removeQuoteFromInputText,
   calculateQuotePosition,
-  DEFAULT_QUOTE_BAR_DIMENSIONS,
 } from "../entrypoints/sidepanel/utils/quoteUtils.ts";
+
+function createMockElement(tagName = "div", className = "", attributes = {}) {
+  const element = {
+    tagName: tagName.toUpperCase(),
+    nodeType: 1,
+    className,
+    isContentEditable: false,
+    parentElement: null,
+    children: [],
+    getAttribute: (name) => attributes[name] ?? null,
+    appendChild(child) {
+      child.parentElement = element;
+      element.children.push(child);
+      return child;
+    },
+    contains(node) {
+      let current = node;
+      while (current) {
+        if (current === element) return true;
+        current = current.parentElement;
+      }
+      return false;
+    },
+  };
+  return element;
+}
+
+function createMockTextNode(text) {
+  return { nodeType: 3, textContent: text, parentElement: null };
+}
 
 describe("Sidepanel Quote Utils", () => {
   test("formatQuoteMarkdown formats single-line and multi-line selected text", () => {
@@ -47,6 +78,82 @@ describe("Sidepanel Quote Utils", () => {
 
     // 3. 无引用内容原样返回
     expect(removeQuoteFromInputText("普通提问内容")).toBe("普通提问内容");
+  });
+
+  test("isNodeInMessageBubble accepts message content and rejects controls", () => {
+    const message = createMockElement("div", "markdown-content");
+    const textNode = message.appendChild(createMockTextNode("普通正文"));
+    expect(isNodeInMessageBubble(textNode)).toBe(true);
+    expect(isNodeInMessageBubble(message)).toBe(true);
+
+    for (const element of [
+      createMockElement("input"),
+      createMockElement("textarea"),
+      createMockElement("button"),
+      createMockElement("div", "chat-input-footer"),
+      createMockElement("div", "sidepanel-quote-action-bar"),
+    ]) {
+      expect(isNodeInMessageBubble(element)).toBe(false);
+    }
+    expect(isNodeInMessageBubble(null)).toBe(false);
+  });
+
+  test("isValidMessageSelection enforces text, range, container and node boundaries", () => {
+    const container = createMockElement("main");
+    const message = container.appendChild(
+      createMockElement("div", "markdown-content")
+    );
+    const start = message.appendChild(createMockTextNode("消息正文"));
+    const end = message.appendChild(createMockTextNode("更多正文"));
+    const makeSelection = (overrides = {}) => ({
+      rangeCount: 1,
+      isCollapsed: false,
+      toString: () => "有效选区",
+      getRangeAt: () => ({ startContainer: start, endContainer: end }),
+      ...overrides,
+    });
+
+    expect(isValidMessageSelection(makeSelection(), container)).toBe(true);
+    expect(isValidMessageSelection(null, container)).toBe(false);
+    expect(
+      isValidMessageSelection(makeSelection({ rangeCount: 0 }), container)
+    ).toBe(false);
+    expect(
+      isValidMessageSelection(makeSelection({ isCollapsed: true }), container)
+    ).toBe(false);
+    expect(
+      isValidMessageSelection(
+        makeSelection({ toString: () => "  \n " }),
+        container
+      )
+    ).toBe(false);
+
+    const outside = createMockElement("div", "markdown-content").appendChild(
+      createMockTextNode("容器外正文")
+    );
+    expect(
+      isValidMessageSelection(
+        makeSelection({
+          getRangeAt: () => ({ startContainer: start, endContainer: outside }),
+        }),
+        container
+      )
+    ).toBe(false);
+
+    const buttonText = message
+      .appendChild(createMockElement("button"))
+      .appendChild(createMockTextNode("按钮文字"));
+    expect(
+      isValidMessageSelection(
+        makeSelection({
+          getRangeAt: () => ({
+            startContainer: buttonText,
+            endContainer: buttonText,
+          }),
+        }),
+        container
+      )
+    ).toBe(false);
   });
 
   test("calculateQuotePosition places quote bar above selection when enough space", () => {

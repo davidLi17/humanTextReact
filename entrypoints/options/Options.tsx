@@ -684,11 +684,11 @@ function Options() {
               onChange={(e) =>
                 handleInputChange("promptTemplate", e.target.value)
               }
-              placeholder="请输入提示词模板，使用 {text} 作为占位符"
+              placeholder="请输入 AI 的解释方式和表达要求"
               rows={4}
             />
             <div className="setting-hint">
-              使用 {"{text}"} 作为待翻译文本的占位符
+              提示词将作为系统指令发送给 AI，待翻译文本会自动作为用户消息发送，无需填写占位符。
             </div>
           </div>
         </div>

@@ -8,32 +8,30 @@ import {
   importJargonItems,
   inferJargonDetails,
 } from "../entrypoints/shared/jargonStorage.ts";
+import {
+  createMemoryBrowserStorage,
+  preserveGlobals,
+  setTestGlobal,
+} from "./helpers/testEnvironment.js";
 
-// 模拟内存存储
 let mockStorage = {};
+const restoreGlobals = preserveGlobals("browser");
 
 function setupMockBrowser() {
-  mockStorage = {};
-  globalThis.browser = {
-    storage: {
-      local: {
-        get: async (keys) => {
-          if (typeof keys === "string") {
-            return { [keys]: mockStorage[keys] };
-          }
-          if (Array.isArray(keys)) {
-            const res = {};
-            keys.forEach((k) => (res[k] = mockStorage[k]));
-            return res;
-          }
-          return { ...mockStorage };
-        },
-        set: async (items) => {
-          Object.assign(mockStorage, items);
-        },
-      },
-    },
-  };
+  const mock = createMemoryBrowserStorage();
+  mockStorage = mock.stores.local;
+  setTestGlobal("browser", mock.browser);
+}
+
+function dispatchRuntimeMessage(request, sender = {}) {
+  return new Promise((resolve) => {
+    const handled = MessageHandler.handleRuntimeMessage(
+      request,
+      sender,
+      (response) => resolve({ handled, response })
+    );
+    if (!handled) resolve({ handled, response: undefined });
+  });
 }
 
 beforeEach(() => {
@@ -41,7 +39,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  delete globalThis.browser;
+  restoreGlobals();
 });
 
 describe("JargonVault 核心存储与管理", () => {
@@ -455,27 +453,16 @@ describe("JargonVault 核心存储与管理", () => {
 
 describe("后台消息处理通信 (MessageHandler Jargon Protocol)", () => {
   test("处理 SAVE_JARGON_ITEM 消息", async () => {
-    let response;
-    const handled = MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.SAVE_JARGON_ITEM,
-        item: {
-          term: "击穿",
-          explanation: "突破底线或彻底打透某一垂直领域。",
-          category: "大厂黑话",
-        },
+    const { handled, response } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.SAVE_JARGON_ITEM,
+      item: {
+        term: "击穿",
+        explanation: "突破底线或彻底打透某一垂直领域。",
+        category: "大厂黑话",
       },
-      {},
-      (res) => {
-        response = res;
-      }
-    );
+    });
 
     expect(handled).toBe(true);
-    // 等待异步响应
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect(response).toBeDefined();
     expect(response.success).toBe(true);
     expect(response.item.term).toBe("击穿");
   });
@@ -489,67 +476,35 @@ describe("后台消息处理通信 (MessageHandler Jargon Protocol)", () => {
     });
 
     // 2. 获取列表
-    let getResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.GET_JARGON_LIST,
-        category: "大厂黑话",
-      },
-      {},
-      (res) => {
-        getResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: getResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.GET_JARGON_LIST,
+      category: "大厂黑话",
+    });
     expect(getResponse.success).toBe(true);
     expect(getResponse.list.length).toBe(1);
 
     // 3. 切换星标
-    let toggleResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.TOGGLE_JARGON_STAR,
-        id: item.id,
-      },
-      {},
-      (res) => {
-        toggleResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: toggleResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.TOGGLE_JARGON_STAR,
+      id: item.id,
+    });
     expect(toggleResponse.success).toBe(true);
     expect(toggleResponse.item.isStarred).toBe(true);
 
     // 4. 更新词条
-    let updateResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.UPDATE_JARGON_ITEM,
-        id: item.id,
-        updates: { explanation: "回顾过去，提升未来。" },
-      },
-      {},
-      (res) => {
-        updateResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: updateResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.UPDATE_JARGON_ITEM,
+      id: item.id,
+      updates: { explanation: "回顾过去，提升未来。" },
+    });
     expect(updateResponse.success).toBe(true);
     expect(updateResponse.item.explanation).toBe("回顾过去，提升未来。");
 
     // 5. 删除词条
-    let deleteResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.DELETE_JARGON_ITEM,
-        id: item.id,
-      },
-      {},
-      (res) => {
-        deleteResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: deleteResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.DELETE_JARGON_ITEM,
+      id: item.id,
+    });
     expect(deleteResponse.success).toBe(true);
 
     // 验证删除后列表为空
@@ -565,34 +520,18 @@ describe("后台消息处理通信 (MessageHandler Jargon Protocol)", () => {
     });
 
     // 导出 Markdown
-    let exportMdResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.EXPORT_JARGON,
-        format: "markdown",
-      },
-      {},
-      (res) => {
-        exportMdResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: exportMdResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.EXPORT_JARGON,
+      format: "markdown",
+    });
     expect(exportMdResponse.success).toBe(true);
     expect(exportMdResponse.data).toContain("Prompt");
 
     // 导出 JSON
-    let exportJsonResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.EXPORT_JARGON,
-        format: "json",
-      },
-      {},
-      (res) => {
-        exportJsonResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: exportJsonResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.EXPORT_JARGON,
+      format: "json",
+    });
     expect(exportJsonResponse.success).toBe(true);
     const parsed = JSON.parse(exportJsonResponse.data);
     expect(parsed.items[0].term).toBe("Prompt");
@@ -600,18 +539,10 @@ describe("后台消息处理通信 (MessageHandler Jargon Protocol)", () => {
     // 清空并导入
     await JargonVault.clearAll();
 
-    let importResponse;
-    MessageHandler.handleRuntimeMessage(
-      {
-        action: MESSAGE_TYPES.IMPORT_JARGON,
-        jsonStr: exportJsonResponse.data,
-      },
-      {},
-      (res) => {
-        importResponse = res;
-      }
-    );
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const { response: importResponse } = await dispatchRuntimeMessage({
+      action: MESSAGE_TYPES.IMPORT_JARGON,
+      jsonStr: exportJsonResponse.data,
+    });
     expect(importResponse.success).toBe(true);
     expect(importResponse.importedCount).toBe(1);
 

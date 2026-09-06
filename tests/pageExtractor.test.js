@@ -22,16 +22,18 @@ describe("Page Extractor Unit Tests", () => {
   });
 
   test("countWords counts Chinese characters and English words correctly", () => {
-    // 纯中文: 10 个字
-    expect(countWords("这是一段用于测试字数统计的纯中文正文")).toBe(18);
+    const cases = [
+      ["", 0],
+      ["   \n\t", 0],
+      ["这是一段用于测试字数统计的纯中文正文", 18],
+      ["Hello world from human translator", 5],
+      ["用 React 19 和 AI 翻译器加速开发", 12],
+      ["React-19 与 AI_tools", 3],
+    ];
 
-    // 纯英文: 4 words
-    expect(countWords("Hello world from human translator")).toBe(5);
-
-    // 中英混合
-    const mixed = "用 React 19 和 AI 翻译器加速开发";
-    // 汉字: 用, 翻, 译, 器, 加, 速, 开, 发 (8) + 英文/数字: React, 19, 和(汉字), AI (3)
-    expect(countWords(mixed)).toBeGreaterThanOrEqual(10);
+    for (const [text, expected] of cases) {
+      expect(countWords(text)).toBe(expected);
+    }
   });
 
   test("extractPageTitle handles mock document with og:title", () => {

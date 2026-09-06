@@ -13,6 +13,13 @@ import {
   trimDiagnosticRecords,
 } from "../entrypoints/shared/logger/diagnostics.ts";
 import { shouldLogAtLevel } from "../entrypoints/shared/logger/index.ts";
+import {
+  createMemoryBrowserStorage,
+  preserveGlobals,
+  setTestGlobal,
+} from "./helpers/testEnvironment.js";
+
+const restoreGlobals = preserveGlobals("browser");
 
 const createRecord = (id, level = "info", message = "message") => ({
   id,
@@ -25,7 +32,7 @@ const createRecord = (id, level = "info", message = "message") => ({
 });
 
 afterEach(() => {
-  delete globalThis.browser;
+  restoreGlobals();
 });
 
 describe("logger levels", () => {
@@ -122,24 +129,8 @@ describe("diagnostic lifecycle", () => {
   });
 
   test("stores a bounded session and keeps control state local", async () => {
-    const stores = { local: {}, session: {} };
-    const createStorageArea = (name) => ({
-      async get(key) {
-        return { [key]: stores[name][key] };
-      },
-      async set(values) {
-        Object.assign(stores[name], values);
-      },
-      async remove(key) {
-        delete stores[name][key];
-      },
-    });
-    globalThis.browser = {
-      storage: {
-        local: createStorageArea("local"),
-        session: createStorageArea("session"),
-      },
-    };
+    const { browser, stores } = createMemoryBrowserStorage();
+    setTestGlobal("browser", browser);
 
     const state = await startDiagnosticSession(1000);
     await appendDiagnosticRecords([

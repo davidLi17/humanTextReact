@@ -1,9 +1,19 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   parseMarkdown,
   copyCode,
   initializeCodeCopy,
 } from "../shared/utils/markdown.ts";
+import {
+  preserveGlobals,
+  setTestGlobal,
+} from "./helpers/testEnvironment.js";
+
+const restoreGlobals = preserveGlobals("document", "navigator", "setTimeout");
+
+afterEach(() => {
+  restoreGlobals();
+});
 
 describe("Markdown Parser for Chat, Popup, and Sidepanel", () => {
   describe("parseMarkdown basics and edge cases", () => {
@@ -202,11 +212,13 @@ describe("Markdown Parser for Chat, Popup, and Sidepanel", () => {
     let mockCopyIcon;
     let mockCheckIcon;
     let writtenClipboardText = "";
+    let scheduledCallbacks;
 
     beforeEach(() => {
       writtenClipboardText = "";
       mockCopyIcon = { style: { display: "block" } };
       mockCheckIcon = { style: { display: "none" } };
+      scheduledCallbacks = [];
 
       mockButton = {
         getAttribute(attr) {
@@ -227,14 +239,18 @@ describe("Markdown Parser for Chat, Popup, and Sidepanel", () => {
         },
       };
 
-      globalThis.navigator = {
+      setTestGlobal("navigator", {
         clipboard: {
           writeText: async (text) => {
             writtenClipboardText = text;
             return true;
           },
         },
-      };
+      });
+      setTestGlobal("setTimeout", (callback) => {
+        scheduledCallbacks.push(callback);
+        return scheduledCallbacks.length;
+      });
     });
 
     test("copyCode writes data-code to clipboard and toggles icon display", async () => {
@@ -242,6 +258,11 @@ describe("Markdown Parser for Chat, Popup, and Sidepanel", () => {
       expect(writtenClipboardText).toBe("console.log('hello');");
       expect(mockCopyIcon.style.display).toBe("none");
       expect(mockCheckIcon.style.display).toBe("block");
+      expect(scheduledCallbacks).toHaveLength(1);
+
+      scheduledCallbacks[0]();
+      expect(mockCopyIcon.style.display).toBe("block");
+      expect(mockCheckIcon.style.display).toBe("none");
     });
 
     test("copyCode ignores button when data-code is empty", async () => {
@@ -256,12 +277,12 @@ describe("Markdown Parser for Chat, Popup, and Sidepanel", () => {
       let eventName = "";
       let eventHandler = null;
 
-      globalThis.document = {
+      setTestGlobal("document", {
         addEventListener: (event, handler) => {
           eventName = event;
           eventHandler = handler;
         },
-      };
+      });
 
       initializeCodeCopy();
       expect(eventName).toBe("click");

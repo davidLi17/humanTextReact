@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   getSelectedTextFromPage,
   initContentShortcuts,
@@ -7,121 +7,50 @@ import {
 } from "../entrypoints/content/shortcutListener.ts";
 import { ShortcutManager } from "../entrypoints/background/shortcutManager.ts";
 import { ContextMenuHandler } from "../entrypoints/background/contextMenuHandler.ts";
+import { preserveGlobals } from "./helpers/testEnvironment.js";
 
-// 保存环境原象
-const originalChrome = globalThis.chrome;
-const originalBrowser = globalThis.browser;
-const originalWindow = globalThis.window;
-const originalDocument = globalThis.document;
+const restoreGlobals = preserveGlobals("browser", "chrome", "window", "document");
+const originalListenerState = ShortcutManager.isListenerRegistered;
 
 describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
   afterEach(() => {
-    globalThis.chrome = originalChrome;
-    globalThis.browser = originalBrowser;
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
+    restoreGlobals();
+    ShortcutManager.isListenerRegistered = originalListenerState;
   });
 
   describe("1. Content Script Key Matching (Cross-Platform & macOS Deadkeys)", () => {
     test("correctly recognizes Alt/Option+D on Windows, Linux and macOS", () => {
-      const standardAltD = {
+      const baseEvent = {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
         code: "KeyD",
-        key: "d",
       };
-      expect(isTranslateShortcut(standardAltD)).toBe(true);
-
-      // macOS Option+D 在美式键盘布局下产生 '∂'
-      const macOptionD = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: false,
-        code: "KeyD",
-        key: "∂",
-      };
-      expect(isTranslateShortcut(macOptionD)).toBe(true);
-
-      const upperAltD = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: false,
-        code: "KeyD",
-        key: "D",
-      };
-      expect(isTranslateShortcut(upperAltD)).toBe(true);
-
-      // 包含 Ctrl 或 Cmd 不应误触
-      const ctrlAltD = {
-        altKey: true,
-        ctrlKey: true,
-        metaKey: false,
-        code: "KeyD",
-        key: "d",
-      };
-      expect(isTranslateShortcut(ctrlAltD)).toBe(false);
-
-      const cmdAltD = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: true,
-        code: "KeyD",
-        key: "d",
-      };
-      expect(isTranslateShortcut(cmdAltD)).toBe(false);
-
-      // 其他按键
-      const altA = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: false,
-        code: "KeyA",
-        key: "a",
-      };
-      expect(isTranslateShortcut(altA)).toBe(false);
+      for (const key of ["d", "D", "∂"]) {
+        expect(isTranslateShortcut({ ...baseEvent, key })).toBe(true);
+      }
+      for (const event of [
+        { ...baseEvent, key: "d", ctrlKey: true },
+        { ...baseEvent, key: "d", metaKey: true },
+        { ...baseEvent, key: "a", code: "KeyA" },
+      ]) {
+        expect(isTranslateShortcut(event)).toBe(false);
+      }
     });
 
     test("correctly recognizes Alt+S on Windows/Linux and macOS", () => {
-      // Windows / Linux 标准 Alt+S
-      const standardAltS = {
+      const baseEvent = {
         altKey: true,
         ctrlKey: false,
         metaKey: false,
         code: "KeyS",
-        key: "s",
       };
-      expect(isOpenSidepanelShortcut(standardAltS)).toBe(true);
-
-      // macOS Option+S 生成德文字符 'ß'
-      const macOptionS = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: false,
-        code: "KeyS",
-        key: "ß",
-      };
-      expect(isOpenSidepanelShortcut(macOptionS)).toBe(true);
-
-      // 大写 S
-      const upperAltS = {
-        altKey: true,
-        ctrlKey: false,
-        metaKey: false,
-        code: "KeyS",
-        key: "S",
-      };
-      expect(isOpenSidepanelShortcut(upperAltS)).toBe(true);
-
-      // 包含 Ctrl 或 Cmd 不应误触
-      const ctrlAltS = {
-        altKey: true,
-        ctrlKey: true,
-        metaKey: false,
-        code: "KeyS",
-        key: "s",
-      };
-      expect(isOpenSidepanelShortcut(ctrlAltS)).toBe(false);
+      for (const key of ["s", "S", "ß"]) {
+        expect(isOpenSidepanelShortcut({ ...baseEvent, key })).toBe(true);
+      }
+      expect(
+        isOpenSidepanelShortcut({ ...baseEvent, key: "s", ctrlKey: true })
+      ).toBe(false);
     });
   });
 
@@ -271,13 +200,17 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
         addEventListener: (event, handler) => {
           globalThis.window._handler = handler;
         },
-        removeEventListener: () => {},
+        removeEventListener: (event, handler) => {
+          if (globalThis.window._handler === handler) {
+            delete globalThis.window._handler;
+          }
+        },
       };
       globalThis.document = {
         activeElement: null,
       };
 
-      initContentShortcuts(mockPopupManager);
+      const cleanup = initContentShortcuts(mockPopupManager);
 
       let defaultPrevented = false;
       const fakeEvent = {
@@ -297,6 +230,8 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       expect(defaultPrevented).toBe(true);
       expect(sentMessage).toEqual({ action: "toggleSidepanel" });
       expect(storageSaved?.pendingSidepanelText?.text).toBe("心智模型构建");
+      cleanup();
+      expect(globalThis.window._handler).toBeUndefined();
     });
   });
 
