@@ -1,4 +1,5 @@
-export const BOTTOM_THRESHOLD_PX = 40;
+// 阈值设为 15px：只要用户离开最底部，立刻解除自动跟随锁定并浮现 GPT 胶囊
+export const BOTTOM_THRESHOLD_PX = 15;
 
 export interface ScrollMetrics {
   scrollTop: number;

@@ -6,12 +6,12 @@ import {
 } from "../../entrypoints/sidepanel/scrollState.ts";
 
 describe("sidepanel scroll follow state", () => {
-  test("treats exactly 40 pixels from the end as bottom", () => {
+  test("treats exactly 15 pixels from the end as bottom", () => {
     expect(
-      isNearBottom({ scrollTop: 560, scrollHeight: 1000, clientHeight: 400 })
+      isNearBottom({ scrollTop: 585, scrollHeight: 1000, clientHeight: 400 })
     ).toBe(true);
     expect(
-      isNearBottom({ scrollTop: 559, scrollHeight: 1000, clientHeight: 400 })
+      isNearBottom({ scrollTop: 584, scrollHeight: 1000, clientHeight: 400 })
     ).toBe(false);
   });
 

@@ -125,6 +125,7 @@ import {
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./App.less";
 import {
+  BOTTOM_THRESHOLD_PX,
   getResetScrollFollowState,
   getScrollFollowState,
 } from "./scrollState";
@@ -279,7 +280,6 @@ export default function SidePanelApp() {
   const overviewRequestIdRef = useRef<string | undefined>(undefined);
   const sessionsRef = useRef<ChatSession[]>([]);
   const activeSessionIdRef = useRef("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
@@ -878,9 +878,16 @@ export default function SidePanelApp() {
     if (programmaticScrollTimerRef.current) {
       clearTimeout(programmaticScrollTimerRef.current);
     }
-    messagesEndRef.current?.scrollIntoView({
-      behavior: smooth ? "smooth" : "auto",
-    });
+    if (chatContentRef.current) {
+      if (smooth) {
+        chatContentRef.current.scrollTo({
+          top: chatContentRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      } else {
+        chatContentRef.current.scrollTop = chatContentRef.current.scrollHeight;
+      }
+    }
     programmaticScrollTimerRef.current = setTimeout(() => {
       programmaticScrollRef.current = false;
       programmaticScrollTimerRef.current = null;
@@ -903,10 +910,14 @@ export default function SidePanelApp() {
     []
   );
 
-  // 自动滚动到消息流底部 (遵循 GPT 交互: 仅在用户未主动往上滑时跟随，绝不跟用户抢夺滚动控制权)
+  // 自动滚动到消息流底部 (遵循 GPT 交互: 仅在用户未主动往上滑时紧贴底部，零动画惯性，绝不抢占用户滚轮控制权)
   useEffect(() => {
-    if (activeView === "chat" && !userHasScrolledUpRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (
+      activeView === "chat" &&
+      !userHasScrolledUpRef.current &&
+      chatContentRef.current
+    ) {
+      chatContentRef.current.scrollTop = chatContentRef.current.scrollHeight;
     }
   }, [activeSession?.messages, isStreaming, isExtractingPage, activeView]);
 
@@ -989,6 +1000,29 @@ export default function SidePanelApp() {
       programmaticScrollRef.current = false;
     };
 
+    const handleWheel = (e: WheelEvent) => {
+      // 只要用户向上滚动滚轮 (deltaY < 0)，立即判定用户正在往上看，
+      // 瞬间停止自动跟随，绝对不跟用户抢控制权
+      if (e.deltaY < 0) {
+        programmaticScrollRef.current = false;
+        userHasScrolledUpRef.current = true;
+        setIsAtBottom(false);
+      } else {
+        markUserScrollIntent();
+      }
+    };
+
+    const handleTouchMove = () => {
+      if (chatContentRef.current) {
+        const { scrollTop, scrollHeight, clientHeight } = chatContentRef.current;
+        if (scrollHeight - scrollTop - clientHeight > BOTTOM_THRESHOLD_PX) {
+          programmaticScrollRef.current = false;
+          userHasScrolledUpRef.current = true;
+          setIsAtBottom(false);
+        }
+      }
+    };
+
     const handleScrollKeyDown = (event: KeyboardEvent) => {
       if (
         ["ArrowUp", "PageUp", "Home", "ArrowDown", "PageDown", "End"].includes(
@@ -1012,13 +1046,14 @@ export default function SidePanelApp() {
       chatEl.addEventListener("mouseup", handleMouseUp);
       chatEl.addEventListener("keyup", handleKeyUp);
       chatEl.addEventListener("scroll", handleScroll, { passive: true });
-      chatEl.addEventListener("wheel", markUserScrollIntent, { passive: true });
+      chatEl.addEventListener("wheel", handleWheel, { passive: true });
       chatEl.addEventListener("touchstart", markUserScrollIntent, {
         passive: true,
       });
       chatEl.addEventListener("pointerdown", markUserScrollIntent, {
         passive: true,
       });
+      chatEl.addEventListener("touchmove", handleTouchMove, { passive: true });
       chatEl.addEventListener("keydown", handleScrollKeyDown);
     }
     document.addEventListener("mousedown", handleMouseDown);
@@ -1028,9 +1063,10 @@ export default function SidePanelApp() {
         chatEl.removeEventListener("mouseup", handleMouseUp);
         chatEl.removeEventListener("keyup", handleKeyUp);
         chatEl.removeEventListener("scroll", handleScroll);
-        chatEl.removeEventListener("wheel", markUserScrollIntent);
+        chatEl.removeEventListener("wheel", handleWheel);
         chatEl.removeEventListener("touchstart", markUserScrollIntent);
         chatEl.removeEventListener("pointerdown", markUserScrollIntent);
+        chatEl.removeEventListener("touchmove", handleTouchMove);
         chatEl.removeEventListener("keydown", handleScrollKeyDown);
       }
       document.removeEventListener("mousedown", handleMouseDown);
@@ -3384,8 +3420,6 @@ export default function SidePanelApp() {
                 </div>
               </div>
             ))}
-
-            <div ref={messagesEndRef} />
           </main>
 
           {/* 底部输入控制台 */}
