@@ -164,6 +164,10 @@ export interface ExtractActiveTabResult {
   stage?: WebReadExtractStage;
 }
 
+export interface ExtractPageContentOptions {
+  deepScan?: boolean;
+}
+
 /**
  * 从当前活动标签页中提取正文信息
  *
@@ -175,7 +179,9 @@ export interface ExtractActiveTabResult {
  *   - 兜底执行成功 → 正常返回
  *   - 兜底未返回内容 / 执行被拒绝 → stage "fallback-extract"，附具体原因
  */
-export async function extractActiveTabContent(): Promise<ExtractActiveTabResult> {
+export async function extractActiveTabContent(
+  options?: ExtractPageContentOptions
+): Promise<ExtractActiveTabResult> {
   let activeTab: TabInfo | null = null;
   try {
     activeTab = await getActiveTab();
@@ -210,6 +216,7 @@ export async function extractActiveTabContent(): Promise<ExtractActiveTabResult>
   try {
     const response = await browserApi.tabs.sendMessage(activeTab.id, {
       action: MESSAGE_TYPES.EXTRACT_PAGE_CONTENT,
+      deepScan: !!options?.deepScan,
     });
 
     if (response && response.success && response.data) {
@@ -221,6 +228,10 @@ export async function extractActiveTabContent(): Promise<ExtractActiveTabResult>
           content: response.data.content || "",
           excerpt: response.data.excerpt || "",
           wordCount: response.data.wordCount || 0,
+          isLikelyVirtualList: response.data.isLikelyVirtualList,
+          totalEstimatedScreens: response.data.totalEstimatedScreens,
+          scrollDensity: response.data.scrollDensity,
+          hasMoreContent: response.data.hasMoreContent,
         },
       };
     }
@@ -251,15 +262,92 @@ export async function extractActiveTabContent(): Promise<ExtractActiveTabResult>
             doc.querySelector("h1")?.textContent?.trim() ||
             doc.title ||
             "网页内容";
-          const clone = (doc.querySelector("article, main, [role='main']") || doc.body).cloneNode(true) as HTMLElement;
-          const noise = clone.querySelectorAll("script, style, noscript, nav, footer, header, aside, .ad");
-          noise.forEach((n) => n.remove());
-          const text = clone.innerText || clone.textContent || "";
+
+          const noiseTags = new Set([
+            "script",
+            "style",
+            "noscript",
+            "iframe",
+            "svg",
+            "canvas",
+            "video",
+            "audio",
+            "nav",
+            "footer",
+            "header",
+            "aside",
+          ]);
+          const textBlocks: string[] = [];
+          const visitedRoots = new WeakSet<Node>();
+
+          const traverse = (node: Node, depth: number) => {
+            if (depth > 64 || textBlocks.length > 5000) return;
+            if (node.nodeType === Node.TEXT_NODE) {
+              const text = node.textContent?.trim();
+              if (text) textBlocks.push(text);
+              return;
+            }
+            if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as HTMLElement;
+              const tag = el.tagName.toLowerCase();
+              if (noiseTags.has(tag)) return;
+              if (
+                el.matches &&
+                el.matches(
+                  ".ad, .ads, .advertisement, .comment, .comments, .sidebar, [aria-hidden='true']"
+                )
+              ) {
+                return;
+              }
+              if (
+                el.hidden ||
+                el.style.display === "none" ||
+                el.style.visibility === "hidden"
+              ) {
+                return;
+              }
+              try {
+                const style = window.getComputedStyle(el);
+                if (style.display === "none" || style.visibility === "hidden")
+                  return;
+              } catch {}
+
+              if (tag === "slot") {
+                const slot = el as HTMLSlotElement;
+                const assigned =
+                  typeof slot.assignedNodes === "function"
+                    ? slot.assignedNodes({ flatten: true })
+                    : [];
+                const targets =
+                  assigned.length > 0 ? assigned : Array.from(slot.childNodes);
+                for (const child of targets) traverse(child, depth + 1);
+                return;
+              }
+
+              if (el.shadowRoot && !visitedRoots.has(el.shadowRoot)) {
+                visitedRoots.add(el.shadowRoot);
+                for (const child of Array.from(el.shadowRoot.childNodes)) {
+                  traverse(child, depth + 1);
+                }
+                return;
+              }
+
+              for (const child of Array.from(el.childNodes)) {
+                traverse(child, depth + 1);
+              }
+            }
+          };
+
+          const root =
+            doc.querySelector("article, main, [role='main']") || doc.body;
+          if (root) traverse(root, 0);
+
+          const content = textBlocks.join(" ").replace(/\s+/g, " ").trim();
           return {
             title,
             url: window.location.href,
-            content: text.replace(/\s+/g, " ").trim(),
-            wordCount: text.length,
+            content,
+            wordCount: content.length,
           };
         },
       });

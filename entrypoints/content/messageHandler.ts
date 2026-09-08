@@ -49,8 +49,9 @@ export class MessageHandler {
           return this.handleGetSelectedText(request, sendResponse);
 
         case MESSAGE_TYPES.EXTRACT_PAGE_CONTENT:
-          logger.info("处理提取网页正文请求");
-          return this.handleExtractPageContent(sendResponse);
+          logger.info("处理提取网页正文请求", { deepScan: !!(request as any).deepScan });
+          void this.handleExtractPageContent(request, sendResponse);
+          return true;
 
         default:
           logger.warn("未知操作:", request.action);
@@ -64,16 +65,20 @@ export class MessageHandler {
     }
   };
 
-  private handleExtractPageContent(
+  private async handleExtractPageContent(
+    request: TranslationRequest,
     sendResponse: (response?: any) => void
-  ): boolean {
+  ): Promise<void> {
     try {
-      const pageData = extractPageData(document, window);
+      const pageData = await extractPageData(document, window, {
+        deepScan: !!(request as any).deepScan,
+      });
       logger.log("📄 [Content MessageHandler] 提取网页正文成功", {
         title: pageData.title,
         url: pageData.url,
         wordCount: pageData.wordCount,
         contentLength: pageData.content.length,
+        isLikelyVirtualList: pageData.isLikelyVirtualList,
       });
       sendResponse({
         success: true,
@@ -86,7 +91,6 @@ export class MessageHandler {
         error: err?.message || "提取网页内容失败",
       });
     }
-    return true;
   }
 
   private handleShowTranslationPopup = (

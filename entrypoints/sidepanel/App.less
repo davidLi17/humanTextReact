@@ -512,6 +512,39 @@
     border-bottom: 1px solid #fecaca;
   }
 
+  &.virtual-scroll-banner {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(147, 51, 234, 0.08) 100%);
+    color: var(--color-primary);
+    border-bottom: 1px solid rgba(79, 70, 229, 0.2);
+    gap: 6px;
+
+    .deep-scan-btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      font-size: calc(11px * var(--ht-font-scale, 1));
+      font-weight: 500;
+      color: #ffffff;
+      background: var(--color-primary);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+
+      &:hover:not(:disabled) {
+        background: var(--color-primary-hover);
+        box-shadow: 0 1px 4px rgba(79, 70, 229, 0.25);
+      }
+
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    }
+  }
+
   .banner-text {
     flex: 1;
     margin: 0 8px;

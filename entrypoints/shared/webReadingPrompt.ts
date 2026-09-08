@@ -8,6 +8,14 @@ export interface WebPageMetadata {
   content: string;
   excerpt?: string;
   wordCount?: number;
+  /** 是否疑似超长虚拟滚动列表（段落随滚动被销毁或未挂载） */
+  isLikelyVirtualList?: boolean;
+  /** 预估总屏数 */
+  totalEstimatedScreens?: number;
+  /** 正文每屏平均字符密度 */
+  scrollDensity?: number;
+  /** 是否检测到未加载完成的长文内容 */
+  hasMoreContent?: boolean;
 }
 
 /**

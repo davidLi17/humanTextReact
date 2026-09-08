@@ -263,6 +263,12 @@ export default function SidePanelApp() {
   const [selectedQuoteText, setSelectedQuoteText] = useState<string>("");
   const [activeQuotedText, setActiveQuotedText] = useState<string | null>(null);
 
+  // 虚拟长文与截断检测提示
+  const [virtualScrollNotice, setVirtualScrollNotice] = useState<{
+    totalScreens: number;
+    url: string;
+  } | null>(null);
+
   // 智能滚动与回到底部/流式指示器状态 (对标 GPT 交互)
   const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
   const userHasScrolledUpRef = useRef<boolean>(false);
@@ -1074,7 +1080,7 @@ export default function SidePanelApp() {
   }, [activeView]);
 
   // 通读当前网页核心逻辑
-  const handleReadCurrentPage = async () => {
+  const handleReadCurrentPage = async (options?: { deepScan?: boolean }) => {
     if (
       !webReadingProgressHydratedRef.current ||
       isStreaming ||
@@ -1082,6 +1088,7 @@ export default function SidePanelApp() {
     ) {
       return;
     }
+    const isDeepScan = options?.deepScan || false;
     const extractionSessionId = activeSessionIdRef.current;
     if (!extractionSessionId) return;
 
@@ -1104,12 +1111,15 @@ export default function SidePanelApp() {
       logger.info("开始提取当前网页正文", {
         tabId: activeTab?.id,
         url: activeTab?.url,
+        deepScan: isDeepScan,
       });
 
       // 失败路径：提取消息无响应/超时（标记环节 cs-inject），避免“正在提取”永久悬挂
+      // deepScan 包含多步滚动采集合并，适当延长超时保护窗口
+      const timeoutLimitMs = isDeepScan ? 15000 : WEB_READING_EXTRACT_TIMEOUT_MS;
       let extractTimeoutId: ReturnType<typeof setTimeout> | undefined;
       const extractResult = await Promise.race([
-        extractActiveTabContent(),
+        extractActiveTabContent({ deepScan: isDeepScan }),
         new Promise<ExtractActiveTabResult>((resolve) => {
           extractTimeoutId = setTimeout(() => {
             resolve({
@@ -1117,7 +1127,7 @@ export default function SidePanelApp() {
               error: WEB_READING_EXTRACT_TIMEOUT_MARKER,
               stage: "cs-inject",
             });
-          }, WEB_READING_EXTRACT_TIMEOUT_MS);
+          }, timeoutLimitMs);
         }),
       ]);
       if (extractTimeoutId) clearTimeout(extractTimeoutId);
@@ -1154,6 +1164,16 @@ export default function SidePanelApp() {
       }
 
       const pageData: WebPageMetadata = extractResult.data;
+
+      // 诊断虚拟滚动与长文截断状态
+      if (pageData.isLikelyVirtualList && pageData.hasMoreContent && !isDeepScan) {
+        setVirtualScrollNotice({
+          totalScreens: pageData.totalEstimatedScreens || 4,
+          url: pageData.url,
+        });
+      } else {
+        setVirtualScrollNotice(null);
+      }
 
       // 失败路径：正文为空或过短，视为无效提取（环节 content-too-short）
       if (
@@ -2719,7 +2739,7 @@ export default function SidePanelApp() {
               className={`web-read-btn ${isExtractingPage ? "loading" : ""}`}
               title="一键提取并人话通读当前打开的网页正文"
               disabled={isStreaming || isExtractingPage}
-              onClick={handleReadCurrentPage}
+              onClick={() => void handleReadCurrentPage()}
             >
               {isExtractingPage ? (
                 <LoadingOne theme="outline" size="14" className="spin-icon" />
@@ -2758,6 +2778,32 @@ export default function SidePanelApp() {
             type="button"
             className="banner-close-btn"
             onClick={() => setExtractError(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* 虚拟长文/未完全渲染提示条与一键深度通读入口 */}
+      {virtualScrollNotice && activeView === "chat" && (
+        <div className="notification-bar virtual-scroll-banner">
+          <Tips theme="outline" size="16" />
+          <span className="banner-text">
+            检测到当前页面疑似超长虚拟文档（预估约 {virtualScrollNotice.totalScreens} 屏），当前仅通读了已渲染的前段。
+          </span>
+          <button
+            type="button"
+            className="deep-scan-btn"
+            disabled={isStreaming || isExtractingPage}
+            onClick={() => void handleReadCurrentPage({ deepScan: true })}
+          >
+            一键深度通读
+          </button>
+          <button
+            type="button"
+            className="banner-close-btn"
+            onClick={() => setVirtualScrollNotice(null)}
+            title="忽略"
           >
             ✕
           </button>
@@ -2924,7 +2970,7 @@ export default function SidePanelApp() {
                     type="button"
                     className="hero-action-btn"
                     disabled={isStreaming || isExtractingPage}
-                    onClick={handleReadCurrentPage}
+                    onClick={() => void handleReadCurrentPage()}
                   >
                     {isExtractingPage ? (
                       <>
