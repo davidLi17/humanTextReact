@@ -474,13 +474,16 @@ describe("restoreBackup 与备份往返（round-trip）", () => {
       restoredJargon.find((item) => item.term === "闭环").isStarred
     ).toBe(true);
 
-    // 设置已覆盖（sync + local 双写），但 apiKey 保留目标环境原值
-    for (const store of [target.stores.sync, target.stores.local]) {
-      expect(store.settings.model).toBe("test-model");
-      expect(store.settings.thinkingEnabled).toBe(true);
-      expect(store.settings.theme).toBe("dark");
-      expect(store.settings.apiKey).toBe("sk-existing-key");
-    }
+    // 设置已覆盖（sync + local 双写），但 apiKey 仅保存在 local，绝不进入 sync
+    expect(target.stores.local.settings.model).toBe("test-model");
+    expect(target.stores.local.settings.thinkingEnabled).toBe(true);
+    expect(target.stores.local.settings.theme).toBe("dark");
+    expect(target.stores.local.settings.apiKey).toBe("sk-existing-key");
+
+    expect(target.stores.sync.settings.model).toBe("test-model");
+    expect(target.stores.sync.settings.thinkingEnabled).toBe(true);
+    expect(target.stores.sync.settings.theme).toBe("dark");
+    expect(target.stores.sync.settings.apiKey).toBeUndefined();
     expect(target.stores.local.fontScalePercent).toBe(130);
     expect(target.stores.sync.fontScalePercent).toBe(130);
     expect((await SettingsUtils.getSettings()).fontScalePercent).toBe(130);

@@ -23,9 +23,28 @@ export interface UserSettings {
   fontScalePercent: number;
 }
 
-function normalizeSettings(settings: UserSettings): UserSettings {
+interface StoredSettings extends Partial<UserSettings> {
+  updatedAt?: number;
+}
+
+function normalizeSettings(
+  settings: Partial<UserSettings> & { updatedAt?: number }
+): UserSettings {
   return {
-    ...settings,
+    baseUrl: settings.baseUrl ?? DEFAULT_SETTINGS.baseUrl,
+    model: settings.model ?? DEFAULT_SETTINGS.model,
+    temperature: settings.temperature ?? DEFAULT_SETTINGS.temperature,
+    promptTemplate: settings.promptTemplate ?? DEFAULT_SETTINGS.promptTemplate,
+    apiKey: settings.apiKey ?? DEFAULT_SETTINGS.apiKey,
+    thinkingEnabled:
+      settings.thinkingEnabled ?? DEFAULT_SETTINGS.thinkingEnabled,
+    showSelectionToolbar:
+      settings.showSelectionToolbar ?? DEFAULT_SETTINGS.showSelectionToolbar,
+    contextualSelectionEnabled:
+      settings.contextualSelectionEnabled ??
+      DEFAULT_SETTINGS.contextualSelectionEnabled,
+    logLevel: settings.logLevel ?? DEFAULT_SETTINGS.logLevel,
+    theme: settings.theme ?? DEFAULT_SETTINGS.theme,
     fontScalePercent: normalizeFontScalePercent(settings.fontScalePercent),
   };
 }
@@ -53,47 +72,99 @@ export class SettingsUtils {
    * 支持两种存储格式：
    * 1. 新格式：'settings' 对象下的所有设置
    * 2. 旧格式：直接存储的键值对（向后兼容）
+   *
+   * 权威源策略：
+   * - 敏感密钥 apiKey 严格且仅保存在 storage.local，绝不进入 storage.sync；
+   * - 读取时对比时间戳 updatedAt：
+   *   - 若 sync 设置存在且拥有更新的时间戳（来自多设备云端同步），采用 sync 偏好设置，但 apiKey 仍以本机 local 为准；
+   *   - 若 local 拥有更新或相等的时间戳，或无时间戳时，以本机 local 为第一权威源；
+   *   - 当 sync 写入失败但 local 成功时，local 具有最新时间戳且权威优先，绝不回滚读取 sync 旧值。
    */
   static async getSettings(): Promise<UserSettings> {
     try {
       logger.log("🔄 [SettingsUtils] 从 Chrome Storage 获取设置");
       const browserAPI = this.getBrowserAPI();
 
-      try {
-        const { settings: syncSettings } =
-          await browserAPI.storage.sync.get("settings");
+      const [syncResult, localResult] = await Promise.allSettled([
+        browserAPI.storage.sync.get("settings"),
+        browserAPI.storage.local.get("settings"),
+      ]);
 
-        if (syncSettings && Object.keys(syncSettings).length > 0) {
-          const mergedSettings = defaults(
-            {},
-            syncSettings,
-            DEFAULT_SETTINGS
-          ) as UserSettings;
+      let syncSettings: (StoredSettings & Record<string, any>) | null = null;
+      let localSettings: (StoredSettings & Record<string, any>) | null = null;
 
-          logger.log("✅ [SettingsUtils] 同步设置获取成功", {
-            hasApiKey: !!mergedSettings.apiKey,
-            thinkingEnabled: mergedSettings.thinkingEnabled,
-          });
-
-          return this.withStoredFontScale(browserAPI, mergedSettings);
+      if (syncResult.status === "fulfilled") {
+        const val = syncResult.value?.settings;
+        if (val && Object.keys(val).length > 0) {
+          syncSettings = { ...val };
         }
-      } catch (error) {
-        logger.warn("同步设置读取失败，尝试本地设置", error);
+      } else {
+        logger.warn("同步设置读取失败", syncResult.reason);
       }
 
-      try {
-        const { settings: localSettings } =
-          await browserAPI.storage.local.get("settings");
-
-        if (localSettings && Object.keys(localSettings).length > 0) {
-          logger.log("✅ [SettingsUtils] 本地设置获取成功");
-          return this.withStoredFontScale(
-            browserAPI,
-            defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings
-          );
+      if (localResult.status === "fulfilled") {
+        const val = localResult.value?.settings;
+        if (val && Object.keys(val).length > 0) {
+          localSettings = { ...val };
         }
-      } catch (error) {
-        logger.warn("本地设置读取失败，尝试旧格式", error);
+      } else {
+        logger.warn("本地设置读取失败", localResult.reason);
+      }
+
+      // 如果 localSettings 缺少 apiKey，尝试从 local 顶层 apiKey 读取
+      if (!localSettings?.apiKey) {
+        try {
+          const localTopKey = await browserAPI.storage.local.get("apiKey");
+          if (localTopKey?.apiKey) {
+            localSettings = { ...localSettings, apiKey: localTopKey.apiKey };
+          }
+        } catch {}
+      }
+
+      const hasLocal = !!localSettings && Object.keys(localSettings).length > 0;
+      const hasSync = !!syncSettings && Object.keys(syncSettings).length > 0;
+
+      if (hasLocal || hasSync) {
+        let resolved: StoredSettings;
+
+        if (hasLocal && hasSync) {
+          const localUpdated = Number(localSettings?.updatedAt) || 0;
+          const syncUpdated = Number(syncSettings?.updatedAt) || 0;
+
+          if (syncUpdated > localUpdated) {
+            // 云端同步更新较新（来自其他设备同步）：应用云端偏好设置，但敏感 apiKey 始终以本地为准
+            resolved = defaults(
+              {},
+              localSettings?.apiKey ? { apiKey: localSettings.apiKey } : {},
+              syncSettings,
+              localSettings,
+              DEFAULT_SETTINGS
+            );
+          } else {
+            // 本地时间戳更新或相等，或无时间戳时：以本地设置为主权威源
+            resolved = defaults(
+              {},
+              localSettings,
+              syncSettings,
+              DEFAULT_SETTINGS
+            );
+          }
+        } else if (hasLocal) {
+          resolved = defaults({}, localSettings, DEFAULT_SETTINGS);
+        } else {
+          resolved = defaults({}, syncSettings, DEFAULT_SETTINGS);
+        }
+
+        // 兼容旧版本迁移：若本地无有效 apiKey，而云端曾遗留有效 apiKey，暂存使用并避免丢失
+        if (
+          !this.isApiKeyConfigured(resolved.apiKey) &&
+          this.isApiKeyConfigured(syncSettings?.apiKey)
+        ) {
+          resolved.apiKey = syncSettings!.apiKey;
+        }
+
+        const normalized = normalizeSettings(resolved as UserSettings);
+        return this.withStoredFontScale(browserAPI, normalized);
       }
 
       logger.log("🔄 [SettingsUtils] 新格式无数据，尝试旧格式");
@@ -113,38 +184,37 @@ export class SettingsUtils {
   ): Promise<UserSettings> {
     const keys = Object.keys(DEFAULT_SETTINGS);
 
-    try {
-      const syncSettings = await browserAPI.storage.sync.get(keys);
+    let syncSettings: Record<string, any> = {};
+    let localSettings: Record<string, any> = {};
 
-      if (Object.keys(syncSettings).length > 0) {
-        logger.success("从云端获取旧格式设置成功", syncSettings);
-        return this.withStoredFontScale(
-          browserAPI,
-          defaults({}, syncSettings, DEFAULT_SETTINGS) as UserSettings
-        );
-      }
+    try {
+      syncSettings = await browserAPI.storage.sync.get(keys);
     } catch (error) {
       logger.warn("云端旧格式设置读取失败", error);
     }
 
     try {
-      logger.warn("云端没有旧格式设置，尝试从本地获取");
-      const localSettings = await browserAPI.storage.local.get(keys);
-
-      if (Object.keys(localSettings).length > 0) {
-        logger.success("从本地获取旧格式设置成功", localSettings);
-        return this.withStoredFontScale(
-          browserAPI,
-          defaults({}, localSettings, DEFAULT_SETTINGS) as UserSettings
-        );
-      }
-
-      logger.info("使用默认设置", DEFAULT_SETTINGS);
-      return normalizeSettings({ ...DEFAULT_SETTINGS });
+      localSettings = await browserAPI.storage.local.get(keys);
     } catch (error) {
-      logger.error("本地旧格式设置读取失败:", error);
-      return normalizeSettings({ ...DEFAULT_SETTINGS });
+      logger.warn("本地旧格式设置读取失败", error);
     }
+
+    const hasSync = syncSettings && Object.keys(syncSettings).length > 0;
+    const hasLocal = localSettings && Object.keys(localSettings).length > 0;
+
+    if (hasLocal || hasSync) {
+      // 本地优先合并，同步存储补充，再合入默认配置
+      const merged = defaults(
+        {},
+        localSettings,
+        syncSettings,
+        DEFAULT_SETTINGS
+      ) as UserSettings;
+      return this.withStoredFontScale(browserAPI, normalizeSettings(merged));
+    }
+
+    logger.info("使用默认设置", DEFAULT_SETTINGS);
+    return normalizeSettings({ ...DEFAULT_SETTINGS });
   }
 
   /** 字号以本机 local 独立键为准，避免 sync 写失败后重开读回旧值。 */
@@ -218,42 +288,82 @@ export class SettingsUtils {
   }
 
   /**
-   * 写入完整设置到 storage.sync 的 'settings' 对象，同时备份到 storage.local
+   * 写入设置：
+   * - storage.local：强行且仅在此处保存包含敏感 apiKey 的完整配置（加注时间戳，作为本机权威源）；
+   * - storage.sync：严格剔除 apiKey，并调用 storage.sync.remove('apiKey') 清理可能遗留的敏感字段；
+   * - 异常隔离：当 sync 失败但 local 成功时仍视为保存成功，下次读取时 local 权威优先，绝不回滚旧值。
    */
   static async setSettings(newSettings: Partial<UserSettings>): Promise<void> {
     try {
       const browserAPI = this.getBrowserAPI();
-      let existing = {};
+      let existing: StoredSettings = {};
 
-      try {
-        const result = await browserAPI.storage.sync.get("settings");
-        existing = result.settings || {};
-      } catch (error) {
-        logger.warn("读取同步设置失败，使用本地设置合并", error);
+      // 优先从本地读取现有设置以保留本地权威配置及敏感 apiKey
+      const [localSettingsResult, syncSettingsResult] =
+        await Promise.allSettled([
+          browserAPI.storage.local.get("settings"),
+          browserAPI.storage.sync.get("settings"),
+        ]);
+
+      if (
+        localSettingsResult.status === "fulfilled" &&
+        localSettingsResult.value?.settings &&
+        Object.keys(localSettingsResult.value.settings).length > 0
+      ) {
+        existing = { ...localSettingsResult.value.settings };
       }
 
-      if (Object.keys(existing).length === 0) {
+      if (!existing.apiKey) {
         try {
-          const result = await browserAPI.storage.local.get("settings");
-          existing = result.settings || {};
-        } catch (error) {
-          logger.warn("读取本地设置失败，使用默认设置合并", error);
+          const localKey = await browserAPI.storage.local.get("apiKey");
+          if (localKey?.apiKey) {
+            existing.apiKey = localKey.apiKey;
+          }
+        } catch {}
+      }
+
+      if (Object.keys(existing).length === 0 || !existing.apiKey) {
+        if (
+          syncSettingsResult.status === "fulfilled" &&
+          syncSettingsResult.value?.settings
+        ) {
+          existing = defaults({}, existing, syncSettingsResult.value.settings);
         }
       }
 
+      const now = Date.now();
       const merged = defaults(
         {},
         newSettings,
         existing,
         DEFAULT_SETTINGS
-      ) as UserSettings;
+      ) as UserSettings & { updatedAt?: number };
+
       merged.fontScalePercent = normalizeFontScalePercent(
         merged.fontScalePercent
       );
+      merged.updatedAt = now;
+
+      // 1. 本地存储：完整配置，包含敏感 apiKey 与当前时间戳，作为本机第一权威
+      const localSettings = { ...merged };
+
+      // 2. 同步存储：严格剔除 apiKey，绝不同步密钥至云端
+      const syncSettings: Record<string, any> = { ...merged };
+      delete syncSettings.apiKey;
 
       const [syncResult, localResult] = await Promise.allSettled([
-        browserAPI.storage.sync.set({ settings: merged }),
-        browserAPI.storage.local.set({ settings: merged }),
+        (async () => {
+          await browserAPI.storage.sync.set({ settings: syncSettings });
+          // 清理 storage.sync 中可能遗留的旧 apiKey 顶层字段
+          if (typeof browserAPI.storage?.sync?.remove === "function") {
+            try {
+              await browserAPI.storage.sync.remove("apiKey");
+            } catch (removeError) {
+              logger.warn("清理同步存储遗留 apiKey 失败", removeError);
+            }
+          }
+        })(),
+        browserAPI.storage.local.set({ settings: localSettings }),
       ]);
 
       if (
@@ -333,7 +443,11 @@ export class SettingsUtils {
     let active = true;
 
     const listener = (changes: any) => {
-      if (changes.settings || changes[FONT_SCALE_STORAGE_KEY]) {
+      if (
+        changes.settings ||
+        changes[FONT_SCALE_STORAGE_KEY] ||
+        changes.apiKey
+      ) {
         logger.log("🔄 [SettingsUtils] 检测到设置变化");
         // 整包 settings 事件中可能仍带旧字号；始终合并独立权威字号键。
         void this.getSettings().then((settings) => {

@@ -329,10 +329,57 @@ describe("SettingsUtils", () => {
 
       expect(syncPayload).not.toBeNull();
       expect(localPayload).not.toBeNull();
-      expect(syncPayload.settings.apiKey).toBe("sk-new-key");
+      expect(syncPayload.settings.apiKey).toBeUndefined();
+      expect("apiKey" in syncPayload.settings).toBe(false);
       expect(syncPayload.settings.temperature).toBe(0.9);
       expect(syncPayload.settings.model).toBe("prev-model");
       expect(localPayload.settings.apiKey).toBe("sk-new-key");
+    });
+
+    test("storage.sync 中绝不包含 apiKey，且会主动调用 remove('apiKey') 清理可能遗留的旧字段", async () => {
+      let syncPayload = null;
+      const syncRemovedKeys = [];
+      let localPayload = null;
+
+      setTestGlobal("browser", {
+        storage: {
+          sync: {
+            get: async () => ({
+              settings: { model: "prev-model" },
+            }),
+            set: async (payload) => {
+              syncPayload = payload;
+            },
+            remove: async (keys) => {
+              syncRemovedKeys.push(keys);
+            },
+          },
+          local: {
+            get: async () => ({
+              settings: { model: "prev-model" },
+            }),
+            set: async (payload) => {
+              localPayload = payload;
+            },
+          },
+        },
+      });
+
+      await SettingsUtils.setSettings({
+        apiKey: "sk-isolated-secret",
+        theme: "dark",
+      });
+
+      expect(syncPayload).not.toBeNull();
+      expect(syncPayload.settings.apiKey).toBeUndefined();
+      expect("apiKey" in syncPayload.settings).toBe(false);
+      expect(syncPayload.settings.theme).toBe("dark");
+
+      expect(localPayload).not.toBeNull();
+      expect(localPayload.settings.apiKey).toBe("sk-isolated-secret");
+      expect(localPayload.settings.theme).toBe("dark");
+
+      expect(syncRemovedKeys).toContain("apiKey");
     });
 
     test("setSetting modifies a single key", async () => {
@@ -383,6 +430,122 @@ describe("SettingsUtils", () => {
       await SettingsUtils.setSettings({ theme: "dark" });
       expect(localSaved.theme).toBe("dark");
       expect(localSaved.model).toBe("local-orig");
+    });
+
+    test("sync 写入失败但 local 成功时，重新读取依然能拿到新配置（杜绝回滚至 sync 旧值）", async () => {
+      // 模拟 sync 存储中残留着过去的旧值
+      const memoryStore = {
+        sync: {
+          settings: {
+            model: "stale-sync-model",
+            temperature: 0.1,
+            theme: "light",
+            updatedAt: 1000,
+          },
+        },
+        local: {
+          settings: {
+            model: "stale-sync-model",
+            temperature: 0.1,
+            theme: "light",
+            apiKey: "sk-authoritative-local-key",
+            updatedAt: 1000,
+          },
+        },
+      };
+
+      setTestGlobal("browser", {
+        storage: {
+          sync: {
+            get: async (key) => {
+              if (key === "settings") {
+                return { settings: structuredClone(memoryStore.sync.settings) };
+              }
+              return {};
+            },
+            set: async () => {
+              // 模拟同步存储配额超限或网络异常导致写入失败
+              throw new Error("QuotaExceededError: sync storage set failed");
+            },
+            remove: async () => {},
+          },
+          local: {
+            get: async (key) => {
+              if (key === "settings") {
+                return {
+                  settings: structuredClone(memoryStore.local.settings),
+                };
+              }
+              return {};
+            },
+            set: async (payload) => {
+              if (payload.settings) {
+                memoryStore.local.settings = structuredClone(payload.settings);
+              }
+            },
+          },
+        },
+      });
+
+      // 保存新配置：sync 抛错，但 local 成功写入
+      await SettingsUtils.setSettings({
+        model: "new-saved-model",
+        temperature: 0.95,
+        theme: "dark",
+      });
+
+      // 关键断言：重新读取设置，必须返回刚刚保存在 local 的新配置，绝不能读取到 sync 中的旧值
+      const reloadedSettings = await SettingsUtils.getSettings();
+      expect(reloadedSettings.model).toBe("new-saved-model");
+      expect(reloadedSettings.temperature).toBe(0.95);
+      expect(reloadedSettings.theme).toBe("dark");
+      expect(reloadedSettings.apiKey).toBe("sk-authoritative-local-key");
+    });
+
+    test("当云端 sync 拥有更新的时间戳时，合并云端偏好但强行保留本地 apiKey", async () => {
+      setTestGlobal("browser", {
+        storage: {
+          sync: {
+            get: async (key) => {
+              if (key === "settings") {
+                return {
+                  settings: {
+                    model: "cloud-device-model",
+                    temperature: 0.3,
+                    theme: "dark",
+                    updatedAt: 5000,
+                  },
+                };
+              }
+              return {};
+            },
+          },
+          local: {
+            get: async (key) => {
+              if (key === "settings") {
+                return {
+                  settings: {
+                    model: "local-old-model",
+                    temperature: 0.7,
+                    theme: "light",
+                    apiKey: "sk-my-device-only-key",
+                    updatedAt: 2000,
+                  },
+                };
+              }
+              return {};
+            },
+          },
+        },
+      });
+
+      const settings = await SettingsUtils.getSettings();
+      // 云端偏好生效
+      expect(settings.model).toBe("cloud-device-model");
+      expect(settings.temperature).toBe(0.3);
+      expect(settings.theme).toBe("dark");
+      // 本地 apiKey 绝不受云端未包含 apiKey 影响而丢失或覆盖
+      expect(settings.apiKey).toBe("sk-my-device-only-key");
     });
 
     test("succeeds when local storage set fails but sync storage succeeds", async () => {
