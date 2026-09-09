@@ -262,9 +262,7 @@ function Options() {
     try {
       const url =
         typeof browser?.runtime?.getURL === "function"
-          ? (browser.runtime.getURL as (path: string) => string)(
-              "entrypoints/options/index.html"
-            ) || browser.runtime.getURL("/options.html")
+          ? browser.runtime.getURL("/options.html")
           : window.location.href;
       window.open(url, "_blank");
     } catch {
