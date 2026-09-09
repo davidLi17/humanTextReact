@@ -260,7 +260,12 @@ function Options() {
 
   const handleOpenInTab = () => {
     try {
-      const url = browser.runtime.getURL("entrypoints/options/index.html");
+      const url =
+        typeof browser?.runtime?.getURL === "function"
+          ? (browser.runtime.getURL as (path: string) => string)(
+              "entrypoints/options/index.html"
+            ) || browser.runtime.getURL("/options.html")
+          : window.location.href;
       window.open(url, "_blank");
     } catch {
       window.open(window.location.href, "_blank");
@@ -1302,8 +1307,9 @@ function Options() {
           </button>
 
           <button
+            type="button"
             className={`save-btn ${saveStatus}`}
-            onClick={handleSave}
+            onClick={() => void handleSave(true)}
             disabled={saveStatus === "saving"}
           >
             {saveStatus === "saving" && "保存中..."}
