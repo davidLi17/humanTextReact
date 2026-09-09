@@ -41,6 +41,10 @@ export default defineConfig({
       default_popup: "entrypoints/popup/index.html",
       default_title: "人话翻译器",
     },
+    options_ui: {
+      page: "entrypoints/options/index.html",
+      open_in_tab: true,
+    },
     side_panel: {
       default_path: "entrypoints/sidepanel/index.html",
     },
