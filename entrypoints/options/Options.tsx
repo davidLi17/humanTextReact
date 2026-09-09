@@ -504,7 +504,17 @@ function Options() {
 
       if (response.success) {
         setTestStatus("success");
-        setTestMessage("✅ API连接测试成功！");
+        setTestMessage("✅ API连接测试成功，已自动保存！");
+        // 测试成功后自动持久化，避免用户在测试通过后遗漏点击底部的“保存设置”按钮
+        try {
+          const settingsWithoutFontScale = { ...settings } as Partial<Settings>;
+          delete settingsWithoutFontScale.fontScalePercent;
+          await SettingsUtils.setSettings(settingsWithoutFontScale);
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 2000);
+        } catch (saveErr) {
+          optionsLogger.warn("自动保存测试通过的设置失败:", saveErr);
+        }
       } else {
         setTestStatus("error");
         setTestMessage(`❌ 连接失败: ${response.error}`);
