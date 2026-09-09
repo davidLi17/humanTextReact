@@ -505,7 +505,7 @@ function Options() {
       if (response.success) {
         setTestStatus("success");
         setTestMessage("✅ API连接测试成功，已自动保存！");
-        // 测试成功后自动持久化，避免用户忘记滚动到底部点击保存
+        // 测试成功后自动持久化，避免用户在测试通过后遗漏点击底部的“保存设置”按钮
         try {
           const settingsWithoutFontScale = { ...settings } as Partial<Settings>;
           delete settingsWithoutFontScale.fontScalePercent;
