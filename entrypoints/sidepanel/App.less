@@ -2035,6 +2035,282 @@
   }
 }
 
+/* 输入框上方排队队列条 (Prompt Queue Bar) */
+.prompt-queue-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+  font-size: calc(12px * var(--ht-font-scale, 1));
+  animation: fadeIn 0.18s ease;
+  flex-shrink: 0;
+
+  .queue-main-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .queue-left-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .queue-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    font-size: calc(11px * var(--ht-font-scale, 1));
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+
+    .queue-pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--color-primary);
+      animation: queuePulse 1.5s infinite ease-in-out;
+    }
+  }
+
+  .queue-snippet {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+
+    .queue-text-content {
+      color: var(--color-text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.4;
+      font-weight: 500;
+    }
+
+    .queue-media-tag {
+      font-size: calc(10px * var(--ht-font-scale, 1));
+      color: var(--color-text-tertiary);
+      flex-shrink: 0;
+    }
+  }
+
+  .queue-expand-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: none;
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--color-text-secondary);
+    font-size: calc(11px * var(--ht-font-scale, 1));
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.09);
+      color: var(--color-text-primary);
+    }
+
+    &.expanded {
+      background: var(--color-primary-light);
+      color: var(--color-primary);
+    }
+  }
+
+  .queue-right-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .queue-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    padding: 3px 7px;
+    font-size: calc(11px * var(--ht-font-scale, 1));
+
+    &.promote-btn {
+      background: var(--color-primary);
+      color: #ffffff;
+      font-weight: 500;
+
+      &:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
+      }
+    }
+
+    &.remove-btn {
+      background: transparent;
+      color: var(--color-text-tertiary);
+      padding: 3px 5px;
+
+      &:hover {
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+      }
+    }
+  }
+
+  /* 展开列表 */
+  .queue-expanded-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--color-border);
+    max-height: 140px;
+    overflow-y: auto;
+
+    .queue-expanded-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: calc(11px * var(--ht-font-scale, 1));
+      color: var(--color-text-tertiary);
+      padding: 0 2px;
+
+      .expanded-title {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .clear-all-queue-btn {
+        border: none;
+        background: transparent;
+        color: #ef4444;
+        font-size: calc(11px * var(--ht-font-scale, 1));
+        cursor: pointer;
+        padding: 0;
+
+        &:hover {
+          text-decoration: underline;
+        }
+      }
+    }
+
+    .queue-items-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .queue-item-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 6px;
+      background: rgba(0, 0, 0, 0.02);
+      border-radius: 4px;
+      font-size: calc(11px * var(--ht-font-scale, 1));
+
+      .item-order {
+        font-weight: 600;
+        color: var(--color-text-tertiary);
+        flex-shrink: 0;
+      }
+
+      .item-text {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--color-text-secondary);
+      }
+
+      .item-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+
+      .item-action-btn {
+        border: none;
+        background: transparent;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        font-size: calc(10px * var(--ht-font-scale, 1));
+        display: flex;
+        align-items: center;
+        gap: 2px;
+
+        &.promote {
+          color: var(--color-primary);
+          background: var(--color-primary-light);
+          &:hover {
+            opacity: 0.85;
+          }
+        }
+
+        &.remove {
+          color: var(--color-text-tertiary);
+          &:hover {
+            color: #ef4444;
+          }
+        }
+      }
+    }
+  }
+}
+
+@keyframes queuePulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+}
+
+/* 忙碌态排队按钮样式 */
+.queue-send-btn {
+  background: var(--color-primary-light) !important;
+  color: var(--color-primary) !important;
+  border: 1px solid var(--color-primary) !important;
+
+  &:hover {
+    background: var(--color-primary) !important;
+    color: #ffffff !important;
+  }
+}
+
 /* 输入框上方微型引用胶囊条 */
 .quote-input-capsule-bar {
   display: flex;

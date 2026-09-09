@@ -86,6 +86,9 @@ import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector"
 import JargonVaultPanel from "./components/JargonVaultPanel";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
 import QuoteInputCapsule from "./components/QuoteInputCapsule";
+import PromptQueueBar, {
+  type QueuedPrompt,
+} from "./components/PromptQueueBar";
 import {
   calculateQuotePosition,
   formatQuoteMarkdown,
@@ -247,6 +250,9 @@ export default function SidePanelApp() {
   );
   // 全局 Toast 提示
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // 提示词排队队列状态 (Prompt Queue System)
+  const [promptQueue, setPromptQueue] = useState<QueuedPrompt[]>([]);
 
   // 用户消息行内编辑状态
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -1649,10 +1655,34 @@ export default function SidePanelApp() {
     }
   };
 
-  // 发送常规消息或追问
-  const handleSendMessage = async (textToSend?: string) => {
-    const text = (textToSend ?? inputText).trim();
-    if (!text || isStreaming || isExtractingPage || !activeSession) return;
+  // 自动串联调度 (Auto-dispatch)：当上一个问题流式输出结束，自动取出队列中下一项发送
+  useEffect(() => {
+    if (
+      !isStreaming &&
+      promptQueue.length > 0 &&
+      activeSession &&
+      !isExtractingPage
+    ) {
+      const nextPrompt = promptQueue[0];
+      // 若属于当前会话，则自动出队并派发
+      if (nextPrompt.sessionId === activeSession.id) {
+        setPromptQueue((prev) => prev.slice(1));
+        void executeSendMessage(
+          nextPrompt.text,
+          nextPrompt.images,
+          nextPrompt.selectionContext
+        );
+      }
+    }
+  }, [isStreaming, promptQueue, activeSession?.id, isExtractingPage]);
+
+  // 底层实际执行消息发送与后台流式通信
+  const executeSendMessage = async (
+    text: string,
+    imagesToSend?: ChatMessage["images"],
+    contextToSend?: SelectionContext
+  ) => {
+    if (!activeSession) return;
 
     setActiveView("chat");
     const userMessageId = createRequestId();
@@ -1668,8 +1698,8 @@ export default function SidePanelApp() {
       id: userMessageId,
       role: "user",
       content: text,
-      images: images && images.length > 0 ? images : undefined,
-      selectionContext: pendingSelectionContext,
+      images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
+      selectionContext: contextToSend,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -1706,11 +1736,6 @@ export default function SidePanelApp() {
     setSessions(nextSessions);
     void saveSessionsToStorage(nextSessions);
 
-    setInputText("");
-    setActiveQuotedText(null);
-    setImages([]);
-    setPendingSelectionContext(undefined);
-    composerDraftsRef.current.delete(activeSession.id);
     setIsStreaming(true);
     setExtractError(null);
     scrollToBottom(true);
@@ -1741,6 +1766,110 @@ export default function SidePanelApp() {
         currentRequestId
       );
     }
+  };
+
+  // 发送常规消息或进入排队队列（忙碌态允许排队）
+  const handleSendMessage = async (textToSend?: string) => {
+    const text = (textToSend ?? inputText).trim();
+    if (!text || isExtractingPage || !activeSession) return;
+
+    // 忙碌态允许排队：当正在流式输出时，将问题存入 promptQueue（先进先出队列）
+    if (isStreaming) {
+      const queuedItem: QueuedPrompt = {
+        id: createRequestId(),
+        sessionId: activeSession.id,
+        text,
+        images: images && images.length > 0 ? images : undefined,
+        selectionContext: pendingSelectionContext,
+        createdAt: Date.now(),
+      };
+      setPromptQueue((prev) => [...prev, queuedItem]);
+      setInputText("");
+      setActiveQuotedText(null);
+      setImages([]);
+      setPendingSelectionContext(undefined);
+      composerDraftsRef.current.delete(activeSession.id);
+      setToastMessage("问题已加入排队队列，AI 回答完毕后将自动作答");
+      setTimeout(() => setToastMessage(null), 2200);
+      return;
+    }
+
+    // 空闲态直接执行发送
+    const imagesToSend = images;
+    const contextToSend = pendingSelectionContext;
+    setInputText("");
+    setActiveQuotedText(null);
+    setImages([]);
+    setPendingSelectionContext(undefined);
+    composerDraftsRef.current.delete(activeSession.id);
+
+    await executeSendMessage(text, imagesToSend, contextToSend);
+  };
+
+  // 快捷键 ⌘+Enter (Mac) / Ctrl+Enter (Win/Linux) 或点击提升按钮：直接打断当前流式输出并立即发送
+  const handleInterruptAndSendImmediate = async (textToSend?: string) => {
+    if (!activeSession || isExtractingPage) return;
+    const currentInput = (textToSend ?? inputText).trim();
+
+    let targetText = currentInput;
+    let targetImages = images;
+    let targetContext = pendingSelectionContext;
+
+    // 如果输入框没有新文字，但队列中有排队项，直接取队首
+    if (!targetText && promptQueue.length > 0) {
+      const head = promptQueue[0];
+      targetText = head.text;
+      targetImages = head.images;
+      targetContext = head.selectionContext;
+      setPromptQueue((prev) => prev.slice(1));
+    }
+
+    if (!targetText) return;
+
+    setInputText("");
+    setActiveQuotedText(null);
+    setImages([]);
+    setPendingSelectionContext(undefined);
+    composerDraftsRef.current.delete(activeSession.id);
+
+    // 打断当前生成
+    if (isStreaming) {
+      await handleStopGenerating();
+    }
+
+    setTimeout(() => {
+      void executeSendMessage(targetText, targetImages, targetContext);
+    }, 60);
+  };
+
+  // 队列条操作：提升/优先发送
+  const handlePromoteQueuedPrompt = async (id: string) => {
+    const target = promptQueue.find((p) => p.id === id);
+    if (!target || !activeSession) return;
+
+    setPromptQueue((prev) => prev.filter((p) => p.id !== id));
+
+    if (isStreaming) {
+      await handleStopGenerating();
+    }
+
+    setTimeout(() => {
+      void executeSendMessage(
+        target.text,
+        target.images,
+        target.selectionContext
+      );
+    }, 60);
+  };
+
+  // 队列条操作：移除单项
+  const handleRemoveQueuedPrompt = (id: string) => {
+    setPromptQueue((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // 队列条操作：清空全部
+  const handleClearAllQueue = () => {
+    setPromptQueue([]);
   };
 
   // 开启用户消息行内编辑
@@ -2553,9 +2682,19 @@ export default function SidePanelApp() {
       }
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      void handleSendMessage();
+    if (e.key === "Enter") {
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+      if (isCmdOrCtrl) {
+        // ⌘+Enter (Mac) / Ctrl+Enter (Windows/Linux): 直接打断当前生成并立即发送
+        e.preventDefault();
+        void handleInterruptAndSendImmediate();
+        return;
+      }
+
+      if (!e.shiftKey) {
+        e.preventDefault();
+        void handleSendMessage();
+      }
     }
   };
 
@@ -3495,6 +3634,16 @@ export default function SidePanelApp() {
                 </button>
               )}
 
+            {/* 提示词排队队列卡片条 (Prompt Queue Bar) */}
+            {promptQueue.length > 0 && (
+              <PromptQueueBar
+                queue={promptQueue}
+                onPromote={handlePromoteQueuedPrompt}
+                onRemove={handleRemoveQueuedPrompt}
+                onClearAll={handleClearAllQueue}
+              />
+            )}
+
             {/* 划词引用胶囊预览条 */}
             {activeQuotedText && (
               <QuoteInputCapsule
@@ -3531,7 +3680,7 @@ export default function SidePanelApp() {
               <textarea
                 ref={inputRef}
                 className="chat-textarea"
-                placeholder="输入追问、黑话术语或指令，支持 Ctrl+V 粘贴图片 (Enter 发送，Shift+Enter 换行)..."
+                placeholder="输入追问、黑话术语或指令 (Enter 发送/排队，⌘+Enter 打断发送，Shift+Enter 换行)..."
                 value={inputText}
                 rows={2}
                 onChange={handleInputChange}
@@ -3555,13 +3704,26 @@ export default function SidePanelApp() {
 
                 <div className="input-actions-right">
                   {isStreaming ? (
-                    <button
-                      type="button"
-                      className="stop-btn"
-                      onClick={handleStopGenerating}
-                    >
-                      <span>停止生成</span>
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="stop-btn"
+                        onClick={handleStopGenerating}
+                      >
+                        <span>停止生成</span>
+                      </button>
+                      {inputText.trim() && (
+                        <button
+                          type="button"
+                          className="send-btn queue-send-btn"
+                          onClick={() => handleSendMessage()}
+                          title="加入排队队列 (Enter)"
+                        >
+                          <Send theme="outline" size="16" />
+                          <span>排队发送</span>
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <button
                       type="button"
