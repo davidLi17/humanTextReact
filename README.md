@@ -1,11 +1,41 @@
 # 人话翻译器
 
+![人话翻译器：把黑话翻译成人话](store-assets/02_store_marquee_1400x560.png)
+
 人话翻译器是一个基于 WXT、React 和 Chrome Extension Manifest V3
 开发的浏览器扩展。它使用用户配置的 AI 接口，将行业黑话、专业术语和
 复杂表达解释成更容易理解的中文。
 
 支持四种使用方式：Popup 翻译、网页划词翻译（右键菜单 / 快捷键 /
 浮动操作栏）、对话式侧边栏，以及侧边栏通读整个网页。
+
+## 功能预览
+
+以下为产品宣传示意图，界面与示例数据用于展示功能概念；具体操作以当前版本为准。
+
+### 把复杂表达讲清楚
+
+![行业黑话与通俗解释示意](store-assets/04_feature_jargon_to_plain_1280x800.png)
+
+### 网页划词，随手解释
+
+![网页划词翻译与浮动操作栏示意](store-assets/05_feature_selection_toolbar_1280x800.png)
+
+### 图片解读与深度思考
+
+![多模态图片解读与深度思考示意](store-assets/06_feature_multimodal_reasoning_1280x800.png)
+
+图片解读需要配置支持图片输入的模型。
+
+### 收藏术语，积累自己的生词本
+
+![黑话生词本与知识积累示意](store-assets/07_feature_jargon_vault_1280x800.png)
+
+### 本地保存，自选模型
+
+![本地存储与多模型接入示意](store-assets/08_feature_local_security_models_1280x800.png)
+
+设置、历史记录和生词本保存在浏览器本地。调用 AI 时，待解释的文字或图片会发送至你配置的模型服务，详见[隐私政策](PRIVACY.md)。
 
 ## 功能
 
