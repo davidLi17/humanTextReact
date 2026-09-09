@@ -99,7 +99,7 @@ function createBrowserMock() {
         }
         return { success: true };
       },
-      getManifest: () => ({ version: "1.3.0", name: "人话翻译器" }),
+      getManifest: () => ({ version: "1.4.0", name: "人话翻译器" }),
       getURL: (path: string) => `chrome-extension://human-text/${path}`,
     },
     commands: {
@@ -146,7 +146,7 @@ afterEach(() => {
 });
 
 describe("Options 设置页面组件级交互与逻辑增强", () => {
-  test("正确渲染 Header 品牌信息、Logo、标题与版本号 v1.3.0", async () => {
+  test("正确渲染 Header 品牌信息、Logo、标题与版本号 v1.4.0", async () => {
     const { browser } = createBrowserMock();
     setTestGlobal("browser", browser);
     setTestGlobal("chrome", browser);
@@ -154,7 +154,7 @@ describe("Options 设置页面组件级交互与逻辑增强", () => {
     render(<Options />);
 
     expect(screen.getByText("人话翻译器")).toBeTruthy();
-    expect(screen.getByText("v1.3.0")).toBeTruthy();
+    expect(screen.getByText("v1.4.0")).toBeTruthy();
     const logo = screen.getByAltText("人话翻译器 Logo") as HTMLImageElement;
     expect(logo).toBeTruthy();
     expect(logo.getAttribute("src")).toBe("/icon/48.png");
