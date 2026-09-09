@@ -854,12 +854,25 @@ function Options() {
                           onClick={() => {
                             if (api.url) {
                               handleInputChange("baseUrl", api.url);
+                              if (
+                                api.defaultModel &&
+                                (!settings.model ||
+                                  API_HINTS.some(
+                                    (h) => h.defaultModel === settings.model
+                                  ))
+                              ) {
+                                handleInputChange("model", api.defaultModel);
+                              }
                             } else {
                               const input = document.getElementById("baseUrl");
                               input?.focus();
                             }
                           }}
-                          title={api.url ? `点击填入: ${api.url}` : "聚焦输入自定义地址"}
+                          title={
+                            api.url
+                              ? `点击填入: ${api.url}${api.defaultModel ? ` (推荐模型: ${api.defaultModel})` : ""}`
+                              : "聚焦输入自定义地址"
+                          }
                         >
                           {api.name}
                           {isSelected && <span className="chip-check">✓</span>}
