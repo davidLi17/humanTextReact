@@ -502,4 +502,26 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
       bar.destroy();
     }
   });
+
+  test("triggerInstantAltTranslation directly triggers popup with mouse position", async () => {
+    let calledText = "";
+    let calledContext = null;
+    const bar = new SelectionActionBar(undefined, {
+      onTranslatePopup: (text, context) => {
+        calledText = text;
+        calledContext = context;
+      },
+    });
+
+    const mousePos = { left: 450, top: 220 };
+    await bar.triggerInstantAltTranslation(
+      "端到端打通",
+      mousePos,
+      createMockWindow(),
+      createMockDocument()
+    );
+
+    expect(calledText).toBe("端到端打通");
+    bar.destroy();
+  });
 });

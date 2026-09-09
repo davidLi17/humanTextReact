@@ -550,9 +550,74 @@ export class SelectionActionBar {
           requestId,
           text,
           thinkingEnabled: settings.thinkingEnabled ?? false,
+          prismMode: true,
         });
       } catch (error) {
         logger.error("触发浮窗翻译失败:", error);
+      }
+    }
+  }
+
+  /**
+   * 按住 Alt/Option 划词后直接在鼠标落点原位唤起翻译浮窗
+   */
+  public async triggerInstantAltTranslation(
+    text: string,
+    mousePosition: { left: number; top: number },
+    win?: Window,
+    doc?: Document
+  ): Promise<void> {
+    if (!isValidSelectionText(text)) return;
+    logger.log("按住 Alt/Option 划选即译触发", {
+      textLength: text.length,
+      mousePosition,
+    });
+
+    const targetDoc =
+      doc || (typeof document !== "undefined" ? document : undefined);
+    const targetWin =
+      win || (typeof window !== "undefined" ? window : undefined);
+
+    const envelope = createSelectionEnvelope(
+      text,
+      this.contextualSelectionEnabled && targetDoc && targetWin
+        ? extractSelectionContext(targetDoc, targetWin, text)
+        : undefined
+    );
+    const selectionContext = envelope.selectionContext;
+
+    if (this.customCallbacks?.onTranslatePopup) {
+      await this.customCallbacks.onTranslatePopup(text, selectionContext);
+      return;
+    }
+
+    if (this.popupManager) {
+      const requestId = createRequestId();
+      try {
+        const settings = await SettingsUtils.getSettings();
+        const useContext = Boolean(
+          settings.contextualSelectionEnabled && selectionContext
+        );
+
+        this.popupManager.showPopup(
+          text,
+          requestId,
+          false,
+          useContext ? selectionContext : undefined,
+          false,
+          mousePosition
+        );
+
+        await browser.runtime.sendMessage({
+          action: MESSAGE_TYPES.TRANSLATE,
+          requestId,
+          text,
+          selectionContext: useContext ? selectionContext : undefined,
+          thinkingEnabled: settings.thinkingEnabled ?? false,
+          prismMode: true,
+        });
+      } catch (error) {
+        logger.error("Alt 即选即译发送请求失败:", error);
       }
     }
   }
@@ -667,6 +732,12 @@ export class SelectionActionBar {
         return;
       }
 
+      const isAltKey = Boolean(e.altKey);
+      const mousePosition = {
+        left: e.clientX,
+        top: e.clientY,
+      };
+
       // 等待浏览器的 selection 变更同步
       setTimeout(() => {
         const selection = win.getSelection();
@@ -691,6 +762,15 @@ export class SelectionActionBar {
           if (this.isVisible) {
             this.hide();
           }
+          return;
+        }
+
+        // 如果用户按住了 Alt/Option 键，跳过操作条直接在鼠标落点原位唤起翻译浮窗
+        if (isAltKey) {
+          if (this.isVisible) {
+            this.hide();
+          }
+          void this.triggerInstantAltTranslation(text, mousePosition, win, doc);
           return;
         }
 

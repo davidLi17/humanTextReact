@@ -13,6 +13,7 @@ import CollapsibleThinkingChain from "./CollapsibleThinkingChain";
 import CopyFooter from "./CopyFooter";
 import SmartInput from "./SmartInput";
 import ThemeModeSelector from "./ThemeModeSelector";
+import PrismResultTabs from "@/entrypoints/sidepanel/components/PrismResultTabs";
 
 const logger = createLogger("popup-translation-area", "📝");
 
@@ -316,11 +317,9 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
                         <span className="vault-result-badge">来自生词本</span>
                       )}
                     </div>
-                    <div
-                      className="result-content markdown-content"
-                      dangerouslySetInnerHTML={{
-                        __html: parseMarkdown(translationState.translatedText),
-                      }}
+                    <PrismResultTabs
+                      content={translationState.translatedText}
+                      isStreaming={translationState.isTranslating}
                     />
                     {translationState.resultSource === "jargon-vault" && (
                       <button

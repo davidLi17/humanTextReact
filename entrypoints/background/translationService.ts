@@ -29,6 +29,7 @@ import {
   JARGON_VAULT_RESULT_SOURCE,
 } from "@/entrypoints/shared/jargonReuse";
 import { findExactJargonItem } from "@/entrypoints/shared/jargonStorage";
+import { buildPrismSystemPrompt } from "@/entrypoints/shared/prismPrompt";
 
 const logger = createLogger("translation-service", "🌐");
 
@@ -93,6 +94,7 @@ export interface TranslationParams {
   apiKey?: string;
   selectionContext?: SelectionContext;
   bypassJargonVault?: boolean;
+  prismMode?: boolean;
 }
 
 interface StreamChunk {
@@ -174,6 +176,7 @@ export function buildMessagesPayload(
     images?: ImageContent[];
     promptTemplate?: string;
     selectionContext?: SelectionContext;
+    prismMode?: boolean;
   }
 ): any[] {
   const {
@@ -182,6 +185,7 @@ export function buildMessagesPayload(
     images = [],
     promptTemplate = DEFAULT_SETTINGS.promptTemplate,
     selectionContext,
+    prismMode = false,
   } = params;
 
   const normalizedTopLevelContext = normalizeSelectionContext(selectionContext);
@@ -194,9 +198,13 @@ export function buildMessagesPayload(
   const hasContext = Boolean(
     normalizedTopLevelContext || normalizedMessageContexts.some(Boolean)
   );
-  const systemPrompt = hasContext
+  let systemPrompt = hasContext
     ? buildContextualSystemPrompt(promptTemplate)
     : promptTemplate;
+
+  if (prismMode) {
+    systemPrompt = buildPrismSystemPrompt(systemPrompt);
+  }
 
   if (chatMessages && chatMessages.length > 0) {
     const hasSystem = chatMessages.some((m) => m.role === "system");
@@ -263,12 +271,17 @@ export function buildMessagesPayload(
       });
     });
 
-    if (hasContext) {
+    if (hasContext || prismMode) {
       const existingSystem = formattedMessages.find(
         (message) => message.role === "system" && typeof message.content === "string"
       );
       if (existingSystem) {
-        existingSystem.content = buildContextualSystemPrompt(existingSystem.content);
+        if (hasContext) {
+          existingSystem.content = buildContextualSystemPrompt(existingSystem.content);
+        }
+        if (prismMode && !existingSystem.content.includes("网页全文通读")) {
+          existingSystem.content = buildPrismSystemPrompt(existingSystem.content);
+        }
       }
     }
 
@@ -398,12 +411,14 @@ export class TranslationService {
         config.promptTemplate ||
         DEFAULT_SETTINGS.promptTemplate;
 
+      const prismMode = params.prismMode ?? true;
       const messagesPayload = buildMessagesPayload({
         text,
         messages: chatMessages,
         images,
         promptTemplate,
         selectionContext: params.selectionContext,
+        prismMode,
       });
 
       const requestBody: any = {

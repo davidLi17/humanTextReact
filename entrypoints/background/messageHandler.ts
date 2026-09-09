@@ -115,6 +115,7 @@ export class MessageHandler {
           apiKey: request.apiKey,
           selectionContext,
           bypassJargonVault: request.bypassJargonVault === true,
+          prismMode: request.prismMode,
         };
 
         const result = await TranslationService.translateText(
