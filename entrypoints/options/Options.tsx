@@ -62,6 +62,7 @@ interface Settings {
   thinkingEnabled: boolean;
   showSelectionToolbar: boolean;
   contextualSelectionEnabled: boolean;
+  prismModeEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
   fontScalePercent: number;
@@ -1022,6 +1023,31 @@ function Options() {
                   默认关闭。开启后，划词时会提取选区所在的有限段落（最多约 2000
                   字），并在确认发送时交给已配置的 AI 服务。页面标题和 URL
                   仅用于本地来源预览。
+                </div>
+              </div>
+
+              <div className="setting-item">
+                <label htmlFor="prismModeEnabled">多维视角三棱镜模式</label>
+                <div className="switch-container">
+                  <input
+                    type="checkbox"
+                    id="prismModeEnabled"
+                    checked={settings.prismModeEnabled ?? false}
+                    onChange={(e) =>
+                      handleInputChange(
+                        "prismModeEnabled",
+                        e.target.checked
+                      )
+                    }
+                    className="switch-input"
+                  />
+                  <label
+                    htmlFor="prismModeEnabled"
+                    className="switch-label"
+                  ></label>
+                </div>
+                <div className="setting-hint">
+                  默认关闭。关闭时仅走原生态链路（仅带上用户自定义系统提示词与问题）；开启后，模型将输出“🍼 直白人话”、“👔 向上汇报”、“🔪 犀利真相”三段视角与周报一键复制。
                 </div>
               </div>
             </section>

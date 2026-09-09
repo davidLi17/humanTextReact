@@ -113,6 +113,7 @@ const settingsFixture = {
   thinkingEnabled: true,
   showSelectionToolbar: false,
   contextualSelectionEnabled: false,
+  prismModeEnabled: false,
   logLevel: "debug",
   theme: "dark",
   fontScalePercent: 130,

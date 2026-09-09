@@ -411,7 +411,7 @@ export class TranslationService {
         config.promptTemplate ||
         DEFAULT_SETTINGS.promptTemplate;
 
-      const prismMode = params.prismMode ?? true;
+      const prismMode = params.prismMode ?? config.prismModeEnabled ?? false;
       const messagesPayload = buildMessagesPayload({
         text,
         messages: chatMessages,

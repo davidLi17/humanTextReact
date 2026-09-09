@@ -77,6 +77,7 @@ export const DEFAULT_SETTINGS = {
   thinkingEnabled: false,
   showSelectionToolbar: true,
   contextualSelectionEnabled: false,
+  prismModeEnabled: false,
   logLevel: LOG_LEVELS.OFF as LogLevel,
   theme: THEME_MODES.SYSTEM as ThemeMode,
   fontScalePercent: DEFAULT_FONT_SCALE_PERCENT,

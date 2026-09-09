@@ -18,6 +18,7 @@ export interface UserSettings {
   thinkingEnabled: boolean;
   showSelectionToolbar: boolean;
   contextualSelectionEnabled: boolean;
+  prismModeEnabled: boolean;
   logLevel: LogLevel;
   theme: ThemeMode;
   fontScalePercent: number;
@@ -43,6 +44,8 @@ function normalizeSettings(
     contextualSelectionEnabled:
       settings.contextualSelectionEnabled ??
       DEFAULT_SETTINGS.contextualSelectionEnabled,
+    prismModeEnabled:
+      settings.prismModeEnabled ?? DEFAULT_SETTINGS.prismModeEnabled,
     logLevel: settings.logLevel ?? DEFAULT_SETTINGS.logLevel,
     theme: settings.theme ?? DEFAULT_SETTINGS.theme,
     fontScalePercent: normalizeFontScalePercent(settings.fontScalePercent),

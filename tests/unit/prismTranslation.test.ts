@@ -132,5 +132,12 @@ describe("Prism Translation Parser & Prompt", () => {
 
       expect(payload[0].content).toBe("纯净提示词");
     });
+
+    test("defaults prismModeEnabled to false in DEFAULT_SETTINGS", async () => {
+      const { DEFAULT_SETTINGS } = await import(
+        "../../entrypoints/shared/constants/index"
+      );
+      expect(DEFAULT_SETTINGS.prismModeEnabled).toBe(false);
+    });
   });
 });

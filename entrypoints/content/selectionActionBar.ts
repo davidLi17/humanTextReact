@@ -550,7 +550,7 @@ export class SelectionActionBar {
           requestId,
           text,
           thinkingEnabled: settings.thinkingEnabled ?? false,
-          prismMode: true,
+          prismMode: settings.prismModeEnabled ?? false,
         });
       } catch (error) {
         logger.error("触发浮窗翻译失败:", error);
@@ -614,7 +614,7 @@ export class SelectionActionBar {
           text,
           selectionContext: useContext ? selectionContext : undefined,
           thinkingEnabled: settings.thinkingEnabled ?? false,
-          prismMode: true,
+          prismMode: settings.prismModeEnabled ?? false,
         });
       } catch (error) {
         logger.error("Alt 即选即译发送请求失败:", error);
