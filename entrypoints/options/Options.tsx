@@ -67,7 +67,12 @@ interface Settings {
   fontScalePercent: number;
 }
 
-type TabCategory = "all" | "api" | "interaction" | "appearance" | "backup";
+export type TabCategory =
+  | "all"
+  | "api"
+  | "interaction"
+  | "appearance"
+  | "diagnostics";
 
 interface TabItem {
   id: TabCategory;
@@ -76,11 +81,11 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
-  { id: "all", label: "全部设置", icon: AllApplication },
+  { id: "all", label: "全部展开", icon: AllApplication },
   { id: "api", label: "API 与模型", icon: Api },
-  { id: "interaction", label: "交互偏好", icon: SettingTwo },
+  { id: "interaction", label: "划词与交互", icon: SettingTwo },
   { id: "appearance", label: "外观显示", icon: Platte },
-  { id: "backup", label: "备份与诊断", icon: Protect },
+  { id: "diagnostics", label: "备份与诊断", icon: Protect },
 ];
 
 function Options() {
@@ -121,6 +126,24 @@ function Options() {
 
   const manifestVersion =
     browser?.runtime?.getManifest?.()?.version || "1.3.0";
+
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  // 检测是否已经在独立全屏标签页中打开
+  useEffect(() => {
+    const checkStandalone = () => {
+      try {
+        const inIframe = window.self !== window.top;
+        const isWide = window.innerWidth >= 800;
+        setIsStandalone(!inIframe && isWide);
+      } catch {
+        setIsStandalone(false);
+      }
+    };
+    checkStandalone();
+    window.addEventListener("resize", checkStandalone);
+    return () => window.removeEventListener("resize", checkStandalone);
+  }, []);
 
   // 加载设置
   useEffect(() => {
@@ -237,20 +260,19 @@ function Options() {
 
   const handleOpenInTab = () => {
     try {
-      if (browser?.tabs?.create) {
-        browser.tabs.create({ url: browser.runtime.getURL("/options.html") });
-      } else {
-        window.open(window.location.href, "_blank");
-      }
+      const url = browser.runtime.getURL("entrypoints/options/index.html");
+      window.open(url, "_blank");
     } catch {
       window.open(window.location.href, "_blank");
     }
   };
 
-  const handleSave = async () => {
-    if (saveStatus === "saving") return; // 防止重复提交
+  const handleSave = async (showStatus = true): Promise<boolean> => {
+    if (saveStatus === "saving") return false; // 防止重复提交
 
-    setSaveStatus("saving");
+    if (showStatus) {
+      setSaveStatus("saving");
+    }
 
     try {
       // 使用 SettingsUtils 统一保存
@@ -265,12 +287,18 @@ function Options() {
         thinkingEnabled: settings.thinkingEnabled,
       });
 
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
+      if (showStatus) {
+        setSaveStatus("saved");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      }
+      return true;
     } catch (error) {
       optionsLogger.error("保存设置失败:", error);
-      setSaveStatus("error");
-      setTimeout(() => setSaveStatus("idle"), 2000);
+      if (showStatus) {
+        setSaveStatus("error");
+        setTimeout(() => setSaveStatus("idle"), 2000);
+      }
+      return false;
     }
   };
 
@@ -527,7 +555,7 @@ function Options() {
     browser.tabs.create({ url: "chrome://extensions/shortcuts" });
   };
 
-  // 测试API密钥连接
+  // 测试API密钥连接并自动持久化
   const testApiKey = async () => {
     if (testStatus === "testing") return; // 防止重复提交
 
@@ -546,21 +574,29 @@ function Options() {
 
       if (response.success) {
         setTestStatus("success");
-        setTestMessage("✅ API连接测试成功！");
+        // 测试成功后自动持久化当前设置
+        const saved = await handleSave(false);
+        if (saved) {
+          setSaveStatus("saved");
+          setTimeout(() => setSaveStatus("idle"), 2000);
+          setTestMessage("✅ API连接测试成功，设置已自动保存！");
+        } else {
+          setTestMessage("✅ API连接测试成功！");
+        }
       } else {
         setTestStatus("error");
-        setTestMessage(`❌ 连接失败: ${response.error}`);
+        setTestMessage(`❌ 连接失败: ${response.error || "未知错误"}`);
       }
     } catch (error: any) {
       setTestStatus("error");
       setTestMessage(`❌ 测试失败: ${error.message || "未知错误"}`);
     }
 
-    // 3秒后自动重置状态
+    // 3.5秒后自动重置状态
     setTimeout(() => {
       setTestStatus("idle");
       setTestMessage("");
-    }, 3000);
+    }, 3500);
   };
 
   const handleReset = () => {
@@ -593,7 +629,8 @@ function Options() {
     activeTab === "all" || activeTab === "interaction";
   const showAppearanceSection =
     activeTab === "all" || activeTab === "appearance";
-  const showBackupSection = activeTab === "all" || activeTab === "backup";
+  const showDiagnosticsSection =
+    activeTab === "all" || activeTab === "diagnostics";
 
   return (
     <div className="options-container">
@@ -604,6 +641,8 @@ function Options() {
             src="/icon/48.png"
             alt="人话翻译器 Logo"
             className="header-logo"
+            width={48}
+            height={48}
           />
           <div className="header-title-group">
             <div className="header-title-row">
@@ -617,6 +656,38 @@ function Options() {
         </div>
 
         <div className="header-actions">
+          {/* 在新标签页打开按钮 / 已在独立标签页 */}
+          {isStandalone ? (
+            <span
+              className="tab-mode-badge"
+              title="当前页面已在浏览器独立全屏标签页中运行"
+            >
+              <CheckCorrect theme="outline" size="14" />
+              <span>已在独立标签页</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="header-action-btn open-tab-btn"
+              onClick={handleOpenInTab}
+              title="在新标签页中打开完整设置页"
+            >
+              <OpenOne theme="outline" size="15" />
+              <span>新标签页打开</span>
+            </button>
+          )}
+
+          {/* 顶栏重置默认快捷按钮 */}
+          <button
+            type="button"
+            className="header-action-btn"
+            onClick={handleReset}
+            title="重置所有设置项为初始默认值"
+          >
+            <Refresh theme="outline" size="15" />
+            <span>重置默认</span>
+          </button>
+
           {/* 全局保存状态指示器 */}
           <div className={`global-save-status ${saveStatus}`}>
             <span className="status-dot" />
@@ -628,22 +699,11 @@ function Options() {
             </span>
           </div>
 
-          {/* 在新标签页打开按钮 */}
-          <button
-            type="button"
-            className="header-action-btn open-tab-btn"
-            onClick={handleOpenInTab}
-            title="在新标签页中打开完整设置页"
-          >
-            <OpenOne theme="outline" size="15" />
-            <span>新标签页打开</span>
-          </button>
-
           {/* 顶部快速保存 */}
           <button
             type="button"
             className={`header-action-btn primary-save ${saveStatus}`}
-            onClick={handleSave}
+            onClick={() => void handleSave(true)}
             disabled={saveStatus === "saving"}
           >
             <SaveOne theme="outline" size="15" />
@@ -685,7 +745,22 @@ function Options() {
               </div>
 
               <div className="setting-item">
-                <label htmlFor="apiKey">API Key *</label>
+                <div className="api-key-header-row">
+                  <label htmlFor="apiKey">API Key *</label>
+                  <div className="api-key-status-group">
+                    {settings.apiKey.trim() ? (
+                      <span className="api-key-badge configured">
+                        <Check theme="outline" size="12" />
+                        已配置
+                      </span>
+                    ) : (
+                      <span className="api-key-badge missing">
+                        <Caution theme="outline" size="12" />
+                        未配置
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <div className="api-key-input-group">
                   <input
                     type={showApiKey ? "text" : "password"}
@@ -729,7 +804,7 @@ function Options() {
                 <div className="setting-hint">
                   <span className="hint-label">获取 API Key 官方控制台:</span>
                   <div className="chip-container">
-                    {API_PLATFORM_HINTS.map((platform) => (
+                    {API_PLATFORM_HINTS.filter((p) => p.url).map((platform) => (
                       <a
                         key={platform.name}
                         className="api-platform-hint chip link"
@@ -761,14 +836,26 @@ function Options() {
                   <span className="hint-label">支持的 API 服务 (点击快速填入):</span>
                   <div className="chip-container">
                     {API_HINTS.map((api) => {
-                      const isSelected = settings.baseUrl === api.url;
+                      const isSelected = api.url
+                        ? settings.baseUrl.trim() === api.url.trim()
+                        : Boolean(settings.baseUrl.trim()) &&
+                          !API_HINTS.some(
+                            (h) => h.url && h.url.trim() === settings.baseUrl.trim()
+                          );
                       return (
                         <button
                           type="button"
                           key={api.name}
                           className={`api-hint chip ${isSelected ? "active" : ""}`}
-                          onClick={() => handleInputChange("baseUrl", api.url)}
-                          title={`点击填入: ${api.url}`}
+                          onClick={() => {
+                            if (api.url) {
+                              handleInputChange("baseUrl", api.url);
+                            } else {
+                              const input = document.getElementById("baseUrl");
+                              input?.focus();
+                            }
+                          }}
+                          title={api.url ? `点击填入: ${api.url}` : "聚焦输入自定义地址"}
                         >
                           {api.name}
                           {isSelected && <span className="chip-check">✓</span>}
@@ -1001,6 +1088,26 @@ function Options() {
               <div className="setting-hint">
                 同步调整侧边栏、Popup、设置页和网页内扩展浮窗文字；也可使用 Command/Ctrl + 加号、减号或 0。
               </div>
+
+              {/* 实时字号效果预览卡片 */}
+              <div className="font-scale-preview-card">
+                <div className="preview-header">
+                  <span>实时字号效果预览</span>
+                  <span className="preview-scale-tag">当前缩放: {fontScalePercent}%</span>
+                </div>
+                <div className="preview-original">
+                  <strong>选中文本（黑话原文）：</strong>
+                  <span>
+                    “我们本次 Q3 主要是对核心模块进行心智对齐，打通底层链路并赋能上游协同生态，沉淀行业抓手……”
+                  </span>
+                </div>
+                <div className="preview-translation">
+                  <strong>人话翻译：</strong>
+                  <span>
+                    “我们第三季度主要把大家的想法统一一下，修好底层接口，让其他业务团队用起来更省心，总结一套成熟好用的做法。”
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="setting-item">
@@ -1027,9 +1134,9 @@ function Options() {
         )}
 
         {/* 备份与诊断卡片 */}
-        {showBackupSection && (
+        {showDiagnosticsSection && (
           <>
-            <section className="settings-section diagnostics-section" data-category="backup">
+            <section className="settings-section diagnostics-section" data-category="diagnostics">
               <div className="section-header">
                 <h2>问题诊断</h2>
                 <p className="section-desc">
@@ -1126,7 +1233,7 @@ function Options() {
               </div>
             </section>
 
-            <section className="settings-section" data-category="backup">
+            <section className="settings-section" data-category="diagnostics">
               <div className="section-header">
                 <h2>数据备份</h2>
                 <p className="section-desc">
