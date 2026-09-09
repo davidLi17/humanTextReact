@@ -30,6 +30,16 @@ import {
   normalizeSelectionContext,
   type SelectionContext,
 } from "@/entrypoints/shared/selectionContext";
+import {
+  PRISM_TABS,
+  type PrismParsedResult,
+  type PrismTabKey,
+} from "@/entrypoints/shared/prismTypes";
+import {
+  getPrismContentByTab,
+  getPrismCopyText,
+  parsePrismTranslation,
+} from "@/entrypoints/shared/prismParser";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
 
@@ -76,6 +86,12 @@ export class PopupManager {
   private lastSelectionText = "";
   private lastSelectionContext: SelectionContext | undefined;
   private deferredStartInProgress = false;
+  // 三棱镜状态
+  private currentPrismTab: PrismTabKey = "vernacular";
+  private lastRawContent = "";
+  private lastPrismResult: PrismParsedResult | null = null;
+  private copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private copyCorporateFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
   // 系统主题和菜单事件的清理函数
   private systemThemeCleanup: (() => void) | null = null;
   private themeMenuCleanup: (() => void) | null = null;
@@ -123,7 +139,8 @@ export class PopupManager {
     requestId: string,
     allowLegacyMessages = false,
     selectionContext?: SelectionContext,
-    deferTranslation = false
+    deferTranslation = false,
+    customPosition?: { left: number; top: number }
   ): HTMLElement {
     logger.log("显示弹窗", {
       requestId,
@@ -173,7 +190,7 @@ export class PopupManager {
     // 初始化复制功能
     initializeCodeCopy();
     // 设置弹窗位置
-    this.positionPopup(popup);
+    this.positionPopup(popup, customPosition);
     // 设置事件处理器
     this.setupEventHandlers(popup);
     // 设置滚动检测
@@ -289,6 +306,17 @@ export class PopupManager {
     this.lastSelectionText = "";
     this.lastSelectionContext = undefined;
     this.deferredStartInProgress = false;
+    this.currentPrismTab = "vernacular";
+    this.lastRawContent = "";
+    this.lastPrismResult = null;
+    if (this.copyFeedbackTimer) {
+      clearTimeout(this.copyFeedbackTimer);
+      this.copyFeedbackTimer = null;
+    }
+    if (this.copyCorporateFeedbackTimer) {
+      clearTimeout(this.copyCorporateFeedbackTimer);
+      this.copyCorporateFeedbackTimer = null;
+    }
   }
 
   public destroy(): void {
@@ -408,6 +436,12 @@ export class PopupManager {
         </div>
         <div class="translator-section">
           <div class="translator-label">译文</div>
+          <div class="translator-prism-tabs" style="display: none;">
+            <button type="button" class="translator-prism-tab active" data-tab="vernacular" title="通俗易懂、撕碎形式主义、生活化打比方">🍼 直白人话</button>
+            <button type="button" class="translator-prism-tab" data-tab="corporate" title="高情商职场神器，大白话秒变周报述职范本">👔 向上汇报</button>
+            <button type="button" class="translator-prism-tab" data-tab="truth" title="幽默解构潜台词，看穿职场内耗与伪装">🔪 犀利真相</button>
+            <button type="button" class="translator-prism-tab" data-tab="raw" title="查看三合一完整 Markdown 输出">📋 全文</button>
+          </div>
           <div class="translator-translated-text"></div>
           <div
             class="translator-result-meta"
@@ -449,7 +483,10 @@ export class PopupManager {
           </div>
         </div>
       </div>
-      <button class="translator-copy-btn">复制译文</button>
+      <div class="translator-footer-actions">
+        <button type="button" class="translator-copy-btn">复制译文</button>
+        <button type="button" class="translator-copy-corporate-btn" style="display: none;" title="一键复制高情商向上汇报版，可直接粘贴进周报">👔 复制周报版</button>
+      </div>
     `;
     const originalText = popup.querySelector(".translator-text");
     if (originalText) originalText.textContent = selection;
@@ -498,7 +535,10 @@ export class PopupManager {
   }
 
   // 定位弹窗方法
-  private positionPopup(popup: HTMLElement) {
+  private positionPopup(
+    popup: HTMLElement,
+    customPosition?: { left: number; top: number }
+  ) {
     // 获取视口尺寸
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
@@ -508,8 +548,23 @@ export class PopupManager {
     let top = 20; // 默认顶部位置
     let width = 400; // 默认宽度
 
-    // 如果存在上次保存的位置，则使用上次的位置
-    if (this.lastPopupState.left !== null && this.lastPopupState.top !== null) {
+    if (customPosition) {
+      width =
+        this.lastPopupState.width !== null
+          ? Math.min(Math.max(300, this.lastPopupState.width), 1200)
+          : 400;
+      left = Math.min(
+        Math.max(10, customPosition.left),
+        viewportWidth - width - 20
+      );
+      top = Math.min(
+        Math.max(10, customPosition.top + 15),
+        viewportHeight - 200
+      );
+    } else if (
+      this.lastPopupState.left !== null &&
+      this.lastPopupState.top !== null
+    ) {
       left = Math.min(
         Math.max(0, this.lastPopupState.left), // 确保不超出屏幕左侧
         viewportWidth - 300 // 确保不超出屏幕右侧
@@ -518,11 +573,9 @@ export class PopupManager {
         Math.max(0, this.lastPopupState.top), // 确保不超出屏幕顶部
         viewportHeight - 100 // 确保不超出屏幕底部
       );
-    }
-
-    // 如果存在上次保存的宽度，则使用上次的宽度
-    if (this.lastPopupState.width !== null) {
-      width = Math.min(Math.max(300, this.lastPopupState.width), 1200); // 限制宽度范围
+      if (this.lastPopupState.width !== null) {
+        width = Math.min(Math.max(300, this.lastPopupState.width), 1200); // 限制宽度范围
+      }
     }
 
     // 应用计算后的位置和大小
@@ -679,22 +732,66 @@ export class PopupManager {
         }
       });
 
+    // 监听三棱镜 Tab 点击
+    const prismTabsEl = popup.querySelector(".translator-prism-tabs");
+    prismTabsEl?.addEventListener("click", (e) => {
+      const target = (e.target as HTMLElement)?.closest(".translator-prism-tab");
+      if (!target) return;
+      const tabKey = target.getAttribute("data-tab") as PrismTabKey | null;
+      if (tabKey && tabKey !== this.currentPrismTab) {
+        this.currentPrismTab = tabKey;
+        this.renderTranslatedContent(this.getPopupElements());
+      }
+    });
+
+    // 复制周报版按钮点击
+    const copyCorporateBtn = popup.querySelector(
+      ".translator-copy-corporate-btn"
+    ) as HTMLButtonElement | null;
+    copyCorporateBtn?.addEventListener("click", async () => {
+      if (!this.lastPrismResult) return;
+      const corporateText = getPrismCopyText(this.lastPrismResult, "corporate");
+      if (!corporateText) return;
+      try {
+        await navigator.clipboard.writeText(corporateText);
+        copyCorporateBtn.textContent = "✅ 已复制周报版！";
+        if (this.copyCorporateFeedbackTimer) clearTimeout(this.copyCorporateFeedbackTimer);
+        this.copyCorporateFeedbackTimer = setTimeout(() => {
+          copyCorporateBtn.textContent = "👔 复制周报版";
+          this.copyCorporateFeedbackTimer = null;
+        }, 1500);
+      } catch (error) {
+        logger.error("复制周报版失败:", error);
+      }
+    });
+
     // 复制译文按钮
-    popup
-      .querySelector(".translator-copy-btn")
-      ?.addEventListener("click", async () => {
-        const translatedText = popup.querySelector(
-          ".translator-translated-text"
-        )?.textContent;
-        if (translatedText) {
-          try {
-            await navigator.clipboard.writeText(translatedText);
-            logger.log("译文已复制");
-          } catch (error) {
-            logger.error("复制译文失败:", error);
-          }
+    const copyBtn = popup.querySelector(
+      ".translator-copy-btn"
+    ) as HTMLButtonElement | null;
+    copyBtn?.addEventListener("click", async () => {
+      const textToCopy = this.lastPrismResult?.isPrism
+        ? getPrismCopyText(this.lastPrismResult, this.currentPrismTab)
+        : (popup.querySelector(".translator-translated-text")?.textContent || this.lastRawContent);
+
+      if (textToCopy) {
+        try {
+          await navigator.clipboard.writeText(textToCopy);
+          logger.log("译文已复制");
+          copyBtn.textContent = "✅ 已复制！";
+          if (this.copyFeedbackTimer) clearTimeout(this.copyFeedbackTimer);
+          this.copyFeedbackTimer = setTimeout(() => {
+            const meta = PRISM_TABS[this.currentPrismTab];
+            copyBtn.textContent = this.lastPrismResult?.isPrism
+              ? `复制${meta?.shortLabel || "当前版"}`
+              : "复制译文";
+            this.copyFeedbackTimer = null;
+          }, 1500);
+        } catch (error) {
+          logger.error("复制译文失败:", error);
         }
-      });
+      }
+    });
   }
 
   private setThemeMode(mode: ThemeMode) {
@@ -1077,6 +1174,53 @@ export class PopupManager {
     });
   }
 
+  private renderTranslatedContent(elements: any) {
+    if (!elements?.translatedTextEl) return;
+    const prismTabsEl = this.currentPopup?.querySelector(
+      ".translator-prism-tabs"
+    ) as HTMLElement | null;
+    const copyCorporateBtn = this.currentPopup?.querySelector(
+      ".translator-copy-corporate-btn"
+    ) as HTMLElement | null;
+    const copyBtn = this.currentPopup?.querySelector(
+      ".translator-copy-btn"
+    ) as HTMLElement | null;
+
+    if (this.lastPrismResult?.isPrism) {
+      if (prismTabsEl) {
+        prismTabsEl.style.display = "flex";
+        prismTabsEl
+          .querySelectorAll(".translator-prism-tab")
+          .forEach((tabEl) => {
+            const tabKey = tabEl.getAttribute("data-tab");
+            if (tabKey === this.currentPrismTab) {
+              tabEl.classList.add("active");
+            } else {
+              tabEl.classList.remove("active");
+            }
+          });
+      }
+      if (copyCorporateBtn) {
+        copyCorporateBtn.style.display = "inline-flex";
+      }
+      if (copyBtn && !this.copyFeedbackTimer) {
+        const meta = PRISM_TABS[this.currentPrismTab];
+        copyBtn.textContent = `复制${meta?.shortLabel || "当前版"}`;
+      }
+
+      const activeContent = getPrismContentByTab(
+        this.lastPrismResult,
+        this.currentPrismTab
+      );
+      elements.translatedTextEl.innerHTML = parseMarkdown(activeContent);
+    } else {
+      if (prismTabsEl) prismTabsEl.style.display = "none";
+      if (copyCorporateBtn) copyCorporateBtn.style.display = "none";
+      if (copyBtn && !this.copyFeedbackTimer) copyBtn.textContent = "复制译文";
+      elements.translatedTextEl.innerHTML = parseMarkdown(this.lastRawContent);
+    }
+  }
+
   // 处理翻译更新的方法
   private handleTranslationUpdate(request: TranslationRequest, elements: any) {
     logger.log("更新翻译结果", {
@@ -1088,7 +1232,9 @@ export class PopupManager {
 
     // 更新译文内容
     if (request.content) {
-      elements.translatedTextEl.innerHTML = parseMarkdown(request.content);
+      this.lastRawContent = request.content;
+      this.lastPrismResult = parsePrismTranslation(request.content);
+      this.renderTranslatedContent(elements);
     }
 
     if (elements.resultMetaEl) {

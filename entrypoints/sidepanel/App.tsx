@@ -84,6 +84,7 @@ import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import JargonVaultPanel from "./components/JargonVaultPanel";
+import PrismResultTabs from "./components/PrismResultTabs";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
 import QuoteInputCapsule from "./components/QuoteInputCapsule";
 import {
@@ -3210,10 +3211,11 @@ export default function SidePanelApp() {
                           </div>
                         )}
                         {message.content ? (
-                          <div
-                            className="markdown-content"
-                            dangerouslySetInnerHTML={{
-                              __html: parseMarkdown(message.content),
+                          <PrismResultTabs
+                            content={message.content}
+                            isStreaming={message.status === "streaming"}
+                            onCopyCorporate={() => {
+                              showToast("已复制向上汇报版，可直接粘贴进周报！");
                             }}
                           />
                         ) : message.status === "streaming" ? (
