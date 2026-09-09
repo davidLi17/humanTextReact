@@ -158,7 +158,10 @@ export function exportSessionAsJson(session: ChatSession | undefined): string {
   }
 
   const exportPayload = {
-    version: "1.3.0",
+    version:
+      typeof browser !== "undefined" && browser?.runtime?.getManifest?.()?.version
+        ? browser.runtime.getManifest().version
+        : "1.4.0",
     appName: "人话翻译器",
     exportTime: new Date().toISOString(),
     session,
