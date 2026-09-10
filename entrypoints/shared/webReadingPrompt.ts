@@ -223,27 +223,50 @@ ${params.segmentContent}
 }
 
 /**
- * 构建长文人话通读的 User Prompt
+ * 按单段上限截断正文，并回报是否发生了截断
  */
-export function buildWebReadingUserPrompt(page: WebPageMetadata): string {
-  const title = (page.title || "未知网页标题").trim();
-  const url = (page.url || "").trim();
-  let rawContent = (page.content || "").trim();
-
-  let isTruncated = false;
-  if (rawContent.length > MAX_PAGE_CONTENT_CHARS) {
-    rawContent = rawContent.slice(0, MAX_PAGE_CONTENT_CHARS);
-    isTruncated = true;
+function truncatePageContent(content: string): {
+  content: string;
+  isTruncated: boolean;
+} {
+  const raw = (content || "").trim();
+  if (raw.length > MAX_PAGE_CONTENT_CHARS) {
+    return { content: raw.slice(0, MAX_PAGE_CONTENT_CHARS), isTruncated: true };
   }
+  return { content: raw, isTruncated: false };
+}
 
-  const headerInfo = [
+/**
+ * 组装网页元信息头（标题 / 来源链接 / 预估字数 / 截断提示）
+ */
+function buildPageHeaderInfo(
+  page: WebPageMetadata,
+  isTruncated: boolean,
+  truncatedNote: string
+): string {
+  // 先 trim 再兜底：纯空白标题在 `||` 下是 truthy，若先兜底再 trim 会得到空标题
+  const title = (page.title || "").trim() || "未知网页标题";
+  const url = (page.url || "").trim();
+  return [
     `【网页标题】: ${title}`,
     url ? `【来源链接】: ${url}` : "",
     page.wordCount ? `【原文预估字数】: 约 ${page.wordCount} 字` : "",
-    isTruncated ? `【注】: 原文较长，已截取前 ${MAX_PAGE_CONTENT_CHARS} 字符进行深度通读。` : "",
+    isTruncated ? truncatedNote : "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * 构建长文人话通读的 User Prompt
+ */
+export function buildWebReadingUserPrompt(page: WebPageMetadata): string {
+  const { content: rawContent, isTruncated } = truncatePageContent(page.content);
+  const headerInfo = buildPageHeaderInfo(
+    page,
+    isTruncated,
+    `【注】: 原文较长，已截取前 ${MAX_PAGE_CONTENT_CHARS} 字符进行深度通读。`
+  );
 
   return `${headerInfo}
 
@@ -253,6 +276,32 @@ ${rawContent}
 \`\`\`
 
 请按照系统提示词的四个板块（💡 一句话大白话总览、📖 核心黑话/专业术语速查表、🎯 要点与行动项提炼、💬 深度追问指引），用通俗易懂的人话为我生成结构化速读报告。`;
+}
+
+/**
+ * 构建“网页正文作为上下文附加”的中性 Prompt。
+ *
+ * 与 buildWebReadingUserPrompt 的关键差别：不要求模型立刻产出速读报告，
+ * 只声明正文已挂载为上下文、供后续追问引用。用户在卡片之后继续提问时，
+ * 历史里出现的必须是这样一段中性背景，而不是“请生成速查表”的指令，
+ * 否则模型会被带向通读报告而非用户真正问的那件事。
+ */
+export function buildAttachedPageContextPrompt(page: WebPageMetadata): string {
+  const { content: rawContent, isTruncated } = truncatePageContent(page.content);
+  const headerInfo = buildPageHeaderInfo(
+    page,
+    isTruncated,
+    `【注】: 原文较长，已截取前 ${MAX_PAGE_CONTENT_CHARS} 字符。`
+  );
+
+  return `${headerInfo}
+
+【网页正文内容】：
+\`\`\`text
+${rawContent}
+\`\`\`
+
+以上网页正文已作为背景资料附加到本次对话。请记住它，但不要主动输出摘要、速读报告或结构化解读：当用户后续的提问与它相关时，结合正文作答；只有当用户明确要求通读、总结或提炼时，才按其具体要求输出。`;
 }
 
 /**

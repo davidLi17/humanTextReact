@@ -25,14 +25,11 @@ import {
 import { retryAssistantMessageAndTruncate } from "@/entrypoints/shared/chatEditRetry";
 import {
   buildWebReadingContinuationPrompt,
-  buildWebReadingUserPrompt,
   classifyWebReadExtractError,
   describeWebReadFailure,
   extractSuggestedQuestions,
-  getWebReadingSegmentCount,
   MAX_PAGE_CONTENT_CHARS,
   MIN_PAGE_CONTENT_CHARS,
-  WEB_READ_STAGE_LABELS,
   WEB_READING_EXTRACT_TIMEOUT_MARKER,
   WEB_READING_EXTRACT_TIMEOUT_MS,
   WEB_READING_SYSTEM_PROMPT,
@@ -45,7 +42,6 @@ import {
   buildReplayableWebReadingPrompt,
   buildWebReadingHistoryPayload,
   cancelWebReadingProgressByRequest,
-  createInitialWebReadingProgress,
   createWebReadingPageMeta,
   getActiveSidepanelRequestOwner,
   hasMatchingWebReadingProgress,
@@ -1099,16 +1095,6 @@ export default function SidePanelApp() {
     const extractionSessionId = activeSessionIdRef.current;
     if (!extractionSessionId) return;
 
-    let activeWebRequest:
-      | {
-          sessionId: string;
-          requestId: string;
-          assistantMessageId: string;
-          readingRunId: string;
-          hasProgress: boolean;
-        }
-      | undefined;
-
     setActiveView("chat");
     setExtractError(null);
     setIsExtractingPage(true);
@@ -1213,173 +1199,63 @@ export default function SidePanelApp() {
         return;
       }
 
-      // 如果当前会话已有消息，为网页通读创建一个干净的新会话
-      let targetSession = extractionSession;
-      if (extractionSession.messages.length > 0) {
-        targetSession = createNewSession(
-          `速读: ${pageData.title.slice(0, 12)}...`
-        );
-        const updatedSessions = [targetSession, ...latestSessions];
-        sessionsRef.current = updatedSessions;
-        setSessions(updatedSessions);
-        activateSessionWithDraft(targetSession.id);
-        void saveSessionsToStorage(updatedSessions);
-        void saveActiveSessionId(targetSession.id);
-      } else {
-        targetSession = {
-          ...targetSession,
-          title: `速读: ${pageData.title.slice(0, 12)}...`,
-        };
+      // 只把正文作为上下文附加到当前会话：
+      // 不新建会话、不创建助手占位、不发起模型请求——用户随后自己决定问什么。
+      const alreadyAttached = extractionSession.messages.some(
+        (message) =>
+          message.pageMeta?.contextOnly === true &&
+          message.pageMeta?.url === pageData.url &&
+          message.pageMeta?.sourceContent ===
+            (pageData.content || "").slice(0, MAX_PAGE_CONTENT_CHARS)
+      );
+      if (alreadyAttached) {
+        setIsExtractingPage(false);
+        showToast("该网页正文已在当前对话中，无需重复附加");
+        return;
       }
 
-      const userMessageId = createRequestId();
-      const assistantMessageId = createRequestId();
-      const currentRequestId = createRequestId();
-      const readingRunId = createRequestId();
-      const totalSegments = getWebReadingSegmentCount(pageData.content.length);
-      registerActiveRequest({
-        requestId: currentRequestId,
-        sessionId: targetSession.id,
-        assistantMessageId,
-        readingRunId: totalSegments > 1 ? readingRunId : undefined,
-      });
-      activeWebRequest = {
-        sessionId: targetSession.id,
-        requestId: currentRequestId,
-        assistantMessageId,
-        readingRunId,
-        hasProgress: totalSegments > 1,
-      };
-
-      // 组装代表“通读网页”的用户消息卡片
       const userMessage: ChatMessage = {
-        id: userMessageId,
+        id: createRequestId(),
         role: "user",
         content: `通读网页: 《${pageData.title}》`,
         pageMeta: createWebReadingPageMeta(pageData, {
           segmentIndex: 1,
-          totalSegments,
-          readingRunId,
+          totalSegments: 1,
+          contextOnly: true,
         }),
         createdAt: Date.now(),
         status: "completed",
       };
 
-      const assistantMessage: ChatMessage = {
-        id: assistantMessageId,
-        role: "assistant",
-        content: "",
-        reasoningContent: "",
-        hasReasoning: false,
-        createdAt: Date.now(),
-        status: "streaming",
-      };
-
       const updatedSession: ChatSession = {
-        ...targetSession,
-        title: `速读: ${pageData.title.slice(0, 12)}...`,
-        messages: [...targetSession.messages, userMessage, assistantMessage],
+        ...extractionSession,
+        // 仅空会话按网页命名；已有对话保持原标题，别打断用户正在进行的话题
+        title:
+          extractionSession.messages.length === 0
+            ? `速读: ${pageData.title.slice(0, 12)}...`
+            : extractionSession.title,
+        messages: [...extractionSession.messages, userMessage],
         updatedAt: Date.now(),
       };
 
-      const currentSessions = sessionsRef.current;
-      const nextSessions = currentSessions.map((s) =>
-        s.id === targetSession.id ? updatedSession : s
+      const nextSessions = latestSessions.map((session) =>
+        session.id === extractionSession.id ? updatedSession : session
       );
-      if (!nextSessions.some((s) => s.id === targetSession.id)) {
-        nextSessions.unshift(updatedSession);
-      }
       sessionsRef.current = nextSessions;
       setSessions(nextSessions);
-
-      // 首段先登记为 pending；只有业务成功且结果非空后，才开放第二段续读。
-      if (totalSegments > 1) {
-        const progressState = createInitialWebReadingProgress({
-          page: pageData,
-          totalSegments,
-          requestId: currentRequestId,
-          assistantMessageId,
-          readingRunId,
-        });
-        commitWebReadingProgress((prev) => {
-          const next = new Map(prev);
-          next.set(targetSession.id, progressState);
-          return next;
-        }, targetSession.id);
-      } else {
-        void saveSessionsToStorage(nextSessions);
-      }
+      void saveSessionsToStorage(nextSessions);
 
       setIsExtractingPage(false);
-      setIsStreaming(true);
       scrollToBottom(true);
-
-      // 构建针对网页长文通读的高质量结构化 Prompt
-      const userPrompt = buildWebReadingUserPrompt(pageData);
-      const messagesPayload = [
-        { role: "system" as const, content: WEB_READING_SYSTEM_PROMPT },
-        { role: "user" as const, content: userPrompt },
-      ];
-
-      const response = (await browser.runtime.sendMessage({
-        action: MESSAGE_TYPES.TRANSLATE,
-        requestId: currentRequestId,
-        targetKind: "sidepanel",
-        source: "sidepanel",
-        sessionId: targetSession.id,
-        messages: messagesPayload,
-        thinkingEnabled,
-      })) as WebReadingResponse;
-      if (!isSuccessfulWebReadingResponse(response)) {
-        markAssistantMessageAsError(
-          activeWebRequest.sessionId,
-          activeWebRequest.assistantMessageId,
-          response?.error || "网页通读未返回有效结果，请重试",
-          activeWebRequest.requestId
-        );
-      }
-      if (activeWebRequest.hasProgress) {
-        settleSessionWebReadingProgress(
-          activeWebRequest.sessionId,
-          activeWebRequest.readingRunId,
-          activeWebRequest.requestId,
-          response
-        );
-      } else {
-        void saveSessionsToStorage(sessionsRef.current);
-      }
+      showToast("已附加网页正文，可在下方继续追问");
     } catch (error: any) {
-      // 提取链路失败均已提前 return，走到这里的异常属于会话组装或 AI 请求发送环节
-      logger.error("通读网页请求失败:", {
-        stage: "ai-request",
+      // 提取链路失败均已提前 return，走到这里的是会话组装环节的异常
+      logger.error("附加网页正文失败:", {
+        stage: "attach-context",
         detail: error?.message,
       });
-      if (
-        !activeWebRequest ||
-        activeRequestIdRef.current === activeWebRequest.requestId
-      ) {
-        setIsExtractingPage(false);
-        setExtractError(
-          `${error?.message || "通读网页请求失败，请检查网络或 API 设置"}（${
-            WEB_READ_STAGE_LABELS["ai-request"]
-          }）`
-        );
-      }
-      if (activeWebRequest) {
-        markAssistantMessageAsError(
-          activeWebRequest.sessionId,
-          activeWebRequest.assistantMessageId,
-          error?.message || "通读网页请求失败，请检查网络或 API 设置",
-          activeWebRequest.requestId
-        );
-        if (activeWebRequest.hasProgress) {
-          settleSessionWebReadingProgress(
-            activeWebRequest.sessionId,
-            activeWebRequest.readingRunId,
-            activeWebRequest.requestId
-          );
-        }
-      }
+      setIsExtractingPage(false);
+      setExtractError(error?.message || "附加网页正文失败，请重试");
     }
   };
 
@@ -1742,12 +1618,17 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const historyPayload = buildHistoryPayload(activeSession.messages, {
-        role: "user",
-        content: text,
-        images: userMessage.images,
-        selectionContext: userMessage.selectionContext,
-      });
+      // 走网页感知的历史组装：把会话里附加过的网页正文还原成真实 Prompt。
+      // 否则用户追问时，模型只看到「通读网页: 《标题》」这句卡片文案，正文是丢的。
+      const historyPayload = buildWebReadingHistoryPayload(
+        activeSession.messages,
+        {
+          role: "user",
+          content: text,
+          images: userMessage.images,
+          selectionContext: userMessage.selectionContext,
+        }
+      );
 
       await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,

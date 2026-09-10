@@ -4,6 +4,7 @@ import {
   type ChatSession,
 } from "./chatTypes";
 import {
+  buildAttachedPageContextPrompt,
   buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
   getWebReadingSegmentCount,
@@ -36,6 +37,8 @@ export function createWebReadingPageMeta(
     totalSegments: number;
     userInstruction?: string;
     readingRunId?: string;
+    /** true 表示只附加正文作上下文，不要求模型产出速读报告。 */
+    contextOnly?: boolean;
   }
 ): WebReadingPageMeta {
   const sourceContent = (page.content || "").slice(
@@ -49,6 +52,7 @@ export function createWebReadingPageMeta(
     excerpt:
       page.excerpt ?? sourceContent.replace(/\s+/g, " ").trim().slice(0, 180),
     isWebPageReading: true,
+    contextOnly: options.contextOnly || undefined,
     sourceContent,
     segmentIndex: options.segmentIndex,
     totalSegments: options.totalSegments,
@@ -76,20 +80,26 @@ export function buildReplayableWebReadingPrompt(
 
   const segmentIndex = Math.max(1, meta.segmentIndex || 1);
   const totalSegments = Math.max(segmentIndex, meta.totalSegments || 1);
-  const basePrompt =
-    segmentIndex > 1
-      ? buildWebReadingContinuationPrompt({
-          title: meta.title,
-          segmentContent: sourceContent,
-          segmentIndex,
-          totalSegments,
-        })
-      : buildWebReadingUserPrompt({
-          title: meta.title,
-          url: meta.url,
-          content: sourceContent,
-          wordCount: meta.wordCount,
-        });
+  const page: WebPageMetadata = {
+    title: meta.title,
+    url: meta.url,
+    content: sourceContent,
+    wordCount: meta.wordCount,
+  };
+  let basePrompt: string;
+  if (meta.contextOnly) {
+    // 仅附加正文：重放中性背景，避免把“请生成速读报告”重新塞回历史
+    basePrompt = buildAttachedPageContextPrompt(page);
+  } else if (segmentIndex > 1) {
+    basePrompt = buildWebReadingContinuationPrompt({
+      title: meta.title,
+      segmentContent: sourceContent,
+      segmentIndex,
+      totalSegments,
+    });
+  } else {
+    basePrompt = buildWebReadingUserPrompt(page);
+  }
   const instruction = userInstruction?.trim();
   return {
     success: true,
@@ -102,7 +112,10 @@ export function buildReplayableWebReadingPrompt(
 /**
  * 网页对话历史仍统一走 buildHistoryPayload，同时把可重放的网页卡片恢复为真实段落 Prompt。
  */
-export function buildWebReadingHistoryPayload(messages: ChatMessage[]) {
+export function buildWebReadingHistoryPayload(
+  messages: ChatMessage[],
+  currentMessage?: Parameters<typeof buildHistoryPayload>[1]
+) {
   return buildHistoryPayload(
     messages.map((message) => {
       if (message.role !== "user" || !message.pageMeta?.isWebPageReading) {
@@ -110,7 +123,8 @@ export function buildWebReadingHistoryPayload(messages: ChatMessage[]) {
       }
       const replay = buildReplayableWebReadingPrompt(message);
       return replay.success ? { ...message, content: replay.prompt } : message;
-    })
+    }),
+    currentMessage
   );
 }
 

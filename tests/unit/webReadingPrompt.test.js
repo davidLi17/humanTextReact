@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   WEB_READING_SYSTEM_PROMPT,
   WEB_READ_STAGE_LABELS,
+  buildAttachedPageContextPrompt,
   buildWebReadingContinuationPrompt,
   buildWebReadingUserPrompt,
   classifyWebReadExtractError,
@@ -366,5 +367,48 @@ describe("Web Reading Prompt Engineering", () => {
       expect(prompt).toContain("【网页标题】: 未知网页标题");
     });
 
+  });
+
+  describe("buildAttachedPageContextPrompt", () => {
+    test("附加中性背景，不向模型索取速读报告", () => {
+      const prompt = buildAttachedPageContextPrompt({
+        title: "测试文章",
+        url: "https://example.com/article",
+        content: "网页正文内容",
+        wordCount: 6,
+      });
+
+      expect(prompt).toContain("【网页标题】: 测试文章");
+      expect(prompt).toContain("【来源链接】: https://example.com/article");
+      expect(prompt).toContain("【原文预估字数】: 约 6 字");
+      expect(prompt).toContain("网页正文内容");
+      expect(prompt).toContain("已作为背景资料附加到本次对话");
+      // 关键差异：不得复用速读报告指令，否则用户追问会被带偏
+      expect(prompt).not.toContain("生成结构化速读报告");
+      expect(prompt).not.toContain("四个板块");
+    });
+
+    test("超长正文按同一上限截断并标注，且省略空的来源链接", () => {
+      const prompt = buildAttachedPageContextPrompt({
+        title: "长文",
+        url: "",
+        content: "甲".repeat(MAX_PAGE_CONTENT_CHARS + 50),
+      });
+
+      expect(prompt).toContain(
+        `【注】: 原文较长，已截取前 ${MAX_PAGE_CONTENT_CHARS} 字符。`
+      );
+      expect(prompt).not.toContain("【来源链接】");
+    });
+
+    test("空标题回落到默认标题", () => {
+      const prompt = buildAttachedPageContextPrompt({
+        title: "   ",
+        url: "",
+        content: "内容",
+      });
+
+      expect(prompt).toContain("【网页标题】: 未知网页标题");
+    });
   });
 });

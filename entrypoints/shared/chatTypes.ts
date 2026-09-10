@@ -115,6 +115,11 @@ export interface ChatMessage {
     wordCount?: number;
     excerpt?: string;
     isWebPageReading?: boolean;
+    /**
+     * 该卡片只把正文作为上下文附加，不要求模型产出速读报告。
+     * 缺省（含所有历史数据）表示它属于一次真实通读，重放时仍走速读报告 Prompt。
+     */
+    contextOnly?: boolean;
     /** 当前网页通读消息可重放的原文片段，最多保存一段。 */
     sourceContent?: string;
     /** 当前原文片段在整篇网页中的序号，从 1 开始。 */

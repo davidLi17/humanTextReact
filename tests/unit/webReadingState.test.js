@@ -606,3 +606,76 @@ describe("网页阅读断点序列化与恢复", () => {
     ).toHaveLength(WEB_READING_MAX_PERSISTED_ENTRIES);
   });
 });
+
+describe("网页正文作为上下文附加", () => {
+  test("contextOnly 卡片重放为中性背景，不带速读报告指令", () => {
+    const pageMeta = createWebReadingPageMeta(
+      {
+        title: "测试文章",
+        url: "https://example.com/article",
+        content: "被附加的网页正文",
+        wordCount: 8,
+      },
+      { segmentIndex: 1, totalSegments: 1, contextOnly: true }
+    );
+    const replay = buildReplayableWebReadingPrompt(createMessage(pageMeta));
+
+    expect(pageMeta.contextOnly).toBe(true);
+    expect(replay.success).toBe(true);
+    expect(replay.prompt).toContain("被附加的网页正文");
+    expect(replay.prompt).toContain("已作为背景资料附加到本次对话");
+    expect(replay.prompt).not.toContain("生成结构化速读报告");
+  });
+
+  test("历史卡片缺少 contextOnly 时仍按速读报告重放（向后兼容）", () => {
+    const pageMeta = createWebReadingPageMeta(
+      {
+        title: "历史文章",
+        url: "https://example.com/old",
+        content: "历史通读正文",
+      },
+      { segmentIndex: 1, totalSegments: 1 }
+    );
+    const replay = buildReplayableWebReadingPrompt(createMessage(pageMeta));
+
+    expect(pageMeta.contextOnly).toBeUndefined();
+    expect(replay.success).toBe(true);
+    expect(replay.prompt).toContain("生成结构化速读报告");
+  });
+
+  test("正常发送路径还原正文，并把当前提问追加在末尾", () => {
+    const pageMeta = createWebReadingPageMeta(
+      {
+        title: "测试文章",
+        url: "https://example.com/article",
+        content: "附加的网页正文",
+      },
+      { segmentIndex: 1, totalSegments: 1, contextOnly: true }
+    );
+    const payload = buildWebReadingHistoryPayload([createMessage(pageMeta)], {
+      role: "user",
+      content: "结合这个网页内容帮我写周报",
+    });
+
+    expect(payload).toHaveLength(2);
+    // 卡片文案必须被正文替换，否则模型只能看到标题
+    expect(payload[0].content).toContain("附加的网页正文");
+    expect(payload[0].content).not.toBe("网页卡片展示文案");
+    expect(payload[1].content).toBe("结合这个网页内容帮我写周报");
+  });
+
+  test("未附带当前提问时仍能还原历史正文", () => {
+    const pageMeta = createWebReadingPageMeta(
+      {
+        title: "测试文章",
+        url: "https://example.com/article",
+        content: "附加的网页正文",
+      },
+      { segmentIndex: 1, totalSegments: 1, contextOnly: true }
+    );
+    const payload = buildWebReadingHistoryPayload([createMessage(pageMeta)]);
+
+    expect(payload).toHaveLength(1);
+    expect(payload[0].content).toContain("附加的网页正文");
+  });
+});
