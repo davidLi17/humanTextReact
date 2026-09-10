@@ -1,5 +1,11 @@
 # 人话翻译器
 
+[![从 Chrome 应用商店安装](https://img.shields.io/badge/Chrome%20应用商店-立即安装-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chrome.google.com/webstore/detail/opkeilhfflnbncnllnhlobmpiokpebgn)
+
+**[立即安装人话翻译器 →](https://chrome.google.com/webstore/detail/opkeilhfflnbncnllnhlobmpiokpebgn)**
+
+安装后需配置自己的 AI 接口与 API Key，详见[初次配置](#初次配置)。
+
 ![人话翻译器：把黑话翻译成人话](store-assets/02_store_marquee_1400x560.png)
 
 人话翻译器是一个基于 WXT、React 和 Chrome Extension Manifest V3
