@@ -12,7 +12,7 @@ Options 模块是人话翻译器的设置管理界面，提供用户配置的完
 - 🤖 AI 模型和参数选择
 - 📝 提示词模板定制
 - ⌨️ 快捷键管理
-- 💾 设置的本地和云端同步
+- 💾 设置持久化：完整配置存 `storage.local`；**非敏感字段**同步到 `storage.sync`（`apiKey` 永不入 sync）
 - 🧪 API 连接测试
 
 ## 入口与启动
@@ -122,41 +122,22 @@ enum LogLevel {
 
 **核心功能**：
 ```typescript
-// 设置加载
-const loadSettings = async () => {
-  try {
-    // 优先从云端获取
-    let result = await browser.storage.sync.get([
-      "apiKey", "baseUrl", "model", "temperature",
-      "promptTemplate", "thinkingEnabled", "logLevel"
-    ]);
+// ⚠️ 设置读写统一走 SettingsUtils，不要直接操作 storage。
+// 本节此前的示例展示了「把含 apiKey 的 settings 直接写入 storage.sync」的做法，
+// 那正是安全加固中被移除的不安全模式，已删除以免被照抄。
+// 真实实现见 shared/settingsUtils.ts 的 getSettings / setSettings。
 
-    // 如果云端没有，从本地获取
-    if (Object.keys(result).length === 0) {
-      result = await browser.storage.local.get([...]);
-    }
+// 读取：local 优先，sync 作为跨设备补充，两者按 updatedAt 仲裁
+const settings = await SettingsUtils.getSettings();
 
-    if (Object.keys(result).length > 0) {
-      setSettings(prev => ({ ...prev, ...result }));
-    }
-  } catch (error) {
-    optionsLogger.error("加载设置失败:", error);
-  }
-};
+// 保存：SettingsUtils.setSettings 同时写两处，但**内容不同** ——
+//   1. storage.local：完整配置（含 apiKey），本机第一权威
+//   2. storage.sync ：严格剔除 apiKey，绝不上传密钥至云端
+//      并额外调用 storage.sync.remove("apiKey") 清理历史遗留的顶层字段
+await SettingsUtils.setSettings(next);
 
-// 设置保存
-const handleSave = async () => {
-  setSaveStatus("saving");
-
-  try {
-    // 同时保存到云端和本地
-    await Promise.all([
-      browser.storage.sync.set(settings),
-      browser.storage.local.set(settings)
-    ]);
-
-    // 重新初始化日志系统
-    await initializeLogger();
+// 重新初始化日志系统
+await initializeLogger();
 
     setSaveStatus("saved");
     setTimeout(() => setSaveStatus("idle"), 2000);
@@ -267,22 +248,25 @@ const openShortcutSettings = () => {
 ## 测试与质量
 
 ### 质量工具
-- **TypeScript 严格模式**: 完整的类型检查
+- **TypeScript 严格模式**: `bun run compile`（`tsc --noEmit`）当前零错误
 - **React 严格模式**: 开发时的额外检查
-- **ESLint**: 代码风格检查
-- **调试日志**: 详细的日志记录
+- **ESLint**: ⚠️ **项目未配置 ESLint**，没有任何 lint 闸门
+- **调试日志**: 自研 logger（`shared/logger`），非 `debug` 包
 
 ### 测试覆盖
-- ✅ 设置加载和保存测试
-- ✅ API 连接测试
-- ✅ 表单验证测试
-- ✅ 快捷键管理测试
+- ✅ 设置读写与存储兼容（`tests/integration/settingsUtils.test.js`）
+- ✅ 设置页组件交互与导航（`tests/components/Options.component.tsx`，6 个用例 / 1363 行组件）
+- ✅ 数据备份导入导出（`tests/integration/dataBackup.test.js`）
+- ⚠️ `Options.tsx` 不在覆盖率统计范围内（覆盖率运行排除 `tests/components`）
 - ❌ 跨设备同步测试（待添加）
 
 ## 常见问题 (FAQ)
 
 ### Q: 设置如何同步到云端？
-A: 使用 Chrome Storage API 的 sync 功能，设置会自动同步到用户账号下的所有设备。
+A: **只有非敏感字段会同步。** `SettingsUtils.setSettings` 在写入 `storage.sync` 前会
+`delete syncSettings.apiKey`，并调用 `storage.sync.remove("apiKey")` 清理可能遗留的旧顶层字段。
+API Key **始终只存 `storage.local`**，不会上传到 Google 账号，也就不跨设备同步。
+`baseUrl` / `model` / `promptTemplate` / `theme` / `fontScalePercent` 等会同步。
 
 ### Q: API 连接测试失败怎么办？
 A: 检查 API 密钥是否正确、网络连接是否正常、API 服务是否可用，并查看详细的错误信息。
@@ -306,11 +290,14 @@ A: 目前支持 `{text}` 变量，在翻译时会替换为实际的文本内容�
 
 ## 变更记录 (Changelog)
 
+### 2026-09-10 - 文档纠错（重要）
+- 🔴 **删除了一段会重新引入密钥泄漏的示例代码**：原示例演示
+  `browser.storage.sync.set(settings)` 且 `storage.sync.get(["apiKey", ...])`，
+  与 `settingsUtils.ts:350-368` 的安全设计直接冲突。照抄会把用户的 API Key 同步到 Google 账号。
+  已替换为正确的「local 存全量、sync 剔除 apiKey」说明。
+- 🔧 修正 FAQ「设置会自动同步到所有设备」——只有非敏感字段同步
+- 🔧 移除 ESLint 质量声明
+- 🔧 「测试覆盖 ✅」按实际测试文件重新列示
+
 ### 2025-09-24 05:32 - 模块文档初始化
-- ✅ 完成设置模块全面分析
-- ✅ 文档化所有核心功能
-- ✅ 建立接口和数据模型
-- ✅ 提供常见问题解答
-- 📊 **覆盖率**: 100% (4/4 文件)
-- 📋 **缺口**: 无
-- 🔄 **下次建议**: 添加跨设备同步测试
+- ⚠️ 初版「覆盖率 100% (4/4 文件)」「缺口：无」与实际不符，已于 2026-09-10 移除

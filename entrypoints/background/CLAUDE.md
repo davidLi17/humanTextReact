@@ -180,31 +180,34 @@ static handleRuntimeMessage(request: any, sender: any, sendResponse: (response?:
 ## 测试与质量
 
 ### 质量工具
-- **TypeScript 严格模式**: 完整的类型检查
-- **ESLint**: 代码风格检查
-- **调试日志**: 详细的日志记录系统
-- **错误边界**: 完善的错误处理
+- **TypeScript 严格模式**: `bun run compile`（`tsc --noEmit`）当前零错误
+- **ESLint**: ⚠️ **项目未配置 ESLint**，没有任何 lint 闸门
+- **调试日志**: 自研 logger（`shared/logger`），支持 30 分钟诊断会话
+- **错误模型**: `shared/errors.ts` 的 `CodedError` + 错误码映射
 
 ### 测试覆盖
-- ✅ API 连接测试
-- ✅ 消息路由测试
-- ✅ 历史记录管理测试
-- ✅ 设置管理测试
-- ❌ 单元测试（待添加）
+- ✅ `RequestManager` 生命周期（`tests/unit/requestManager.test.js`）
+- ✅ `TranslationService` 鉴权头与流式超时（`tests/integration/translationServiceAuth.test.js`、`requestTimeout.test.js`）
+- ✅ 快捷键双通道保活（`tests/integration/shortcutFix.test.js`）
+- ⚠️ `historyManager` / `messageHandler` 无直接测试，仅经集成路径间接覆盖
+- ⚠️ 本模块**没有**「单元测试待添加」的情况：`tests/unit/` 已有 12 个文件
 
 ## 常见问题 (FAQ)
 
 ### Q: 翻译请求失败如何处理？
-A: TranslationService 内置了完善的错误处理机制，会根据错误类型进行分类处理：
-- 网络错误：自动重试
-- API 错误：返回详细错误信息
-- 用户取消：清理请求并记录
+A: TranslationService 按错误类型分支处理，**没有任何自动重试逻辑**：
+- 超时（`CodedError.code === "TIMEOUT"`）：保留已显示的正文与思考内容，附阶段说明，由用户手动重试
+- 流式中断 / 长度截断（`INTERRUPTED` / `TRUNCATED`）：同样保留已收到内容，但**不写入历史**
+- HTTP 错误（`createApiError`）：按状态码映射为 AUTH / NOT_FOUND / RATE_LIMIT / SERVER 文案
+- 用户取消（`AbortError`）：静默清理请求并释放 stream reader
 
 ### Q: 如何管理并发翻译请求？
 A: 使用 RequestManager 管理请求生命周期，每个标签页同时只能有一个翻译请求，新的请求会自动取消旧的请求。
 
 ### Q: 历史记录如何同步？
-A: 通过 Chrome Storage API 同时保存到本地和云端，支持跨设备同步。
+A: **不同步**。历史记录只写入 `browser.storage.local`（`historyManager.ts` 全程如此），
+最多保留 `MAX_HISTORY_COUNT = 142` 条，不经过 `storage.sync`，不支持跨设备同步。
+（只有非敏感设置项会走 `storage.sync`，且 `apiKey` 被显式排除。）
 
 ## 相关文件清单
 
@@ -227,11 +230,12 @@ A: 通过 Chrome Storage API 同时保存到本地和云端，支持跨设备同
 
 ## 变更记录 (Changelog)
 
+### 2026-09-10 - 文档纠错
+- 🔧 删除「网络错误：自动重试」——**全项目不存在任何重试逻辑**，此条会误导维护者以为重试已实现
+- 🔧 删除历史记录「本地和云端同步、跨设备同步」——实际仅存 `storage.local`
+- 🔧 「单元测试（待添加）」不实，`tests/unit/` 已有 12 个文件
+- 🔧 移除 ESLint 质量声明
+- ➕ 补充流式异常终止（`INTERRUPTED` / `TRUNCATED`）的处理说明
+
 ### 2025-09-24 05:32 - 模块文档初始化
-- ✅ 完成背景模块全面分析
-- ✅ 文档化所有核心服务类
-- ✅ 建立接口和数据模型
-- ✅ 提供常见问题解答
-- 📊 **覆盖率**: 100% (12/12 文件)
-- 📋 **缺口**: 无
-- 🔄 **下次建议**: 添加单元测试覆盖
+- ⚠️ 初版「覆盖率 100% (12/12 文件)」「缺口：无」与实际不符，已于 2026-09-10 移除

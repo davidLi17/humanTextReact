@@ -13,6 +13,8 @@ export type ErrorCode =
   | "SERVER" // 服务端错误或其他 HTTP 错误
   | "ABORT" // 请求被主动中止
   | "TIMEOUT" // 请求超过阶段或总时限
+  | "TRUNCATED" // 模型输出达到长度上限，内容被截断
+  | "INTERRUPTED" // 流式响应在收到终止标记前中断
   | "UNKNOWN"; // 未归类错误
 
 /**
@@ -27,6 +29,8 @@ export const ERROR_CODE_MESSAGES: Record<ErrorCode, string> = {
   SERVER: "",
   ABORT: "请求已取消",
   TIMEOUT: "",
+  TRUNCATED: "模型输出达到长度上限，内容可能不完整，请重试或缩短输入",
+  INTERRUPTED: "连接在生成过程中中断，已显示的内容可能不完整，请重试",
   UNKNOWN: "",
 };
 

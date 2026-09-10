@@ -294,17 +294,22 @@ export function injectStyles() {
 ## 测试与质量
 
 ### 质量工具
-- **TypeScript 严格模式**: 完整的类型检查
-- **ESLint**: 代码风格检查
-- **调试日志**: 详细的日志记录
-- **错误边界**: 完善的错误处理
+- **TypeScript 严格模式**: `bun run compile`（`tsc --noEmit`）当前零错误
+- **ESLint**: ⚠️ **项目未配置 ESLint**，没有任何 lint 闸门
+- **调试日志**: 自研 logger（`shared/logger`），支持 30 分钟诊断会话
+- **内容安全**: 模型输出统一走 `shared/utils/markdown` 的 `sanitizeUrl` / `escapeAttribute`
 
 ### 测试覆盖
-- ✅ 弹窗创建和销毁测试
-- ✅ 消息处理测试
-- ✅ 样式注入测试
-- ✅ 事件处理测试
+- ✅ 浮动操作栏（`tests/integration/selectionActionBar.test.js`）
+- ✅ 正文提取与 Shadow DOM（`tests/integration/pageExtractor.test.js`、`tests/unit/pageExtractorShadowDom.test.js`）
+- ✅ 划词段落上下文（`tests/integration/selectionContext.test.js`）
+- ⚠️ `popupManager.ts`（1288 行，注入式浮窗核心）行覆盖仅约 10%
 - ❌ 跨浏览器兼容性测试（待添加）
+
+### ⚠️ 本模块内的 `markdown.ts` 是死代码
+`entrypoints/content/markdown.ts`（369 行）在全仓库**没有任何引用方**，且它是**未做转义的旧版本**
+（缺 `escapeAttribute` / `sanitizeUrl`）。浮窗实际使用的是 `shared/utils/markdown.ts`。
+请勿引用前者；如需清理，这是安全的删除目标。
 
 ## 常见问题 (FAQ)
 
@@ -337,11 +342,11 @@ A: 将弹窗的位置和大小信息保存在内存中，页面刷新后重新�
 
 ## 变更记录 (Changelog)
 
+### 2026-09-10 - 文档纠错
+- 🔧 移除 ESLint 质量声明（项目未配置 ESLint）
+- 🔧 「弹窗创建和销毁测试 ✅」等结论无依据：`popupManager.ts` 行覆盖仅约 10%，
+  改为按实际测试文件列示
+- ➕ 标注 `content/markdown.ts` 为**死代码且未转义**，避免被误引用
+
 ### 2025-09-24 05:32 - 模块文档初始化
-- ✅ 完成内容模块全面分析
-- ✅ 文档化所有核心组件
-- ✅ 建立接口和数据模型
-- ✅ 提供常见问题解答
-- 📊 **覆盖率**: 100% (5/5 文件)
-- 📋 **缺口**: 无
-- 🔄 **下次建议**: 添加跨浏览器兼容性测试
+- ⚠️ 初版「覆盖率 100% (5/5 文件)」「缺口：无」与实际不符，已于 2026-09-10 移除

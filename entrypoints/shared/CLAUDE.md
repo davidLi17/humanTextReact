@@ -75,14 +75,13 @@ export class Logger {
   trace(...args: any[]): void
 }
 
-export function createLogger(namespace: string, emoji?: string): Logger
-export async function initializeLogger(): void
+export function createLogger(namespace: string, emoji?: string, prefix?: string): Logger
+export async function initializeLogger(context?: LoggerContext): Promise<void>
 ```
 
 ## 关键依赖与配置
 
 ### 外部依赖
-- **debug**: 日志输出库
 - **Chrome Extension API**: storage
 
 ### 内部依赖
@@ -174,10 +173,11 @@ export const DEFAULT_SETTINGS = {
 
 ### 2. 设置管理工具 (settingsUtils.ts)
 **特点**：
-- 缓存机制优化
-- 向后兼容性支持
-- 云端同步功能
-- 变化监听机制
+- 内存缓存（TTL 5 分钟）减少 storage 往返
+- 新旧存储格式兼容（`settings` 对象 ↔ 旧的平铺键值对）
+- 非敏感设置经 `storage.sync` 跨设备同步；**`apiKey` 始终只存 `storage.local`**，
+  写入 sync 时显式剔除，并主动清理历史遗留的顶层 `apiKey` 字段
+- `onSettingsChanged` 变化监听
 
 **核心功能**：
 ```typescript
@@ -239,76 +239,61 @@ export class SettingsUtils {
 ```
 
 ### 3. 日志系统 (logger/index.ts)
-**特点**：
-- 基于 debug 包
-- 命名空间支持
-- 条件日志输出
-- 多级别日志
-- 环境适配
 
-**核心功能**：
+**自研实现，不依赖 `debug` 包**（旧版本的模块文档曾描述一套基于 `debug` 的实现，那份实现已被替换，
+其示例代码已删除）。
+
+**特点**：
+- 命名空间 + emoji 前缀的实例化日志器
+- 按级别条件输出（`shouldLog` / `shouldLogAtLevel`）
+- 自动脱敏：`apiKey` / `authorization` / `token` / `cookie` / `password` / `secret` / `selectionContext` 字段，
+  以及 `Bearer xxx` 形式的凭证
+- 诊断会话期间记录分批落盘
+
+**核心接口**：
 ```typescript
 export class Logger {
-  private debugger: debugLib.Debugger;
-  private emoji: string;
-  private namespace: string;
-
-  constructor(namespace: string, emoji: string = "🔧") {
-    this.namespace = namespace;
-    this.debugger = debugLib(`human-text:${namespace}`);
-    this.emoji = emoji;
-  }
-
-  log(...args: any[]): void {
-    if (shouldLog("log")) {
-      this.debugger(`${this.emoji}`, ...args);
-    }
-  }
-
-  info(...args: any[]): void {
-    if (shouldLog("info")) {
-      this.debugger(`${this.emoji} ℹ️`, ...args);
-    }
-  }
-
-  error(...args: any[]): void {
-    if (shouldLog("error")) {
-      this.debugger(`${this.emoji} ❌`, ...args);
-    }
-  }
+  log(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+  success(...args: unknown[]): void;
+  trace(...args: unknown[]): void;
 }
 
-export async function initializeLogger(): void {
-  try {
-    const result = await browser.storage.sync.get(["logLevel"]);
-    const logLevel: LogLevel = result.logLevel || LOG_LEVELS.OFF;
+export function createLogger(
+  namespace: string,
+  emoji?: string,   // 默认 "🔧"
+  prefix?: string   // 默认取 DEBUG_NAMESPACE_PREFIX
+): Logger;
 
-    setCurrentLogLevel(logLevel);
+export async function initializeLogger(context?: LoggerContext): Promise<void>;
 
-    if (logLevel === LOG_LEVELS.OFF) {
-      debugLib.enabled = () => false;
-      if (isLocalStorageAvailable()) {
-        localStorage.removeItem("debug");
-      }
-    } else {
-      const patterns = getDebugPatterns(logLevel);
-      debugLib.enabled = () => true;
-      if (isLocalStorageAvailable()) {
-        localStorage.setItem("debug", patterns);
-      }
-    }
-  } catch (error) {
-    console.error("初始化日志系统失败:", error);
-  }
-}
+export function shouldLog(logType: LoggerMethod): boolean;
+export function shouldLogAtLevel(level: LogLevel, logType: LoggerMethod): boolean;
 ```
+
+**预置实例**（各模块优先复用，不要自行命名）：
+
+```typescript
+export const backgroundLogger  = createLogger("background", "🔙");
+export const contentLogger     = createLogger("content", "📄");
+export const popupLogger       = createLogger("popup", "🔽");
+export const optionsLogger     = createLogger("options", "⚙️");
+export const translationLogger = createLogger("translation", "🌐");
+export const messageLogger     = createLogger("message", "📨");
+export const settingsLogger    = createLogger("settings", "⚙️");
+```
+
+**诊断批次**：待写日志最多缓存 `MAX_PENDING_LOGS = 100` 条，按 `DIAGNOSTIC_BATCH_DELAY_MS = 200`
+合并写入，避免每条日志一次 storage 往返。
 
 ## 测试与质量
 
 ### 质量工具
-- **TypeScript 严格模式**: 完整的类型检查
-- **ESLint**: 代码风格检查
-- **调试工具**: 集成 debug 包
+- **TypeScript 严格模式**: `bun run compile`（`tsc --noEmit`）当前零错误
+- **ESLint**: ⚠️ **项目未配置 ESLint**，没有任何 lint 闸门
+- **调试工具**: 自研 logger（见上），**非 `debug` 包**
 
 ### 测试覆盖
 - ✅ 设置缓存测试
@@ -326,7 +311,8 @@ A: 使用内存缓存，TTL 为 5 分钟，避免频繁的存储访问，提高�
 A: 在 constants/index.ts 的 MESSAGE_TYPES 对象中添加新的类型，并确保所有模块都更新。
 
 ### Q: 日志系统如何适配不同环境？
-A: 自动检测 localStorage 可用性，在 Content Script 环境中优雅降级。
+A: 由 `initializeLogger(context)` 显式声明所在上下文（background / content / popup / options），
+诊断记录的落盘路径按上下文区分。**没有** localStorage 探测与降级分支。
 
 ### Q: 设置的新旧格式如何兼容？
 A: 优先尝试新格式（settings 对象），如果不存在则回退到旧格式（直接键值对）。
@@ -340,11 +326,13 @@ A: 优先尝试新格式（settings 对象），如果不存在则回退到旧�
 
 ## 变更记录 (Changelog)
 
+### 2026-09-10 - 文档纠错
+- 🔧 删除整段基于 `debug` 包的虚构 Logger 实现，替换为真实接口（含 `prefix` 参数与预置实例）
+- 🔧 修正 `createLogger` / `initializeLogger` 签名
+- 🔧 移除不存在的 `debug` 外部依赖与 ESLint 质量声明
+- 🔧 澄清 `storage.sync` 只同步非敏感设置，`apiKey` 仅存 `storage.local`
+- 📌 本模块测试覆盖确实较高：`requestTimeout` 100%、`webReadingState` 97.9%、
+  `dataBackup` 97.2%、`settingsUtils` 96.9%、`errors` 100%
+
 ### 2025-09-24 05:32 - 模块文档初始化
-- ✅ 完成共享模块全面分析
-- ✅ 文档化所有核心功能
-- ✅ 建立接口和数据模型
-- ✅ 提供常见问题解答
-- 📊 **覆盖率**: 100% (3/3 文件)
-- 📋 **缺口**: 无
-- 🔄 **下次建议**: 添加性能测试
+- ⚠️ 初版「覆盖率 100% (3/3 文件)」「缺口：无」与实际不符，已于 2026-09-10 移除

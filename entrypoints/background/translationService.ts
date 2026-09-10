@@ -4,6 +4,7 @@ import {
   THINKING_CONFIG,
 } from "@/entrypoints/shared/constants";
 import {
+  CodedError,
   createApiError,
   resolveUserErrorMessage,
 } from "@/entrypoints/shared/errors";
@@ -101,6 +102,21 @@ interface StreamChunk {
   content: string;
   reasoningContent: string;
   done: boolean;
+  /** 末帧携带的 finish_reason（stop/length/…）；整个流未出现时为 null */
+  finishReason: string | null;
+}
+
+/**
+ * 流式异常终止：连接在生成中途断开，或模型因长度上限被截断。
+ * 两者都必须保留已收到内容并走错误路径，而不是当作完整结果交付或写进历史。
+ */
+function isStreamTerminationError(
+  error: unknown
+): error is CodedError & { code: "TRUNCATED" | "INTERRUPTED" } {
+  return (
+    error instanceof CodedError &&
+    (error.code === "TRUNCATED" || error.code === "INTERRUPTED")
+  );
 }
 
 function releaseStreamReader(
@@ -475,6 +491,10 @@ export class TranslationService {
       reader = streamReader;
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
+      // 正常终止的两种凭据：data: [DONE] 标记，或任意一帧带 finish_reason。
+      // 两者都没有却读到 EOF，即为中途断流。
+      let sawDoneMarker = false;
+      let lastFinishReason: string | null = null;
 
       while (!streamFinished) {
         const { value, done } = await timeoutGuard.run(streamReader.read());
@@ -489,6 +509,13 @@ export class TranslationService {
         const lines = buffer.split(/\r?\n/);
         buffer = done ? "" : lines.pop() || "";
         const currentChunk = this.parseStreamLines(lines);
+
+        if (currentChunk.done) {
+          sawDoneMarker = true;
+        }
+        if (currentChunk.finishReason) {
+          lastFinishReason = currentChunk.finishReason;
+        }
 
         if (currentChunk.content || currentChunk.reasoningContent) {
           result += currentChunk.content;
@@ -527,6 +554,22 @@ export class TranslationService {
 
       if (!result.trim()) {
         throw new Error("模型未返回可显示内容，请检查模型或接口兼容性");
+      }
+
+      // 读到 EOF 却没有任何终止凭据，说明连接在生成中途被断开
+      // （代理或网关超时、服务端崩溃、进程被杀）。
+      // 此时 result 只是残片，既不能当完整结果交付，也不能写进历史。
+      if (!sawDoneMarker && lastFinishReason === null) {
+        throw new CodedError(
+          "连接在生成过程中中断，已显示的内容可能不完整，请重试",
+          "INTERRUPTED"
+        );
+      }
+      if (lastFinishReason === "length") {
+        throw new CodedError(
+          "模型输出达到长度上限，内容可能不完整，请重试或缩短输入",
+          "TRUNCATED"
+        );
       }
 
       const finalDelivered = await this.sendTranslationUpdate(
@@ -571,6 +614,26 @@ export class TranslationService {
         }
         throw error;
       }
+      if (isStreamTerminationError(error)) {
+        const message = this.normalizeErrorMessage(error);
+        logger.error("🚀lhg[TranslationService][流式异常终止]", {
+          requestId,
+          code: error.code,
+          receivedChars: result.length,
+          target,
+        });
+        if (RequestManager.isActiveRequest(requestId)) {
+          // 与超时路径一致：把已收到的正文与思考内容一并交付，
+          // 用户仍能看到中断前的内容，只是不会被当成完整结果。
+          await this.sendTranslationError(
+            requestContext,
+            message,
+            result,
+            reasoningContent
+          );
+        }
+        throw error;
+      }
       if (error.name === "AbortError") {
         logger.log("翻译请求已中止", { requestId });
         return;
@@ -600,6 +663,7 @@ export class TranslationService {
       content: "",
       reasoningContent: "",
       done: false,
+      finishReason: null,
     };
 
     for (const line of lines) {
@@ -615,7 +679,13 @@ export class TranslationService {
 
       try {
         const parsed = JSON.parse(data);
-        const delta = parsed?.choices?.[0]?.delta;
+        const choice = parsed?.choices?.[0];
+        // finish_reason 只出现在末帧，而该帧的 delta 通常是空对象，
+        // 因此必须在下面的 delta 判空之前捕获。
+        if (typeof choice?.finish_reason === "string" && choice.finish_reason) {
+          chunk.finishReason = choice.finish_reason;
+        }
+        const delta = choice?.delta;
         if (!delta) continue;
 
         if (typeof delta.content === "string") {

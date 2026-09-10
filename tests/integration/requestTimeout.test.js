@@ -119,6 +119,15 @@ function doneSse(delta = {}) {
   );
 }
 
+/** 带 finish_reason 的末帧：不携带 [DONE]，用于覆盖"靠 finish_reason 判定正常结束"的兼容路径 */
+function finishSse(reason, delta = {}) {
+  return new TextEncoder().encode(
+    `data: ${JSON.stringify({
+      choices: [{ delta, finish_reason: reason }],
+    })}\n\n`
+  );
+}
+
 const TEST_POLICY = {
   fetchHeadersMs: 4,
   firstOutputMs: 10,
@@ -616,14 +625,15 @@ describe("TranslationService timeout integration", () => {
     expect(clock.size).toBe(0);
   });
 
-  test("normal EOF completes, saves history and clears timers", async () => {
+  test("EOF after a finish_reason frame completes, saves history and clears timers", async () => {
     const controlled = createControlledReader();
     setTestGlobal("fetch",  async () => responseWithReader(controlled.reader));
     const { context } = createTranslationRequest();
     const operation = TranslationService.translateText({ text: "测试" }, context);
 
+    // 服务商不发送 [DONE]，只靠末帧的 finish_reason 宣告结束。
     const first = await controlled.nextRead();
-    first.resolve({ value: sse({ content: "完整结果" }), done: false });
+    first.resolve({ value: finishSse("stop", { content: "完整结果" }), done: false });
     const second = await controlled.nextRead();
     second.resolve({ value: undefined, done: true });
 
@@ -632,6 +642,49 @@ describe("TranslationService timeout integration", () => {
     expect(savedHistory).toHaveLength(1);
     expect(controlled.cancelCalls).toBe(0);
     expect(controlled.releaseCalls).toBe(1);
+    expect(clock.size).toBe(0);
+  });
+
+  test("EOF without any terminator is reported as interrupted and kept out of history", async () => {
+    const controlled = createControlledReader();
+    setTestGlobal("fetch",  async () => responseWithReader(controlled.reader));
+    const { context } = createTranslationRequest();
+    const operation = TranslationService.translateText({ text: "测试" }, context);
+
+    // 连接在生成中途被断开：既无 [DONE]，也无 finish_reason。
+    const first = await controlled.nextRead();
+    first.resolve({ value: sse({ content: "半截译文" }), done: false });
+    const second = await controlled.nextRead();
+    second.resolve({ value: undefined, done: true });
+
+    await expect(operation).rejects.toMatchObject({ code: "INTERRUPTED" });
+    // 已收到的残片仍需交付，但必须带错误、且不得写入历史。
+    const last = sentMessages.at(-1);
+    expect(last.content).toBe("半截译文");
+    expect(last.error).toContain("连接在生成过程中中断");
+    expect(savedHistory).toHaveLength(0);
+    expect(clock.size).toBe(0);
+  });
+
+  test("finish_reason length is reported as truncated and kept out of history", async () => {
+    const controlled = createControlledReader();
+    setTestGlobal("fetch",  async () => responseWithReader(controlled.reader));
+    const { context } = createTranslationRequest();
+    const operation = TranslationService.translateText({ text: "测试" }, context);
+
+    const first = await controlled.nextRead();
+    first.resolve({
+      value: finishSse("length", { content: "被截断的译文" }),
+      done: false,
+    });
+    const second = await controlled.nextRead();
+    second.resolve({ value: undefined, done: true });
+
+    await expect(operation).rejects.toMatchObject({ code: "TRUNCATED" });
+    const last = sentMessages.at(-1);
+    expect(last.content).toBe("被截断的译文");
+    expect(last.error).toContain("长度上限");
+    expect(savedHistory).toHaveLength(0);
     expect(clock.size).toBe(0);
   });
 
