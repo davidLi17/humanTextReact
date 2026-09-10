@@ -8,7 +8,7 @@
 - **技术栈**: React 19 + TypeScript + WXT 0.20.6 + Vite
 - **包管理器**: Bun（项目级默认，见 AGENTS.md，勿引入 npm / pnpm / yarn）
 - **扩展类型**: Chrome Extension MV3
-- **版本**: 1.4.0
+- **版本**: 1.4.1
 - **开发时间**: 2025年8月至今
 
 ## 系统架构

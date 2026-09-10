@@ -82,7 +82,7 @@ function createBrowserMock() {
           runtimeListeners.delete(listener);
         },
       },
-      getManifest: () => ({ version: "1.4.0" }),
+      getManifest: () => ({ version: "1.4.1" }),
     },
     storage: {
       local: createStorageArea(localStore, true),

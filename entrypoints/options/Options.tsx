@@ -126,7 +126,7 @@ function Options() {
   const backupFileInputRef = useRef<HTMLInputElement>(null);
 
   const manifestVersion =
-    browser?.runtime?.getManifest?.()?.version || "1.4.0";
+    browser?.runtime?.getManifest?.()?.version || "1.4.1";
 
   const [isStandalone, setIsStandalone] = useState(false);
 
