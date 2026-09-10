@@ -784,6 +784,11 @@ export default function SidePanelApp() {
       if (message.action === MESSAGE_TYPES.READ_WEB_PAGE) {
         if (!webReadingProgressHydratedRef.current) return;
         setActiveView("chat");
+        // 与 storage 通道保持一致：消费掉待办，避免 10 秒新鲜度窗口内重载侧边栏
+        // 时被 storage 通道重复触发一次通读
+        if (browser?.storage?.local) {
+          void browser.storage.local.remove("pendingWebPageRead");
+        }
         void handleReadCurrentPage();
         return;
       }

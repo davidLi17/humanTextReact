@@ -148,6 +148,98 @@ function createBrowserMock(options: BrowserMockOptions = {}) {
   };
 }
 
+/** 一个「进行中」的会话：已有问答，用于验证通读不再新建会话 */
+function createOngoingSession() {
+  return {
+    id: "ongoing-session",
+    title: "进行中的会话",
+    createdAt: 100,
+    updatedAt: 200,
+    messages: [
+      {
+        id: "m1",
+        role: "user",
+        content: "之前的问题",
+        createdAt: 100,
+        status: "completed",
+      },
+      {
+        id: "m2",
+        role: "assistant",
+        content: "之前的回答",
+        createdAt: 200,
+        status: "completed",
+      },
+    ],
+  };
+}
+
+/** 构造一个能成功提取正文的 browser mock（活动标签页 + 提取响应） */
+function createReadablePageMock(
+  session: ReturnType<typeof createOngoingSession>
+) {
+  return createBrowserMock({
+    sessions: [session],
+    activeSessionId: session.id,
+    activeTab: {
+      id: 7,
+      url: "https://example.com/article",
+      title: "示例文章",
+    },
+    tabExtractResponse: {
+      success: true,
+      data: {
+        title: "示例文章",
+        url: "https://example.com/article",
+        // 必须长于 MIN_PAGE_CONTENT_CHARS（15），否则会被“内容过短”守卫拦下
+        content: "这是被附加的网页正文内容，用于验证上下文附加行为是否正确。",
+        wordCount: 27,
+      },
+    },
+  });
+}
+
+/** 落盘可能多次，取最近一次「含附加卡片」的会话快照 */
+function findAttachedSessions(mock: ReturnType<typeof createBrowserMock>) {
+  for (const write of [...mock.localWrites].reverse()) {
+    const sessions = write.sidepanel_chat_sessions as any[] | undefined;
+    if (
+      sessions?.some((session) =>
+        session.messages.some(
+          (message: any) => message.pageMeta?.contextOnly === true
+        )
+      )
+    ) {
+      return sessions;
+    }
+  }
+  return undefined;
+}
+
+/** 断言附加结果落进当前会话：不新建会话、不改标题、只多一张正文卡片 */
+function expectAttachedToCurrentSession(
+  sessions: any[],
+  sentMessages: any[]
+) {
+  expect(sessions).toHaveLength(1);
+  expect(sessions[0].id).toBe("ongoing-session");
+  expect(sessions[0].title).toBe("进行中的会话");
+
+  const messages = sessions[0].messages;
+  // 只追加一张正文卡片，没有助手占位消息
+  expect(messages).toHaveLength(3);
+  const card = messages.at(-1);
+  expect(card.role).toBe("user");
+  expect(card.status).toBe("completed");
+  expect(card.pageMeta.contextOnly).toBe(true);
+  expect(card.pageMeta.sourceContent).toContain("这是被附加的网页正文内容");
+
+  // 全程没有发起模型请求
+  expect(
+    sentMessages.filter((message) => message.action === MESSAGE_TYPES.TRANSLATE)
+  ).toHaveLength(0);
+}
+
 const restoreGlobals = preserveGlobals("browser", "chrome");
 let documentRootAttributes: {
   dataTheme: string | null;
@@ -305,97 +397,47 @@ describe("Sidepanel App 真实 React 交互", () => {
   });
 
   test("已有对话时点通读只把正文附加到当前会话，不新建会话也不发模型请求", async () => {
-    const ongoingSession = {
-      id: "ongoing-session",
-      title: "进行中的会话",
-      createdAt: 100,
-      updatedAt: 200,
-      messages: [
-        {
-          id: "m1",
-          role: "user",
-          content: "之前的问题",
-          createdAt: 100,
-          status: "completed",
-        },
-        {
-          id: "m2",
-          role: "assistant",
-          content: "之前的回答",
-          createdAt: 200,
-          status: "completed",
-        },
-      ],
-    };
-    const mock = createBrowserMock({
-      sessions: [ongoingSession],
-      activeSessionId: ongoingSession.id,
-      activeTab: {
-        id: 7,
-        url: "https://example.com/article",
-        title: "示例文章",
-      },
-      tabExtractResponse: {
-        success: true,
-        data: {
-          title: "示例文章",
-          url: "https://example.com/article",
-          // 必须长于 MIN_PAGE_CONTENT_CHARS（15），否则会被“内容过短”守卫拦下
-          content: "这是被附加的网页正文内容，用于验证上下文附加行为是否正确。",
-          wordCount: 27,
-        },
-      },
-    });
+    const mock = createReadablePageMock(createOngoingSession());
     setTestGlobal("browser", mock.browser);
 
     render(<SidePanelApp />);
     // 会话文本出现即代表水合已完成，handleReadCurrentPage 的水合前置守卫才会放行
     await screen.findByText("之前的问题");
 
-    // 落盘写入可能不止一次，取最近一次「含附加卡片」的快照
-    const findAttachedSessions = () => {
-      for (const write of [...mock.localWrites].reverse()) {
-        const sessions = write.sidepanel_chat_sessions as any[] | undefined;
-        if (
-          sessions?.some((session) =>
-            session.messages.some(
-              (message: any) => message.pageMeta?.contextOnly === true
-            )
-          )
-        ) {
-          return sessions;
-        }
-      }
-      return undefined;
-    };
+    fireEvent.click(screen.getByTitle("一键提取并人话通读当前打开的网页正文"));
 
-    fireEvent.click(
-      screen.getByTitle("一键提取并人话通读当前打开的网页正文")
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    expectAttachedToCurrentSession(
+      findAttachedSessions(mock)!,
+      mock.sentMessages
     );
+  });
 
-    await waitFor(() => expect(findAttachedSessions()).toBeDefined());
+  test("右键菜单的 READ_WEB_PAGE 消息能触发通读，并清掉待办键", async () => {
+    const mock = createReadablePageMock(createOngoingSession());
+    setTestGlobal("browser", mock.browser);
 
-    const sessions = findAttachedSessions()!;
-    // 关键：没有新建会话，仍然是原来那一个
-    expect(sessions).toHaveLength(1);
-    expect(sessions[0].id).toBe("ongoing-session");
-    // 已有对话的标题不被改写
-    expect(sessions[0].title).toBe("进行中的会话");
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    await waitFor(() => expect(mock.runtimeListeners.size).toBe(1));
 
-    const messages = sessions[0].messages;
-    // 只追加一张正文卡片，没有助手占位消息
-    expect(messages).toHaveLength(3);
-    const card = messages.at(-1);
-    expect(card.role).toBe("user");
-    expect(card.status).toBe("completed");
-    expect(card.pageMeta.contextOnly).toBe(true);
-    expect(card.pageMeta.sourceContent).toContain("这是被附加的网页正文内容");
+    // 侧边栏已打开时，storage 通道的领取门闩早已置位、effect 也不会重跑，
+    // 唯一的通路就是后台右键菜单发出的这条 runtime 消息。
+    // （此前 action 名写成 "readCurrentWebPage"，与常量不匹配，消息被静默丢弃）
+    mock.localStore.pendingWebPageRead = { timestamp: Date.now(), tabId: 7 };
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.READ_WEB_PAGE,
+        tabId: 7,
+      });
+    });
 
-    // 全程没有发起模型请求
-    expect(
-      mock.sentMessages.filter(
-        (message) => message.action === MESSAGE_TYPES.TRANSLATE
-      )
-    ).toHaveLength(0);
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    expectAttachedToCurrentSession(
+      findAttachedSessions(mock)!,
+      mock.sentMessages
+    );
+    // 消费后清掉待办，避免新鲜度窗口内重载侧边栏被 storage 通道重复触发
+    expect(mock.localStore.pendingWebPageRead).toBeUndefined();
   });
 });

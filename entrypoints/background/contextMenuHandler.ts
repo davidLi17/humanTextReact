@@ -71,8 +71,11 @@ export class ContextMenuHandler {
             tabId: tab.id,
           },
         });
+        // 必须用常量：此前这里写的是字面量 "readCurrentWebPage"，而侧边栏比对的是
+        // MESSAGE_TYPES.READ_WEB_PAGE（"readWebPage"），消息永远匹配不上，
+        // 导致「侧边栏已打开时右键通读」没有任何反应。
         void MessageUtils.sendRuntimeMessage({
-          action: "readCurrentWebPage",
+          action: MESSAGE_TYPES.READ_WEB_PAGE,
           tabId: tab.id,
         });
       } catch (error) {
