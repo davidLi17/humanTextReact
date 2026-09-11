@@ -5,8 +5,12 @@
 This is a WXT + React browser extension project named `human-language-translator`.
 The product goal is to translate hard-to-read industry language into clearer human-readable text.
 
-Primary development branch right now: `feat-col_reasoning-lhg`.
-The project was actively developed in concentrated batches during 2025 and is now entering a stabilization and evolution phase.
+Primary development branch right now: `feat/read-webpage-as-context`, tracked by
+`origin/feat/read-webpage-as-context`. Confirm with `git rev-parse --abbrev-ref HEAD`
+before syncing; older names such as `feat-col_reasoning-lhg` do not exist in this
+repository any more (neither locally nor on `origin`).
+The first commit is dated 2025-08-25 and development continued through 2026 (most
+recent commits in September 2026); the project is now in a stabilization and evolution phase.
 
 ## Package Manager Policy
 
@@ -22,6 +26,7 @@ bun install
 bun run dev
 bun run dev:firefox
 bun run compile
+bun run test
 bun run build
 bun run build:firefox
 bun run zip
@@ -31,17 +36,20 @@ bun run zip:firefox
 Notes:
 
 - `bun run dev` starts the default WXT development workflow.
-- `bun run compile` runs TypeScript without emitting files.
+- `bun run compile` runs TypeScript without emitting files (alias: `bun run typecheck`).
+- `bun run test` runs the fast test layers and then the component tests (Options, PromptQueue, SidepanelApp).
 - `bun run build` creates the Chrome extension build.
 - `bun run zip` creates the distributable extension archive.
+- The only automated quality gates are `tsc --noEmit` and `bun test`. This repository has no ESLint, Prettier, or Biome configuration.
+- The extension version lives in two places and both must be bumped together: `wxt.config.ts` (packaged manifest version) and `package.json` (zip file name). Both currently read `1.4.1`.
 - Local build artifacts should stay out of git. Use `artifacts/` for local exports and keep generated zip/7z files ignored.
 
 ## Stability Phase Priorities
 
-1. Keep the current branch synchronized with `origin/feat-col_reasoning-lhg` before starting new feature work.
+1. Keep the current branch synchronized with its `origin` counterpart (currently `origin/feat/read-webpage-as-context`) before starting new feature work.
 2. Keep local packaged artifacts outside version control.
 3. Normalize package-manager usage around Bun.
-4. Document the expected Node/Bun environment once the working version is confirmed.
+4. Keep the expected Node/Bun environment documented. Bun is pinned by `.bun-version` (1.4.0); `@types/bun` in `package.json` is `1.4.1`. These are Bun's own version numbers and are unrelated to the extension version, which also happens to be `1.4.1`. The Node version is still unpinned (no `engines` field, no `.nvmrc`).
 5. Keep changes small and verify core extension flows after dependency, WXT, or Vite changes.
 
 Estimated cost:

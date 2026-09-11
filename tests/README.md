@@ -19,7 +19,7 @@
 # 默认测试集：先执行快速测试，再执行组件测试
 bun run test
 
-# 312 个快速测试：unit、contracts、integration 和 helpers
+# 344 个快速测试：unit、contracts、integration 和 helpers
 bun run test:fast
 
 # 快速测试分层执行
@@ -33,7 +33,7 @@ bun run test:shared
 # 指定随机种子，便于复现顺序相关问题
 TEST_SEED=123456 bun run test:shared
 
-# 独立 Happy DOM Runner，挂载真实 Sidepanel App
+# 独立 Happy DOM Runner，挂载真实 React 组件（Options / PromptQueue / SidepanelApp）
 bun run test:components
 
 # 输出 text 报告，并生成 coverage/lcov.info
@@ -55,7 +55,7 @@ bun run test:e2e:built
 bun run compile
 ```
 
-项目根目录的 `.bun-version` 固定 Bun 1.4.0。持续集成在 `push` 和 `pull_request` 上从该文件读取版本，依次执行冻结锁文件安装、类型检查、快速测试、共享进程随机顺序测试、Sidepanel 组件测试和覆盖率报告。独立 E2E Job 安装 Playwright Chromium、构建扩展并运行真实 MV3 流程。覆盖率以 text 与 LCOV 两种格式输出到已忽略的 `coverage/`；Playwright 截图、Trace 和 HTML 报告输出到已忽略的 `artifacts/`。CI 即使前序步骤失败也会尝试上传这些诊断目录。工作流只读仓库内容，不部署，也不读取业务密钥。
+项目根目录的 `.bun-version` 固定 Bun 1.4.0。持续集成在 `push` 和 `pull_request` 上从该文件读取版本，依次执行冻结锁文件安装、类型检查、快速测试、共享进程随机顺序测试、组件测试和覆盖率报告。独立 E2E Job 安装 Playwright Chromium、构建扩展并运行真实 MV3 流程。覆盖率以 text 与 LCOV 两种格式输出到已忽略的 `coverage/`；Playwright 截图、Trace 和 HTML 报告输出到已忽略的 `artifacts/`。CI 即使前序步骤失败也会尝试上传这些诊断目录。工作流只读仓库内容，不部署，也不读取业务密钥。
 
 ## 三、隔离规范
 
@@ -68,13 +68,13 @@ bun run compile
 
 ## 四、覆盖率的含义与盲区
 
-`bun run test:coverage` 报告 312 个快速测试实际加载到的生产文件覆盖率。`bunfig.toml` 使用 `coveragePathIgnorePatterns = ["tests/**"]`，因此 text 与 LCOV 都排除了测试和辅助文件。当前生产代码基线为函数覆盖率 70.86%、行覆盖率 72.49%，LCOV 的 `SF:` 路径仅包含 `entrypoints/**` 和 `shared/**`。
+`bun run test:coverage` 报告 344 个快速测试实际加载到的生产文件覆盖率。`bunfig.toml` 使用 `coveragePathIgnorePatterns = ["tests/**"]`，因此 text 与 LCOV 都排除了测试和辅助文件。本次核对时运行 `bun run test:coverage` 的输出为函数覆盖率 74.43%、行覆盖率 74.97%（口径：344 个快速测试、Bun 1.4.0、该次提交的源码），LCOV 的 `SF:` 路径仅包含 `entrypoints/**` 和 `shared/**`。这是核对当时的快照，不是承诺值，请以重新运行的输出为准。
 
 覆盖率适合发现已进入测试图的分支空白，但不能代表整个扩展的全量覆盖率：未被快速测试导入的文件不会自然出现在统计中。组件测试使用独立 Runner，当前没有并入这份覆盖率，避免把 Happy DOM 全局环境带入快速测试。配置语义见 [Bun 官方代码覆盖率指南](https://bun.com/docs/test/code-coverage)。
 
 当前报告尤其不能证明以下真实浏览器行为：
 
-- Sidepanel 组件测试已经覆盖真实输入发送、requestId 流式隔离、完成态持久化、监听清理与会话恢复；Popup、Options 和 Sidepanel 其余交互仍待补。
+- 组件测试只覆盖了三个文件（`SidepanelApp.component.tsx` 的真实输入发送、requestId 流式隔离、完成态持久化、监听清理与会话恢复，`Options.component.tsx` 的设置页渲染与保存交互，`PromptQueue.component.tsx` 的提示词排队）；Popup、Content Script 以及这三个组件的其余交互仍待补。
 - Chrome 与 Firefox 的扩展消息通道、Service Worker 唤醒、Side Panel 生命周期和权限行为。
 - 真实 Selection、Shadow DOM、跨节点选区、剪贴板、`contenteditable` 和跨域 iframe。
 - 扩展安装、升级、刷新后的存储迁移、配额限制及完整用户主流程。
@@ -86,7 +86,7 @@ bun run compile
 - `tests/components/preload.ts` 负责注册 Happy DOM、补齐必要 DOM 能力，并通过 Bun 插件忽略 CSS/Less 内容。
 - `*.component.tsx` 没有使用 Bun 默认识别的 `.test.*` 命名；`test:components` 通过显式目录通配符收集当前和未来组件文件。
 - React Testing Library 每个用例后显式 `cleanup`，随后恢复 Browser API 全局描述符、根节点主题属性和完整原始 `style` 属性。
-- 测试执行真实 `SidePanelApp`、内部 Hook、状态转换、消息处理和存储协调器；Browser API 与后台通信是受控边界。
+- 测试执行真实 `SidePanelApp`、`Options` 和 `PromptQueue` 组件、内部 Hook、状态转换、消息处理和存储协调器；Browser API 与后台通信是受控边界。
 - 快速测试的 `test:shared` 固定 `--parallel=1 --no-isolate --randomize`。不设置 `TEST_SEED` 时每次生成随机种子，失败日志中的种子可用 `TEST_SEED=<seed>` 原样复现。
 
 ## 六、真实扩展 E2E 边界

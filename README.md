@@ -41,7 +41,9 @@
 
 ![本地存储与多模型接入示意](store-assets/08_feature_local_security_models_1280x800.png)
 
-设置、历史记录和生词本保存在浏览器本地。调用 AI 时，待解释的文字或图片会发送至你配置的模型服务，详见[隐私政策](PRIVACY.md)。
+设置、历史记录和生词本都保存在浏览器存储中：历史记录和生词本仅保存在本机
+（`storage.local`），设置会通过 Chrome 账号同步，但 API Key 例外、只保存在本机。
+调用 AI 时，待解释的文字或图片会发送至你配置的模型服务，详见[隐私政策](PRIVACY.md)。
 
 ## 功能
 
@@ -60,6 +62,7 @@
 - 流式显示正文和 Provider 返回的 reasoning 内容。
 - 支持 Markdown、代码块和代码复制。
 - 支持快速回复和深度思考模式。
+- 可在设置中开启「多维视角三棱镜模式」，让模型按「🍼 直白人话版 / 👔 向上汇报版 / 🔪 犀利真相版」三段结构输出。
 - 支持停止生成、失败后手动重试。
 - 扩展界面字体可在 80%～160% 之间按 10% 调整；侧边栏顶栏与设置页共用同一比例并自动保存。
 - 在侧边栏、Popup 或设置页按 `Command/Ctrl + +`、`Command/Ctrl + -` 调整，按 `Command/Ctrl + 0` 恢复 100%。网页内快捷键只有焦点位于人话翻译浮窗或划词工具条时才生效，不改变普通网页字号。
@@ -78,10 +81,12 @@
 - 网页中选中文字后点击「侧边栏人话」，自动带上引用进入侧边栏追问。
 - 侧边栏内选中回复文字，浮出「追问」胶囊继续提问，输入框上方显示引用预览条。
 - 支持消息编辑后重新生成。
+- 流式生成过程中可以继续输入新问题：按 Enter 入队，当前回答结束后自动依次解答；
+  也可以取消排队，或点「优先发送」/ 按 `Command/Ctrl + Enter` 打断当前输出立即提问。
 - 支持流式输出时的 GPT 式智能滚动：自动跟随生成，用户上滑即暂停，
   并以浮动胶囊提示「回到底部」或「AI 生成中」。
 - 对话可复制，支持导出 Markdown 和 JSON。
-- 右键菜单「通读网页」可将当前页面正文提取后送入侧边栏解读。
+- 右键菜单「通读当前网页 (人话速读)」可将当前页面正文提取后送入侧边栏解读。
 - 未读完的长文会把已采集正文和当前段位保存在独立本地断点中；关闭并重新打开侧边栏后，可从中断段重试或继续，不会重新抓取网页或自动请求模型。
 - 单篇断点最多保存 100 万字符，本地断点总正文最多 200 万字符、最多 10 篇；超限时当前会话仍可继续，并会明确提示关闭后不保证恢复。
 - 全部分段完成后，可主动点击「生成全文总览」；总览只基于各段已经完成的解读结果生成，不会自动请求模型。
@@ -136,6 +141,11 @@
 扩展直接请求用户配置的 AI Provider。模型需要兼容当前使用的
 Chat Completions 流式响应格式；图片翻译还要求模型支持图片输入。
 
+设置页内置 6 个推荐服务商的请求地址与默认模型（DeepSeek、智谱AI (GLM)、
+火山引擎、月之暗面、OpenRouter、通义千问），也可以填「自定义地址」。
+默认地址为 `https://api.deepseek.com/v1/chat/completions`，默认模型为
+`deepseek-flash`。
+
 ### Popup 翻译
 
 1. 输入需要解释的内容，或使用 `Ctrl+V` 粘贴图片。
@@ -174,7 +184,8 @@ Chat Completions 流式响应格式；图片翻译还要求模型支持图片输
 
 1. 按 `Alt+S`（macOS 使用 `Option+S`）打开侧边栏，或点击扩展图标。
 2. 直接提问，或粘贴图片让支持视觉输入的模型解读。
-3. 在网页中选中文字，用右键菜单「通读网页」或划词操作栏送入侧边栏。
+3. 把网页内容送进侧边栏：用右键菜单「通读当前网页 (人话速读)」送入整页正文；
+   只想带上选中文字时，用划词操作栏中的「侧边栏人话」。
 4. 选中任意回复片段可发起引用追问。
 
 侧边栏顶栏的 `A− / 百分比 / A+` 可随时调整扩展文字大小；点击中间百分比恢复 100%，修改会同步到 Popup、设置页、网页内翻译浮窗和划词工具条。
@@ -248,11 +259,15 @@ bun run test:e2e
 bun run test:e2e:built
 ```
 
-`test` 会依次执行 312 个快速测试和独立的 Sidepanel React 组件测试。
+`test` 会依次执行 344 个快速测试（`tests/unit`、`tests/contracts`、
+`tests/integration`、`tests/helpers`）和 16 个组件测试（`tests/components` 下的
+Options、PromptQueue、SidepanelApp 三个 `.component.tsx`，由独立 Happy DOM
+Runner 执行）。
 `test:shared` 会在单 Worker 共享进程中随机测试顺序；可通过
 `TEST_SEED=123456 bun run test:shared` 指定种子复现问题。覆盖率只统计测试实际
-加载到的生产文件，并通过 `bunfig.toml` 排除 `tests/**`。当前生产代码基线为函数
-70.86%、行 72.49%；组件 Runner、未加载的浏览器入口和真实扩展生命周期不属于全量覆盖率。
+加载到的生产文件，并通过 `bunfig.toml` 排除 `tests/**`。本次核对时运行
+`bun run test:coverage`（344 个快速测试）输出为函数 74.43%、行 74.97%；
+组件 Runner、未加载的浏览器入口和真实扩展生命周期不属于这份统计。
 分层职责、隔离规范和浏览器回归盲区见 [`tests/README.md`](tests/README.md)。
 
 `test:e2e` 会先构建 Chrome MV3 扩展，再使用 Playwright 的临时独立 Chromium
@@ -260,6 +275,12 @@ Profile 和本地 HTTP/SSE 夹具验证三条真实扩展流程。它不会连�
 Linux 或 CI 首次安装使用 `bunx playwright install --with-deps chromium`。
 参考 [Bun 官方代码覆盖率指南](https://bun.com/docs/test/code-coverage)和
 [Playwright 官方 Chrome 扩展测试指南](https://playwright.dev/docs/chrome-extensions)。
+
+仓库没有 ESLint / Prettier / Biome 配置文件，当前的质量闸门只有
+`tsc --noEmit`（`bun run compile`，别名 `bun run typecheck`）与 `bun test`。
+版本号 `1.4.1` 硬编码在 `wxt.config.ts`（决定进包 manifest 的版本）和
+`package.json`（决定 zip 文件名）两处，发版时需要同时修改。项目根目录
+`.bun-version` 里的 `1.4.0` 是 Bun 运行时的版本号，与扩展版本号无关。
 
 `docs/` 目录收录了开发回顾、请求 ID 重构方案、翻译链路修复方案
 和 Chrome 诊断日志使用指南。
@@ -343,4 +364,4 @@ Popup / 页面翻译浮窗 / 侧边栏
 
 ## License
 
-[MIT](LICENSE)
+MIT。仓库当前没有 `LICENSE` 文件，`package.json` 也没有 `license` 字段。
