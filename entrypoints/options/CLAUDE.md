@@ -166,7 +166,7 @@ const testApiKey = async () => {
       action: "testApiConnection",
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl || "https://api.deepseek.com/v1/chat/completions",
-      model: settings.model || "deepseek-reasoner",
+      model: settings.model || "deepseek-flash",
     });
 
     if (response.success) {
@@ -209,12 +209,12 @@ export const API_HINTS: ApiHint[] = [
 
 // 模型提示
 export const MODEL_HINTS = [
-  "deepseek-reasoner",
-  "deepseek-chat",
-  "deepseek-r1-250528",
-  "kimi-k2-250711",
-  "doubao-seed-1-6-thinking-250715",
-  // ... 更多模型
+  "deepseek-flash",
+  "glm-5.3-flash",
+  "doubao-seed-2-1-turbo-260628",
+  "kimi-k2.6",
+  "google/gemini-3-flash-preview",
+  "qwen3.8-flash",
 ];
 ```
 

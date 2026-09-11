@@ -11,50 +11,49 @@ export interface ApiPlatformHint {
 }
 
 export const MODEL_HINTS = [
-  "deepseek-reasoner",
-  "deepseek-chat",
-  "glm-4-flash",
-  "glm-4-plus",
-  "doubao-seed-1-6-thinking-250715",
-  "kimi-k2-250905",
-  "qwen-plus",
+  "deepseek-flash",
+  "glm-5.3-flash",
+  "doubao-seed-2-1-turbo-260628",
+  "kimi-k2.6",
+  "google/gemini-3-flash-preview",
+  "qwen3.8-flash",
 ];
 
 export const API_HINTS: ApiHint[] = [
   {
     name: "DeepSeek",
     url: "https://api.deepseek.com/v1/chat/completions",
-    defaultModel: "deepseek-chat",
+    defaultModel: "deepseek-flash",
     platformUrl: "https://platform.deepseek.com/api_keys",
   },
   {
     name: "智谱AI (GLM)",
     url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-    defaultModel: "glm-4-flash",
+    defaultModel: "glm-5.3-flash",
     platformUrl: "https://open.bigmodel.cn/apikey/platform",
   },
   {
     name: "火山引擎",
     url: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-    defaultModel: "doubao-seed-1-6-thinking-250715",
+    defaultModel: "doubao-seed-2-1-turbo-260628",
     platformUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
   },
   {
     name: "月之暗面",
     url: "https://api.moonshot.cn/v1/chat/completions",
-    defaultModel: "kimi-k2-250905",
+    defaultModel: "kimi-k2.6",
     platformUrl: "https://platform.moonshot.cn/console/api-keys",
   },
   {
     name: "OpenRouter",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    defaultModel: "deepseek/deepseek-chat",
+    defaultModel: "google/gemini-3-flash-preview",
     platformUrl: "https://openrouter.ai/keys",
   },
   {
     name: "通义千问",
     url: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
-    defaultModel: "qwen-plus",
+    defaultModel: "qwen3.8-flash",
     platformUrl: "https://bailian.console.aliyun.com/#/api-key",
   },
   { name: "自定义地址", url: "" },

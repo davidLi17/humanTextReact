@@ -43,8 +43,8 @@ export const LOG_LEVELS = {
 
 // 默认设置
 export const DEFAULT_SETTINGS = {
-  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  model: "kimi-k2-250905",
+  baseUrl: "https://api.deepseek.com/v1/chat/completions",
+  model: "deepseek-flash",
   temperature: 0.7,
   promptTemplate: "System Prompt...",
   apiKey: "your_api_key",
@@ -161,8 +161,8 @@ export const LOG_LEVELS = {
 
 // 默认设置
 export const DEFAULT_SETTINGS = {
-  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  model: "kimi-k2-250905",
+  baseUrl: "https://api.deepseek.com/v1/chat/completions",
+  model: "deepseek-flash",
   temperature: 0.7,
   promptTemplate: "System Prompt(系统提示词): 1. 用通俗易懂的中文解释以下内容...",
   apiKey: "your_api_key",

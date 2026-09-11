@@ -573,7 +573,7 @@ function Options() {
         apiKey: settings.apiKey,
         baseUrl:
           settings.baseUrl || "https://api.deepseek.com/v1/chat/completions",
-        model: settings.model || "deepseek-reasoner",
+        model: settings.model || "deepseek-flash",
       });
 
       if (response.success) {
@@ -890,7 +890,7 @@ function Options() {
                   id="model"
                   value={settings.model}
                   onChange={(e) => handleInputChange("model", e.target.value)}
-                  placeholder="请输入模型ID，如：deepseek-reasoner"
+                  placeholder="请输入模型ID，如：deepseek-flash"
                 />
                 <div className="setting-hint">
                   <span className="hint-label">常用模型推荐 (点击快速填入):</span>

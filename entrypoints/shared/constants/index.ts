@@ -67,8 +67,8 @@ export type ThemeMode = (typeof THEME_MODES)[keyof typeof THEME_MODES];
  * 默认设置
  */
 export const DEFAULT_SETTINGS = {
-  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  model: "kimi-k2-250905",
+  baseUrl: "https://api.deepseek.com/v1/chat/completions",
+  model: "deepseek-flash",
   temperature: 0.7,
   promptTemplate:
     "System Prompt(系统提示词): 1. 用通俗易懂的中文解释以下内容(就是说人话,如果遇到英文缩写记得解释,比如OKR说成OKR(Object Key Value))。" +

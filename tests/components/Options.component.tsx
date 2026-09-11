@@ -36,14 +36,14 @@ function createBrowserMock() {
     settings: {
       apiKey: "sk-initial-key",
       baseUrl: "https://api.deepseek.com/v1/chat/completions",
-      model: "deepseek-reasoner",
+      model: "deepseek-flash",
       updatedAt: now + 100,
     },
   };
   const syncStore: Record<string, unknown> = {
     settings: {
       baseUrl: "https://api.deepseek.com/v1/chat/completions",
-      model: "deepseek-reasoner",
+      model: "deepseek-flash",
       temperature: 0.7,
       promptTemplate: "测试系统提示词",
       thinkingEnabled: false,

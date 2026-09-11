@@ -83,8 +83,8 @@ export const MESSAGE_TYPES = {
 ### 配置项
 ```typescript
 export const DEFAULT_SETTINGS = {
-  baseUrl: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-  model: "kimi-k2-250905",
+  baseUrl: "https://api.deepseek.com/v1/chat/completions",
+  model: "deepseek-flash",
   temperature: 0.7,
   promptTemplate: "System Prompt...",
   apiKey: "your_api_key",
