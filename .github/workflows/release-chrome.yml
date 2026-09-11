@@ -56,9 +56,6 @@ jobs:
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
 
-      - name: Run extension E2E
-        run: bun run test:e2e
-
       - name: Build Chrome release zip
         id: package
         run: |
@@ -87,6 +84,10 @@ jobs:
           echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
           echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
           echo "Prepared $ZIP_PATH (version $PACKAGE_VERSION)"
+
+      # wxt zip already builds .output/chrome-mv3. Test that same build before upload.
+      - name: Run extension E2E on release build
+        run: bun run test:e2e:built
 
       - name: Keep release zip as workflow artifact
         uses: actions/upload-artifact@v4
