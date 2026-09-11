@@ -1,0 +1,545 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "人话翻译器：从用户操作到通俗解释",
+    "locale": "zh-CN",
+    "output": "humantextreact-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/davidLi17/humanTextReact.git",
+      "provider": "github",
+      "revision": "94fffe098c98398ae07a05f2bdbf4fd791fb4a0e"
+    },
+    "views": [
+      {
+        "id": "selection-path",
+        "label": "划词翻译链路",
+        "focus": [
+          "user",
+          "content",
+          "background",
+          "translation",
+          "provider"
+        ],
+        "note": "从网页选区、快捷键或浮动操作栏进入统一翻译主链。"
+      },
+      {
+        "id": "web-context-path",
+        "label": "网页正文附加",
+        "focus": [
+          "user",
+          "sidepanel",
+          "contracts",
+          "background",
+          "translation",
+          "provider"
+        ],
+        "note": "通读当前网页不再新建会话：正文作为 contextOnly 卡片附加，追问时由历史组装还原。"
+      },
+      {
+        "id": "conversation-path",
+        "label": "对话与分段续读",
+        "focus": [
+          "sidepanel",
+          "contracts",
+          "background",
+          "translation",
+          "provider",
+          "storage"
+        ],
+        "note": "侧边栏承载多轮对话、长文分段解读与可恢复的通读断点。"
+      },
+      {
+        "id": "local-data",
+        "label": "本地数据与复用",
+        "focus": [
+          "popup",
+          "sidepanel",
+          "options",
+          "contracts",
+          "storage"
+        ],
+        "note": "设置、历史、生词本、草稿与通读断点保存在浏览器存储，密钥不上云。"
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      30,
+      70
+    ],
+    "cols": 5,
+    "gapX": 70,
+    "gapY": 54,
+    "cellW": 145,
+    "cellH": 74
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户与当前网页",
+      "sublabel": "选区、输入、图片、网页正文",
+      "row": 1,
+      "col": 0,
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "content",
+      "type": "frontend",
+      "label": "网页内容脚本",
+      "sublabel": "划词、浮窗、快捷键、正文提取",
+      "row": 0,
+      "col": 1,
+      "sources": [
+        {
+          "path": "entrypoints/content/index.ts",
+          "line": 8,
+          "end_line": 38,
+          "label": "Content Script 入口"
+        },
+        {
+          "path": "entrypoints/content/selectionActionBar.ts",
+          "line": 74,
+          "end_line": 120,
+          "label": "选区校验与动作条"
+        },
+        {
+          "path": "entrypoints/content/pageExtractor.ts",
+          "line": 214,
+          "end_line": 240,
+          "label": "正文提取"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "popup",
+      "type": "frontend",
+      "label": "Popup 翻译器",
+      "sublabel": "输入图片、流式结果、历史搜索",
+      "row": 1,
+      "col": 1,
+      "sources": [
+        {
+          "path": "entrypoints/popup/App.tsx",
+          "line": 290,
+          "end_line": 340,
+          "label": "发起翻译"
+        },
+        {
+          "path": "entrypoints/popup/App.tsx",
+          "line": 82,
+          "end_line": 120,
+          "label": "草稿恢复"
+        },
+        {
+          "path": "entrypoints/popup/hooks/useFuseSearch.ts",
+          "line": 39,
+          "end_line": 60,
+          "label": "历史模糊搜索"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "sidepanel",
+      "type": "frontend",
+      "label": "侧边栏工作台",
+      "sublabel": "对话、正文附加、分段续读",
+      "row": 2,
+      "col": 1,
+      "sources": [
+        {
+          "path": "entrypoints/sidepanel/App.tsx",
+          "line": 1091,
+          "end_line": 1265,
+          "label": "通读：正文附加到当前会话"
+        },
+        {
+          "path": "entrypoints/sidepanel/App.tsx",
+          "line": 1628,
+          "end_line": 1642,
+          "label": "追问时还原网页正文"
+        },
+        {
+          "path": "entrypoints/sidepanel/webReadingProgressStorage.ts",
+          "line": 110,
+          "end_line": 130,
+          "label": "通读进度落盘"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "options",
+      "type": "frontend",
+      "label": "设置与诊断页",
+      "sublabel": "模型推荐、提示词、诊断、备份",
+      "row": 3,
+      "col": 1,
+      "sources": [
+        {
+          "path": "entrypoints/options/config/index.ts",
+          "line": 13,
+          "end_line": 63,
+          "label": "六家服务商与默认模型"
+        },
+        {
+          "path": "entrypoints/options/Options.tsx",
+          "line": 84,
+          "end_line": 95,
+          "label": "设置分区"
+        },
+        {
+          "path": "entrypoints/options/Options.tsx",
+          "line": 572,
+          "label": "连接测试"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "background",
+      "type": "backend",
+      "label": "Background 调度中心",
+      "sublabel": "消息路由、requestId、菜单快捷键",
+      "row": 1,
+      "col": 2,
+      "sources": [
+        {
+          "path": "entrypoints/background/index.ts",
+          "line": 29,
+          "end_line": 75,
+          "label": "Runtime 与浏览器事件"
+        },
+        {
+          "path": "entrypoints/background/messageHandler.ts",
+          "line": 56,
+          "end_line": 120,
+          "label": "消息路由与请求认领"
+        },
+        {
+          "path": "entrypoints/background/contextMenuHandler.ts",
+          "line": 65,
+          "end_line": 80,
+          "label": "右键通读消息通道"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "contracts",
+      "type": "backend",
+      "label": "共享契约层",
+      "sublabel": "设置、日志、通读状态、错误码",
+      "row": 2,
+      "col": 2,
+      "sources": [
+        {
+          "path": "entrypoints/shared/webReadingState.ts",
+          "line": 33,
+          "end_line": 62,
+          "label": "网页卡片元信息 (contextOnly)"
+        },
+        {
+          "path": "entrypoints/shared/chatTypes.ts",
+          "line": 104,
+          "end_line": 133,
+          "label": "ChatMessage 契约"
+        },
+        {
+          "path": "entrypoints/shared/settingsUtils.ts",
+          "line": 86,
+          "end_line": 130,
+          "label": "设置读写与密钥隔离"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "translation",
+      "type": "backend",
+      "label": "翻译服务",
+      "sublabel": "载荷构造、流式解析、超时守卫",
+      "row": 1,
+      "col": 3,
+      "sources": [
+        {
+          "path": "entrypoints/background/translationService.ts",
+          "line": 363,
+          "end_line": 380,
+          "label": "翻译入口与超时守卫"
+        },
+        {
+          "path": "entrypoints/background/translationService.ts",
+          "line": 490,
+          "end_line": 553,
+          "label": "SSE 流式读取"
+        },
+        {
+          "path": "entrypoints/background/translationService.ts",
+          "line": 560,
+          "end_line": 575,
+          "label": "INTERRUPTED / TRUNCATED"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "external",
+      "label": "AI Provider",
+      "sublabel": "Chat Completions 流式接口",
+      "row": 1,
+      "col": 4,
+      "sources": [
+        {
+          "path": "entrypoints/background/translationService.ts",
+          "line": 419,
+          "end_line": 456,
+          "label": "读取设置并发起请求"
+        },
+        {
+          "path": "entrypoints/background/apiService.ts",
+          "line": 48,
+          "end_line": 89,
+          "label": "Provider 连接测试"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "浏览器存储",
+      "sublabel": "local / sync / session",
+      "row": 3,
+      "col": 2,
+      "sources": [
+        {
+          "path": "entrypoints/sidepanel/webReadingProgressStorage.ts",
+          "line": 9,
+          "end_line": 12,
+          "label": "会话 / 活跃会话 / 通读断点三个键"
+        },
+        {
+          "path": "entrypoints/sidepanel/App.tsx",
+          "line": 712,
+          "end_line": 727,
+          "label": "saveSessionsToStorage / 落盘"
+        },
+        {
+          "path": "entrypoints/shared/dataBackup.ts",
+          "line": 47,
+          "end_line": 51,
+          "label": "历史与会话存储键"
+        }
+      ],
+      "size": [
+        145,
+        74
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Chrome Manifest V3 扩展",
+      "wraps": [
+        "content",
+        "popup",
+        "sidepanel",
+        "options",
+        "background",
+        "contracts",
+        "translation",
+        "storage"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-selection",
+      "from": "user",
+      "to": "content",
+      "label": "选中文字 / 快捷键",
+      "variant": "emphasis",
+      "labelAt": [
+        276,
+        180
+      ]
+    },
+    {
+      "id": "user-popup",
+      "from": "user",
+      "to": "popup",
+      "label": "输入 / 粘贴图片",
+      "variant": "emphasis",
+      "labelAt": [
+        270,
+        290
+      ]
+    },
+    {
+      "id": "user-chat",
+      "from": "user",
+      "to": "sidepanel",
+      "label": "对话 / 通读当前网页",
+      "variant": "emphasis",
+      "labelAt": [
+        280,
+        310
+      ]
+    },
+    {
+      "id": "content-message",
+      "from": "content",
+      "to": "background",
+      "label": "Runtime：划词与正文提取"
+    },
+    {
+      "id": "popup-message",
+      "from": "popup",
+      "to": "background",
+      "label": "Runtime：翻译 / 历史",
+      "labelAt": [
+        500,
+        175
+      ]
+    },
+    {
+      "id": "sidepanel-message",
+      "from": "sidepanel",
+      "to": "background",
+      "label": "Runtime：多轮消息与阅读任务"
+    },
+    {
+      "id": "request-orchestration",
+      "from": "background",
+      "to": "translation",
+      "label": "创建 / 取消 / 完成",
+      "variant": "emphasis",
+      "labelAt": [
+        660,
+        171
+      ]
+    },
+    {
+      "id": "provider-stream",
+      "from": "translation",
+      "to": "provider",
+      "label": "HTTPS POST / SSE 流式响应",
+      "variant": "security",
+      "labelAt": [
+        755,
+        286
+      ]
+    },
+    {
+      "id": "options-storage",
+      "from": "options",
+      "to": "storage",
+      "label": "保存设置与诊断状态",
+      "labelAt": [
+        425.0,
+        542.0
+      ]
+    },
+    {
+      "id": "translation-storage",
+      "from": "translation",
+      "to": "storage",
+      "label": "读设置 / 写历史",
+      "labelAt": [
+        640.0,
+        414.0
+      ]
+    },
+    {
+      "id": "sidepanel-context",
+      "from": "sidepanel",
+      "to": "contracts"
+    },
+    {
+      "id": "sidepanel-storage",
+      "from": "sidepanel",
+      "to": "storage",
+      "label": "会话与断点",
+      "labelAt": [
+        418,
+        440
+      ]
+    },
+    {
+      "id": "background-context",
+      "from": "background",
+      "to": "contracts",
+      "label": "设置读取与错误码",
+      "labelAt": [
+        580,
+        286
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "统一主链",
+      "items": [
+        "四个界面入口共享翻译服务",
+        "requestId 隔离标签页与展示位置",
+        "流式正文与 reasoning 回原入口"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "网页正文附加",
+      "items": [
+        "通读只追加 contextOnly 卡片",
+        "不新建会话，不自动发起请求",
+        "追问时由历史组装还原正文"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "模型与本地边界",
+      "items": [
+        "预置六家服务商地址与默认模型",
+        "INTERRUPTED / TRUNCATED 错误码",
+        "apiKey 仅存 local，不上云",
+        "系统提示词为多行长文本，原样发送"
+      ]
+    }
+  ]
+}
