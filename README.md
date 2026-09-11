@@ -259,14 +259,14 @@ bun run test:e2e
 bun run test:e2e:built
 ```
 
-`test` 会依次执行 344 个快速测试（`tests/unit`、`tests/contracts`、
+`test` 会依次执行 396 个快速测试（`tests/unit`、`tests/contracts`、
 `tests/integration`、`tests/helpers`）和 16 个组件测试（`tests/components` 下的
 Options、PromptQueue、SidepanelApp 三个 `.component.tsx`，由独立 Happy DOM
 Runner 执行）。
 `test:shared` 会在单 Worker 共享进程中随机测试顺序；可通过
 `TEST_SEED=123456 bun run test:shared` 指定种子复现问题。覆盖率只统计测试实际
 加载到的生产文件，并通过 `bunfig.toml` 排除 `tests/**`。本次核对时运行
-`bun run test:coverage`（344 个快速测试）输出为函数 74.43%、行 74.97%；
+`bun run test:coverage`（396 个快速测试）输出为函数 77.52%、行 77.20%；
 组件 Runner、未加载的浏览器入口和真实扩展生命周期不属于这份统计。
 分层职责、隔离规范和浏览器回归盲区见 [`tests/README.md`](tests/README.md)。
 
@@ -278,7 +278,7 @@ Linux 或 CI 首次安装使用 `bunx playwright install --with-deps chromium`�
 
 仓库没有 ESLint / Prettier / Biome 配置文件，当前的质量闸门只有
 `tsc --noEmit`（`bun run compile`，别名 `bun run typecheck`）与 `bun test`。
-版本号 `1.4.1` 硬编码在 `wxt.config.ts`（决定进包 manifest 的版本）和
+版本号 `1.5.0` 硬编码在 `wxt.config.ts`（决定进包 manifest 的版本）和
 `package.json`（决定 zip 文件名）两处，发版时需要同时修改。项目根目录
 `.bun-version` 里的 `1.4.0` 是 Bun 运行时的版本号，与扩展版本号无关。
 

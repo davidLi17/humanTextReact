@@ -341,7 +341,7 @@ static handleRuntimeMessage(
 
 ### 测试覆盖
 实测（2026-09-11 本地运行 `bun test tests/unit tests/contracts tests/integration tests/helpers`）：
-**344 个用例 / 31 个文件，全部通过**。与本模块直接相关的：
+**396 个用例 / 33 个文件，全部通过**。与本模块直接相关的：
 
 - ✅ 右键菜单通读通知通道（`tests/integration/contextMenuWebReading.test.js`，2026-09-11 新增）
 - ✅ `RequestManager` 生命周期（`tests/unit/requestManager.test.js`）
@@ -409,7 +409,7 @@ A: **不同步**。历史记录只写入 `browser.storage.local`（`historyManag
   「自动清理过期记录」两条无依据描述
 - 🔧 标注 `apiService.ts` 连接测试写死 `temperature: 0.1` / `max_tokens: 5` 为**已知待修问题**
 - 🔧 标注 `constants.ts` 为 0 字节空文件；`DEFAULT_SETTINGS` 按源码补齐字段
-- ➕ 补充测试规模实测（344 用例 / 31 文件）与新增测试 `contextMenuWebReading.test.js`
+- ➕ 补充测试规模实测（396 用例 / 33 文件）与新增测试 `contextMenuWebReading.test.js`
 
 ### 2026-09-10 - 文档纠错
 - 🔧 删除「网络错误：自动重试」——**全项目不存在任何重试逻辑**，此条会误导维护者以为重试已实现

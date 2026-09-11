@@ -41,7 +41,7 @@ Notes:
 - `bun run build` creates the Chrome extension build.
 - `bun run zip` creates the distributable extension archive.
 - The only automated quality gates are `tsc --noEmit` and `bun test`. This repository has no ESLint, Prettier, or Biome configuration.
-- The extension version lives in two places and both must be bumped together: `wxt.config.ts` (packaged manifest version) and `package.json` (zip file name). Both currently read `1.4.1`.
+- The extension version lives in two places and both must be bumped together: `wxt.config.ts` (packaged manifest version) and `package.json` (zip file name). Both currently read `1.5.0`.
 - Local build artifacts should stay out of git. Use `artifacts/` for local exports and keep generated zip/7z files ignored.
 
 ## Stability Phase Priorities
@@ -49,7 +49,7 @@ Notes:
 1. Keep the current branch synchronized with its `origin` counterpart (currently `origin/feat/read-webpage-as-context`) before starting new feature work.
 2. Keep local packaged artifacts outside version control.
 3. Normalize package-manager usage around Bun.
-4. Keep the expected Node/Bun environment documented. Bun is pinned by `.bun-version` (1.4.0); `@types/bun` in `package.json` is `1.4.1`. These are Bun's own version numbers and are unrelated to the extension version, which also happens to be `1.4.1`. The Node version is still unpinned (no `engines` field, no `.nvmrc`).
+4. Keep the expected Node/Bun environment documented. Bun is pinned by `.bun-version` (1.4.0); `@types/bun` in `package.json` is `1.4.1`. These are Bun's own version numbers and are unrelated to the extension version. The Node version is still unpinned (no `engines` field, no `.nvmrc`).
 5. Keep changes small and verify core extension flows after dependency, WXT, or Vite changes.
 
 Estimated cost:

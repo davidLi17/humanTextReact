@@ -332,7 +332,7 @@ const openShortcutSettings = () => {
 - **调试日志**: 自研 logger（`shared/logger`），非 `debug` 包
 
 ### 测试覆盖
-全仓测试现状（2026-09-11 实测 `bun test`）：**344 个用例通过 / 31 个文件**。
+全仓测试现状（2026-09-11 实测 `bun test`）：**396 个用例通过 / 33 个文件**。
 与本模块直接相关的：
 - ✅ 设置读写与存储兼容（`tests/integration/settingsUtils.test.js`）
 - ✅ 设置页组件交互（`tests/components/Options.component.tsx`，278 行 / 6 个用例：版本号渲染、Tab 切换、API Key Badge 与 Base URL chip 高亮、测试连接后自动保存、字号预览卡片、快捷保存与重置）
@@ -394,7 +394,7 @@ A: **不支持任何变量**，模板会被原样作为 system message 发送（
 - 🔧 **「保存 / 测试连接」代码块换成真实实现**：`handleSave` 会先 `delete fontScalePercent`、
   再 `initializeLogger("options")`；`testApiKey` 成功后自动保存、3.5 秒（非 3 秒）后重置。
 - 🔧 **删除「快捷键测试」**：该页只读展示快捷键并跳转 `chrome://extensions/shortcuts`，无测试功能。
-- 🔧 测试现状更新为实测的 **344 用例 / 31 文件**；覆盖率陈述改为可核验的表述
+- 🔧 测试现状更新为实测的 **396 用例 / 33 文件**；覆盖率陈述改为可核验的表述
   （`Options.tsx` 不在 `test:coverage` 的 lcov 中，原因是该命令只跑 4 个非组件目录）。
 - 📌 保留 2026-09-10 的两处关键更正：`apiKey` 永不入 `storage.sync`；提示词模板**不支持变量**。
 

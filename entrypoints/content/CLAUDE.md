@@ -327,7 +327,7 @@ export function injectStyles() {
 
 ### 测试覆盖
 实测（2026-09-11 本地运行 `bun test tests/unit tests/contracts tests/integration tests/helpers`）：
-**344 个用例 / 31 个文件，全部通过**。与本模块相关的测试文件：
+**396 个用例 / 33 个文件，全部通过**。与本模块相关的测试文件：
 
 - ✅ 浮动操作栏（`tests/integration/selectionActionBar.test.js`）
 - ✅ 正文提取与 Shadow DOM（`tests/integration/pageExtractor.test.js`、`tests/unit/pageExtractorShadowDom.test.js`）
@@ -408,7 +408,7 @@ A: **只存在内存里**（`PopupManager.lastPopupState`），并且只在同�
 - 🔧 FAQ「页面刷新后恢复上次状态」不实：弹窗几何只在内存中，刷新即丢失
 - 🔧 外部依赖去掉 `tabs`（本模块不使用），补上 `storage.local`
 - ➕ 补充 `TranslationRequest` 的 content 侧实际字段；文件清单补齐 4 个缺失文件
-- ➕ 标注覆盖率实测数据与测试规模（344 用例 / 31 文件），并声明非覆盖率承诺
+- ➕ 标注覆盖率实测数据与测试规模（396 用例 / 33 文件），并声明非覆盖率承诺
 
 ### 2026-09-10 - 文档纠错
 - 🔧 移除 ESLint 质量声明（项目未配置 ESLint）

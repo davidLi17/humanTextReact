@@ -345,7 +345,7 @@ const { search, results, totalMatches } = useHistorySearch(history);
 - **调试日志**: 自研 logger（`shared/logger`），非 `debug` 包
 
 ### 测试覆盖
-全仓测试现状（2026-09-11 实测 `bun test`）：**344 个用例通过 / 31 个文件**。
+全仓测试现状（2026-09-11 实测 `bun test`）：**396 个用例通过 / 33 个文件**。
 - ⚠️ **本模块没有组件级测试**：`tests/components/` 只有 `Options.component.tsx`、
   `SidepanelApp.component.tsx`、`PromptQueue.component.tsx` 三个用例文件
 - ⚠️ `App.tsx`（706 行）与 `components/*` 都不在 `bun run test:coverage` 产出的
@@ -426,7 +426,7 @@ A: 历史记录：导出走 `getHistory` → `JSON.stringify` → `Blob` 下载�
 - 🔴 **修正 HistoryPanel 示例**：`new Fuse(...)` / Blob / FileReader 实际不在该组件内，
   搜索走 `useHistorySearch`（`useFuseSearch.ts:198-206`），导入导出走 `App.tsx` + background 消息。
 - 🔧 记录 `SettingsUtils.clearCache()` 是空实现（`settingsUtils.ts:71`），避免被误会为有效缓存清理。
-- 🔧 测试现状更新为实测 **344 用例 / 31 文件**；覆盖率表述改为可核验的说法（本模块文件不在
+- 🔧 测试现状更新为实测 **396 用例 / 33 文件**；覆盖率表述改为可核验的说法（本模块文件不在
   `coverage/lcov.info` 中，因 `test:coverage` 只跑 4 个非组件目录）。
 - ✅ 保留 2026-09-10 的更正：无组件级测试、无 ESLint、导出不含自动跨设备同步；
   图片格式与大小限制（`IMAGE_CONFIG`）经核对属实。

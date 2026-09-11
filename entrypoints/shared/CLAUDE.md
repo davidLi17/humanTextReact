@@ -497,7 +497,7 @@ export const settingsLogger    = createLogger("settings", "⚙️");
 ### 质量工具
 - **TypeScript 严格模式**: `bun run compile`（`tsc --noEmit`）当前零错误
 - **ESLint / Prettier**: ⚠️ **项目未配置**（仓库内无 eslint / prettier / biome 配置文件），没有任何 lint 闸门
-- **测试**: `bun run test`，本次核对为 **344 用例 / 31 文件全绿**
+- **测试**: `bun run test`，本次核对为 **396 用例 / 33 文件全绿**
 - **调试工具**: 自研 logger（见上），**非 `debug` 包**
 
 ### 本目录相关测试文件（存在性已核对）
@@ -567,7 +567,7 @@ A: **不能**。模板原样作为 system message 发送，没有任何替换逻
 - 🔧 `Logger` 方法签名由 `any[]` 更正为 `unknown[]`，补齐 `child` / `updateConfig` / `getNamespace`
 - 🔧 澄清日志上下文白名单只有四个（`LoggerContext` 含 sidepanel 但不会落盘）
 - 🔧 移除无依据的覆盖率百分比结论，改为列出真实存在的测试文件，并声明「不承诺覆盖率数字」
-- 📌 本次核对：`bun test` **344 用例 / 31 文件全绿**；仓库内无 ESLint / Prettier / Biome 配置文件
+- 📌 本次核对：`bun test` **396 用例 / 33 文件全绿**；仓库内无 ESLint / Prettier / Biome 配置文件
 
 ### 2026-09-10 - 文档纠错
 - 🔧 删除整段基于 `debug` 包的虚构 Logger 实现，替换为真实接口（含 `prefix` 参数与预置实例）

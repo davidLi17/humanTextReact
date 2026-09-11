@@ -19,7 +19,7 @@
 # 默认测试集：先执行快速测试，再执行组件测试
 bun run test
 
-# 344 个快速测试：unit、contracts、integration 和 helpers
+# 396 个快速测试：unit、contracts、integration 和 helpers
 bun run test:fast
 
 # 快速测试分层执行
@@ -68,7 +68,7 @@ bun run compile
 
 ## 四、覆盖率的含义与盲区
 
-`bun run test:coverage` 报告 344 个快速测试实际加载到的生产文件覆盖率。`bunfig.toml` 使用 `coveragePathIgnorePatterns = ["tests/**"]`，因此 text 与 LCOV 都排除了测试和辅助文件。本次核对时运行 `bun run test:coverage` 的输出为函数覆盖率 74.43%、行覆盖率 74.97%（口径：344 个快速测试、Bun 1.4.0、该次提交的源码），LCOV 的 `SF:` 路径仅包含 `entrypoints/**` 和 `shared/**`。这是核对当时的快照，不是承诺值，请以重新运行的输出为准。
+`bun run test:coverage` 报告 396 个快速测试实际加载到的生产文件覆盖率。`bunfig.toml` 使用 `coveragePathIgnorePatterns = ["tests/**"]`，因此 text 与 LCOV 都排除了测试和辅助文件。本次核对时运行 `bun run test:coverage` 的输出为函数覆盖率 77.52%、行覆盖率 77.20%（口径：396 个快速测试、Bun 1.4.0、该次提交的源码），LCOV 的 `SF:` 路径仅包含 `entrypoints/**` 和 `shared/**`。这是核对当时的快照，不是承诺值，请以重新运行的输出为准。
 
 覆盖率适合发现已进入测试图的分支空白，但不能代表整个扩展的全量覆盖率：未被快速测试导入的文件不会自然出现在统计中。组件测试使用独立 Runner，当前没有并入这份覆盖率，避免把 Happy DOM 全局环境带入快速测试。配置语义见 [Bun 官方代码覆盖率指南](https://bun.com/docs/test/code-coverage)。
 

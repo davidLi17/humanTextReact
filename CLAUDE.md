@@ -8,7 +8,7 @@
 - **技术栈**: React 19 + TypeScript + WXT 0.20.6 + Vite
 - **包管理器**: Bun（项目级默认，见 AGENTS.md，勿引入 npm / pnpm / yarn）
 - **扩展类型**: Chrome Extension MV3（`minimum_chrome_version: "141"`）
-- **版本**: 1.4.1（`wxt.config.ts` 与 `package.json` 各有一处，含义不同：前者决定生成的 manifest 版本号，后者决定 zip 包名）
+- **版本**: 1.5.0（`wxt.config.ts` 与 `package.json` 各有一处，含义不同：前者决定生成的 manifest 版本号，后者决定 zip 包名）
 - **开发时间**: 2025年8月至今（首个提交为 2025-08-25）
 
 ## 系统架构
@@ -150,7 +150,7 @@ graph TB
 ### 开发流程
 - **模块化开发**：按功能模块独立开发
 - **类型优先**：先定义类型，再实现功能
-- **测试**：`bun test` 当前 **344 个用例 / 31 个文件全绿**（本次核对时运行结果），质量闸门为 `tsc --noEmit` + `bun test`
+- **测试**：`bun test` 当前 **396 个用例 / 33 个文件全绿**（本次核对时运行结果），质量闸门为 `tsc --noEmit` + `bun test`
 - **文档先行**：重要功能需要文档说明
 
 ## 关键配置
@@ -161,7 +161,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "人话翻译器",
-    version: "1.4.1",              // 决定生成 manifest 的版本号
+    version: "1.5.0",              // 决定生成 manifest 的版本号
     minimum_chrome_version: "141",
     permissions: ["contextMenus", "storage", "activeTab", "tabs", "sidePanel"],
     commands: {                     // Alt+D 翻译选中文本；Alt+S 显示/隐藏侧边栏
@@ -265,6 +265,20 @@ humanTextReact/
 
 ## 变更记录 (Changelog)
 
+### 2026-09-11 · v1.5.0 按提供商适配请求参数
+- ➕ 新增 `entrypoints/shared/modelCatalog.ts`：按 `baseUrl` 的 host 识别提供商并产出请求参数，
+  `translationService` 与 `apiService` **共用同一套参数生成逻辑**
+- 🔧 修复智谱 GLM 快速模式的硬故障：其 `thinking.type` 只接受 `enabled`（官方文档），
+  改为恒开思考 + 用 `reasoning_effort` 降强度（快速 `medium` / 深度 `high`）
+- 🔧 Kimi 省略 `temperature`（其参数表未列出该字段）；OpenRouter 改用 `reasoning:{effort}`；
+  通义千问改用顶层 `enable_thinking`；火山引擎沿用 `thinking:{type}` 并标注「待联调」
+- 🔧 连接测试去掉硬编码的 `temperature: 0.1` / `max_tokens: 5`，改为按提供商生成，
+  `max_tokens` 提到 512；新增三态判定（正文 / 仅有思考 / 无法判定），
+  修掉「报连接成功但模型实际没输出」的假阳性
+- 📌 两条不变量已由测试钉死：① DeepSeek 与任何未识别端点的请求体与改造前逐字节相同；
+  ② 连接测试与正式翻译对同一模型的参数不存在矛盾
+- 📌 版本升至 **1.5.0**（`wxt.config.ts` 与 `package.json` 两处）
+
 ### 2026-09-11 - 对齐「网页正文附加为上下文」等近期变更
 - 🔧 架构图去除源码中**不存在**的类名：`SettingsManager`（`entrypoints/background/index.ts:15`
   注明已被 `SettingsUtils` 取代）、`UniversalLogger`（日志实现为 `Logger` / `createLogger`）；
@@ -280,7 +294,7 @@ humanTextReact/
   并列出真实存在的组件测试文件
 - 🔧 模块结构的共享模块路径移除残留的 `common/`；目录树 `tests/` 补上 `helpers/`
 - 🔧 依赖清单补全为 `package.json` 中的真实条目与版本；WXT 配置示例改为真实字段
-- 📌 本次核对：`bun test` **344 用例 / 31 文件全绿**；仓库内无 ESLint / Prettier / Biome 配置文件
+- 📌 本次核对：`bun test` **396 用例 / 33 文件全绿**；仓库内无 ESLint / Prettier / Biome 配置文件
 
 ### 2026-09-10 - 文档纠错
 - 🔧 修正包管理器：`npm` → **Bun**（与 AGENTS.md 的包管理器策略对齐）
