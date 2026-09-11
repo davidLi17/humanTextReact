@@ -1,7 +1,6 @@
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
-  THINKING_CONFIG,
 } from "@/entrypoints/shared/constants";
 import {
   CodedError,
@@ -31,6 +30,7 @@ import {
 } from "@/entrypoints/shared/jargonReuse";
 import { findExactJargonItem } from "@/entrypoints/shared/jargonStorage";
 import { buildPrismSystemPrompt } from "@/entrypoints/shared/prismPrompt";
+import { buildModelParams } from "@/entrypoints/shared/modelCatalog";
 
 const logger = createLogger("translation-service", "🌐");
 
@@ -437,17 +437,21 @@ export class TranslationService {
         prismMode,
       });
 
+      // 模型/提供商相关字段统一由 modelCatalog 决策（temperature 也在其中，
+      // Kimi 等不认 temperature 的提供商会自行省略，不要在这里再写一遍）。
       const requestBody: any = {
         model: config.model || DEFAULT_SETTINGS.model,
         messages: messagesPayload,
-        temperature:
-          params.temperature ??
-          config.temperature ??
-          DEFAULT_SETTINGS.temperature,
         stream: true,
-        thinking: thinkingEnabled
-          ? THINKING_CONFIG.ENABLED
-          : THINKING_CONFIG.DISABLED,
+        ...buildModelParams({
+          baseUrl: config.baseUrl || DEFAULT_SETTINGS.baseUrl,
+          model: config.model || DEFAULT_SETTINGS.model,
+          thinkingEnabled,
+          temperature:
+            params.temperature ??
+            config.temperature ??
+            DEFAULT_SETTINGS.temperature,
+        }),
       };
 
       timeoutGuard.startFetchHeadersTimeout();
