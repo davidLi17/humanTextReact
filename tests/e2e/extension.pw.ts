@@ -3,6 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import type { ChatSession } from "../../entrypoints/shared/chatTypes";
 
 interface RecordedModelRequest {
   authorization?: string;
@@ -276,65 +277,90 @@ test("真实选区经过 Content、Background 和本地 SSE 显示浮窗结果",
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
-test("真实长文首段完成后关闭并重开 Sidepanel，恢复后继续第二段", async ({ harness }) => {
+test("网页正文附加到当前会话，重开侧边栏后追问携带正文", async ({ harness }) => {
   const article = await harness.context.newPage();
   await article.goto(`${harness.server.baseUrl}/long-article`);
   const sidepanel = await harness.context.newPage();
+  // 在打开侧边栏前准备已有对话，验证附加操作保留用户当前上下文。
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const session: ChatSession = {
+    id: "ongoing-e2e-session",
+    title: "已有对话",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    messages: [
+      { id: "u1", role: "user", content: "之前的问题：如何改进交付？", createdAt: Date.now(), status: "completed" },
+      { id: "a1", role: "assistant", content: "之前的回答：先收集用户反馈。", createdAt: Date.now(), status: "completed" },
+    ],
+  };
+  await sidepanel.evaluate(async (session) => {
+    await (globalThis as any).chrome.storage.local.set({
+      sidepanel_chat_sessions: [session],
+      sidepanel_active_session_id: session.id,
+    });
+  }, session);
   await sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await expect(sidepanel.getByText(session.messages[0].content, { exact: true })).toBeVisible();
   const readButton = sidepanel.getByRole("button", { name: /通读当前网页/ }).first();
   await expect(readButton).toBeEnabled();
 
+  const readSessions = (page: import("@playwright/test").Page): Promise<ChatSession[]> =>
+    page.evaluate(async () => {
+      const stored = await (globalThis as any).chrome.storage.local.get("sidepanel_chat_sessions");
+      return stored.sidepanel_chat_sessions || [];
+    });
   await article.bringToFront();
   await readButton.evaluate((element) => (element as HTMLButtonElement).click());
-  await expect(sidepanel.getByText("本地长文首段结果")).toBeVisible();
-  const continueButton = sidepanel.getByRole("button", {
-    name: /继续解读剩余部分（第 2 段）/,
-  });
-  await expect(continueButton).toBeVisible();
-  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
-  await expect
-    .poll(() =>
-      sidepanel.evaluate(async () => {
-        const chromeApi = (globalThis as any).chrome;
-        const stored = await chromeApi.storage.local.get(
-          "sidepanel_web_reading_progress_v1"
-        );
-        return JSON.stringify(stored.sidepanel_web_reading_progress_v1 || null);
-      })
-    )
-    .toContain('"segmentIndex":2');
+  await expect.poll(async () => (await readSessions(sidepanel))[0]?.messages.length).toBe(3);
+  const attachedSessions = await readSessions(sidepanel);
+  expect(attachedSessions).toHaveLength(1);
+  expect(attachedSessions[0].id).toBe(session.id);
+  expect(attachedSessions[0].title).toBe(session.title);
+  expect(attachedSessions[0].messages.slice(0, 2)).toEqual(session.messages);
+  const card = attachedSessions[0].messages[2];
+  expect(card.role).toBe("user");
+  expect(card.status).toBe("completed");
+  expect(card.pageMeta?.contextOnly).toBe(true);
+  expect(card.pageMeta?.url).toBe(`${harness.server.baseUrl}/long-article`);
+  expect(card.pageMeta?.sourceContent).toContain("第 1 段阶段三长文正文");
+  expect(harness.server.modelRequests).toHaveLength(0);
+
+  // 等待明确的去重反馈，避免在异步提取结束前检查消息数量。
+  await expect(readButton).toBeEnabled();
+  await readButton.evaluate((element) => (element as HTMLButtonElement).click());
+  await expect(sidepanel.getByText("该网页正文已在当前对话中，无需重复附加", { exact: true })).toBeVisible();
+  expect(await readSessions(sidepanel)).toEqual(attachedSessions);
+  expect(harness.server.modelRequests).toHaveLength(0);
 
   await sidepanel.close();
   const restoredSidepanel = await harness.context.newPage();
-  await restoredSidepanel.goto(
-    `chrome-extension://${harness.extensionId}/sidepanel.html`
-  );
-  await expect(restoredSidepanel.getByText("本地长文首段结果")).toBeVisible();
-  const restoredContinueButton = restoredSidepanel.getByRole("button", {
-    name: /继续解读剩余部分（第 2 段）/,
-  });
-  await expect(restoredContinueButton).toBeVisible();
+  await restoredSidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await expect(restoredSidepanel.getByText(session.messages[0].content, { exact: true })).toBeVisible();
+  expect(await readSessions(restoredSidepanel)).toEqual(attachedSessions);
+  expect(harness.server.modelRequests).toHaveLength(0);
 
-  await article.bringToFront();
-  await restoredContinueButton.evaluate((element) =>
-    (element as HTMLButtonElement).click()
+  const question = "结合网页正文，给出一个改进交付的建议。";
+  await restoredSidepanel.getByPlaceholder("输入追问、黑话术语或指令", { exact: false }).fill(question);
+  await restoredSidepanel.getByRole("button", { name: "发送", exact: true }).click();
+  await expect(restoredSidepanel.getByText("本地长文首段结果", { exact: true })).toBeVisible();
+  expect(harness.server.modelRequests).toHaveLength(1);
+  const request = harness.server.modelRequests[0];
+  expect(request.authorization).toBe("Bearer fixture-only-key");
+  const messages = request.body.messages;
+  expect(messages.at(-1)).toMatchObject({ role: "user", content: question });
+  const history = JSON.stringify(messages);
+  expect(history).toContain(session.messages[0].content);
+  expect(history).toContain(session.messages[1].content);
+  const pageContext = messages.find((message: { content: string }) =>
+    typeof message.content === "string" && message.content.includes("【网页正文内容】")
   );
-  await expect(restoredSidepanel.getByText("本地长文第二段结果")).toBeVisible();
-  await expect.poll(() => harness.server.modelRequests.length).toBe(2);
-  const firstUserContent = harness.server.modelRequests[0].body.messages.at(-1)
-    .content as string;
-  const secondUserContent = harness.server.modelRequests[1].body.messages.at(-1)
-    .content as string;
-  expect(firstUserContent).not.toContain("【续读进度】");
-  expect(secondUserContent).toContain("【续读进度】: 第 2 段");
-  expect(secondUserContent).toContain("【本段正文内容】");
-  expect(secondUserContent).not.toBe(firstUserContent);
-  const secondSegmentMarker = secondUserContent.match(
-    /第 \d+ 段阶段三长文正文/
-  )?.[0];
-  expect(secondSegmentMarker).toBeDefined();
-  expect(firstUserContent).not.toContain(secondSegmentMarker);
-  await expect(restoredSidepanel.getByText(/已读至第 2 段/)).toBeVisible();
+  expect(pageContext).toBeDefined();
+  expect(pageContext.content).toContain(card.pageMeta!.sourceContent);
+  expect(pageContext.content).toContain("以上网页正文已作为背景资料附加到本次对话");
+  expect(pageContext.content).not.toContain("请按照系统提示词的四个板块");
+  const finalSessions = await readSessions(restoredSidepanel);
+  expect(finalSessions).toHaveLength(1);
+  expect(finalSessions[0].id).toBe(session.id);
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
