@@ -278,7 +278,7 @@ Linux 或 CI 首次安装使用 `bunx playwright install --with-deps chromium`�
 
 仓库没有 ESLint / Prettier / Biome 配置文件，当前的质量闸门只有
 `tsc --noEmit`（`bun run compile`，别名 `bun run typecheck`）与 `bun test`。
-版本号 `1.5.0` 硬编码在 `wxt.config.ts`（决定进包 manifest 的版本）和
+版本号 `1.5.3` 硬编码在 `wxt.config.ts`（决定进包 manifest 的版本）和
 `package.json`（决定 zip 文件名）两处，发版时需要同时修改。项目根目录
 `.bun-version` 里的 `1.4.0` 是 Bun 运行时的版本号，与扩展版本号无关。
 

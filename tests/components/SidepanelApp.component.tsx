@@ -102,7 +102,7 @@ function createBrowserMock(options: BrowserMockOptions = {}) {
         return { success: true };
       },
       async openOptionsPage() {},
-      getManifest: () => ({ version: "1.5.0" }),
+      getManifest: () => ({ version: "1.5.3" }),
     },
     storage: {
       local: createStorageArea(localStore, true),

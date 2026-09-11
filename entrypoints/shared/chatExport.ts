@@ -161,7 +161,7 @@ export function exportSessionAsJson(session: ChatSession | undefined): string {
     version:
       typeof browser !== "undefined" && browser?.runtime?.getManifest?.()?.version
         ? browser.runtime.getManifest().version
-        : "1.5.0",
+        : "1.5.3",
     appName: "人话翻译器",
     exportTime: new Date().toISOString(),
     session,

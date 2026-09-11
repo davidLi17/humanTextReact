@@ -8,7 +8,7 @@
 - **技术栈**: React 19 + TypeScript + WXT 0.20.6 + Vite
 - **包管理器**: Bun（项目级默认，见 AGENTS.md，勿引入 npm / pnpm / yarn）
 - **扩展类型**: Chrome Extension MV3（`minimum_chrome_version: "141"`）
-- **版本**: 1.5.0（`wxt.config.ts` 与 `package.json` 各有一处，含义不同：前者决定生成的 manifest 版本号，后者决定 zip 包名）
+- **版本**: 1.5.3（`wxt.config.ts` 与 `package.json` 各有一处，含义不同：前者决定生成的 manifest 版本号，后者决定 zip 包名）
 - **开发时间**: 2025年8月至今（首个提交为 2025-08-25）
 
 ## 系统架构
@@ -161,7 +161,7 @@ export default defineConfig({
   modules: ["@wxt-dev/module-react"],
   manifest: {
     name: "人话翻译器",
-    version: "1.5.0",              // 决定生成 manifest 的版本号
+    version: "1.5.3",              // 决定生成 manifest 的版本号
     minimum_chrome_version: "141",
     permissions: ["contextMenus", "storage", "activeTab", "tabs", "sidePanel"],
     commands: {                     // Alt+D 翻译选中文本；Alt+S 显示/隐藏侧边栏
