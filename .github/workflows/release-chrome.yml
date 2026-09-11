@@ -103,6 +103,36 @@ jobs:
         run: |
           bun run .github/scripts/cws-auth.ts
 
+      # 商店同一时间只允许一个版本处于审核状态。撞上时上传会返回 HTTP 400
+      # NOT_UPDATEABLE「You may not edit or publish an item that is in review.」，
+      # 表现为 curl 退出码 22 加一坨 JSON，翻日志才知道发生了什么。
+      # 这里提前查一次状态，把它变成一句能看懂的话。
+      - name: Check store state before upload
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          API_BASE="https://chromewebstore.googleapis.com"
+          ITEM="publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}"
+
+          # 查询本身失败不阻断发布（可能只是瞬时网络问题），由上传步骤兜底。
+          if ! curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            "${API_BASE}/v2/${ITEM}:fetchStatus" > /tmp/cws-preflight.json; then
+            echo "::warning::无法查询商店状态，跳过预检（不影响后续上传）"
+            exit 0
+          fi
+
+          STATE="$(jq -r '.submittedItemRevisionStatus.state // empty' /tmp/cws-preflight.json)"
+          echo "submittedItemRevisionStatus.state = ${STATE:-（无已提交版本）}"
+
+          if [[ "$STATE" == "PENDING_REVIEW" ]]; then
+            echo "::error::商店里已有版本正在审核中（PENDING_REVIEW），本次无法上传。"
+            echo "::error::Chrome Web Store 同一时间只允许一个版本处于审核状态。"
+            echo "::error::处理方式：等上一个版本审核结束后，在 Actions 页面点 Re-run jobs 重跑本次运行（无需重新打 tag）。"
+            exit 1
+          fi
+
       - name: Upload package to Chrome Web Store
         id: upload
         env:
@@ -113,12 +143,24 @@ jobs:
           API_BASE="https://chromewebstore.googleapis.com"
           ITEM="publishers/${CWS_PUBLISHER_ID}/items/${CWS_EXTENSION_ID}"
 
-          curl --fail-with-body --silent --show-error \
+          # 预检与上传之间存在竞态（审核可能刚好在这一刻开始），
+          # 因此这里同样把 NOT_UPDATEABLE 翻译成人话，而不是只留下 curl 退出码。
+          if ! curl --fail-with-body --silent --show-error \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -X POST \
             -T "$ZIP_PATH" \
             "${API_BASE}/upload/v2/${ITEM}:upload" \
-            | tee /tmp/cws-upload.json
+            > /tmp/cws-upload.json; then
+            echo "::error::上传失败，商店返回：$(jq -r '.error.message // "（无法解析响应体）"' /tmp/cws-upload.json 2>/dev/null || echo '（无法解析响应体）')"
+            if jq -e '[.error.details[]?.reason] | index("NOT_UPDATEABLE")' /tmp/cws-upload.json > /dev/null 2>&1; then
+              echo "::error::原因：该条目有版本正在审核中，商店不允许同时上传新版本。请等审核结束后重跑本次运行。"
+            fi
+            echo "--- 完整响应体 ---"
+            cat /tmp/cws-upload.json
+            exit 1
+          fi
+
+          cat /tmp/cws-upload.json
 
           STATE="$(jq -r '.uploadState // empty' /tmp/cws-upload.json)"
           echo "Initial upload state: ${STATE:-unknown}"
