@@ -90,7 +90,7 @@ jobs:
         run: bun run test:e2e:built
 
       - name: Keep release zip as workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: human-language-translator-${{ steps.package.outputs.version }}-chrome
           path: ${{ steps.package.outputs.zip_path }}
