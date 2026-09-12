@@ -62,6 +62,12 @@ export function getSelectedTextFromPage(): string {
   return "";
 }
 
+function isJargonEditorInputTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  const input = element?.closest?.("input, textarea");
+  return Boolean(input?.closest?.(".translator-jargon-editor"));
+}
+
 /**
  * 在 Content Script 注入层初始化快捷键监听（双通道保活机制）
  */
@@ -78,6 +84,8 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
   });
 
   const handleKeyDown = async (e: KeyboardEvent) => {
+    if (isJargonEditorInputTarget(e.target)) return;
+
     const now = Date.now();
 
     // 1. 匹配 Alt/Option+D：翻译选中文本

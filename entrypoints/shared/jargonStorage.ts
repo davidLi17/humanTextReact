@@ -45,6 +45,12 @@ function cleanOptionalText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** 输入层保留显式空串，让编辑表单可以清除已有来源字段。 */
+function preserveOptionalText(value: unknown): string | undefined {
+  if (value === "") return "";
+  return cleanOptionalText(value);
+}
+
 function cleanTags(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return Array.from(
@@ -189,8 +195,8 @@ function normalizeInput(itemData: JargonInput): Omit<JargonItem, "id" | "created
       typeof itemData.isStarred === "boolean"
         ? itemData.isStarred
         : Boolean(itemData.starred),
-    sourceUrl: cleanOptionalText(itemData.sourceUrl),
-    sourceContext: cleanOptionalText(itemData.sourceContext),
+    sourceUrl: preserveOptionalText(itemData.sourceUrl),
+    sourceContext: preserveOptionalText(itemData.sourceContext),
   };
 }
 

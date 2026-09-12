@@ -40,6 +40,7 @@ import {
   getPrismCopyText,
   parsePrismTranslation,
 } from "@/entrypoints/shared/prismParser";
+import { createJargonDraft } from "@/entrypoints/shared/jargonDraft";
 
 const logger = createLogger("content-popup", "🔽"); // 弹窗事件处理器
 
@@ -85,7 +86,10 @@ export class PopupManager {
   // 当前弹窗对应的划词原文，用于失败后重试
   private lastSelectionText = "";
   private lastSelectionContext: SelectionContext | undefined;
+  private immutableSelectionContext: SelectionContext | undefined;
+  private immutableFallbackSourceUrl: string | undefined;
   private deferredStartInProgress = false;
+  private jargonSaveInProgress = false;
   // 三棱镜状态
   private currentPrismTab: PrismTabKey = "vernacular";
   private lastRawContent = "";
@@ -100,6 +104,10 @@ export class PopupManager {
   private fontScaleNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly fontScaleController: FontScaleController;
   private readonly handleFontScaleKeyDown = (event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.(".translator-jargon-editor input, .translator-jargon-editor textarea")) {
+      return;
+    }
     handleScopedFontScaleShortcut(
       event,
       this.currentPopup,
@@ -172,9 +180,21 @@ export class PopupManager {
       selectionContext,
       selection
     );
+    const fallbackSourceUrl = getSafeHttpUrl(
+      typeof window !== "undefined" ? window.location.href : undefined
+    );
+    const immutableSelectionContext = normalizedContext
+      ? {
+          selectedText: normalizedContext.selectedText,
+          paragraph: normalizedContext.paragraph,
+          ...(normalizedContext.source
+            ? { source: { ...normalizedContext.source } }
+            : {}),
+        }
+      : undefined;
     const popup = this.createPopupElement(
       selection,
-      normalizedContext,
+      immutableSelectionContext,
       deferTranslation
     );
     this.currentPopup = popup;
@@ -182,7 +202,9 @@ export class PopupManager {
     this.allowLegacyMessages = allowLegacyMessages;
     this.requestFinished = false;
     this.lastSelectionText = selection;
-    this.lastSelectionContext = normalizedContext;
+    this.lastSelectionContext = immutableSelectionContext;
+    this.immutableSelectionContext = immutableSelectionContext;
+    this.immutableFallbackSourceUrl = fallbackSourceUrl;
     this.deferredStartInProgress = false;
 
     // 将弹窗添加到页面中
@@ -305,7 +327,10 @@ export class PopupManager {
     this.requestFinished = false;
     this.lastSelectionText = "";
     this.lastSelectionContext = undefined;
+    this.immutableSelectionContext = undefined;
+    this.immutableFallbackSourceUrl = undefined;
     this.deferredStartInProgress = false;
+    this.jargonSaveInProgress = false;
     this.currentPrismTab = "vernacular";
     this.lastRawContent = "";
     this.lastPrismResult = null;
@@ -380,6 +405,7 @@ export class PopupManager {
             class="translator-vault-btn"
             title="存入黑话生词本"
             aria-label="存入生词本"
+            disabled
           >
             ⭐ 收藏
           </button>
@@ -697,39 +723,24 @@ export class PopupManager {
         }
       });
 
-    // 收藏到生词本按钮点击事件
+    // 收藏到生词本按钮点击事件：先打开可编辑草稿，保存动作由表单显式触发。
     popup
       .querySelector(".translator-vault-btn")
-      ?.addEventListener("click", async () => {
-        const originalText =
-          popup.querySelector(".translator-text")?.textContent;
-        const translatedText = popup.querySelector(
-          ".translator-translated-text"
-        )?.textContent;
-        const vaultBtn = popup.querySelector(
-          ".translator-vault-btn"
-        ) as HTMLButtonElement | null;
-
-        if (originalText && translatedText && vaultBtn) {
-          try {
-            vaultBtn.textContent = "保存中...";
-            await browser.runtime.sendMessage({
-              action: MESSAGE_TYPES.SAVE_JARGON_ITEM,
-              item: {
-                term: originalText.slice(0, 30).trim(),
-                explanation: translatedText.trim(),
-                category: "通用",
-              },
-            });
-            vaultBtn.textContent = "已收藏 ✓";
-            setTimeout(() => {
-              if (vaultBtn) vaultBtn.textContent = "⭐ 收藏";
-            }, 2000);
-          } catch (error) {
-            logger.error("存入生词本失败:", error);
-            if (vaultBtn) vaultBtn.textContent = "⭐ 收藏";
-          }
+      ?.addEventListener("click", () => {
+        if (
+          this.jargonSaveInProgress ||
+          !this.requestFinished ||
+          !this.lastRawContent.trim()
+        ) {
+          return;
         }
+        const draft = createJargonDraft({
+          rawTerm: this.lastSelectionText,
+          rawExplanation: this.lastRawContent,
+          selectionContext: this.immutableSelectionContext,
+          sourceUrl: this.immutableFallbackSourceUrl,
+        });
+        this.openJargonSaveEditor(popup, draft);
       });
 
     // 监听三棱镜 Tab 点击
@@ -791,6 +802,184 @@ export class PopupManager {
           logger.error("复制译文失败:", error);
         }
       }
+    });
+  }
+
+  private setVaultAvailability(available: boolean): void {
+    const button = this.currentPopup?.querySelector(
+      ".translator-vault-btn"
+    ) as HTMLButtonElement | null;
+    if (!button) return;
+    button.disabled = !available || this.jargonSaveInProgress;
+  }
+
+  private openJargonSaveEditor(
+    popup: HTMLElement,
+    draft: ReturnType<typeof createJargonDraft>
+  ): void {
+    if (popup !== this.currentPopup || popup.querySelector(".translator-jargon-editor")) {
+      return;
+    }
+
+    const editor = document.createElement("form");
+    editor.className = "translator-jargon-editor";
+    editor.setAttribute("data-testid", "translator-jargon-editor");
+    editor.innerHTML = `
+      <div class="translator-jargon-editor-title">保存到生词本</div>
+      <div class="translator-jargon-explanation-source" data-testid="translator-jargon-explanation-source"></div>
+      <label class="translator-jargon-field">
+        <span>术语</span>
+        <input name="term" aria-label="术语" required />
+      </label>
+      <label class="translator-jargon-field">
+        <span>人话释义</span>
+        <textarea name="explanation" aria-label="人话释义" rows="5" required></textarea>
+      </label>
+      <label class="translator-jargon-field">
+        <span>原句或提问</span>
+        <textarea name="sourceContext" aria-label="原句或提问" rows="3"></textarea>
+      </label>
+      <label class="translator-jargon-field">
+        <span>来源链接</span>
+        <input name="sourceUrl" aria-label="来源链接" type="text" inputmode="url" />
+      </label>
+      <div class="translator-jargon-editor-error" role="alert" aria-live="polite"></div>
+      <div class="translator-jargon-editor-actions">
+        <button type="button" class="translator-jargon-cancel-btn" title="取消收藏编辑">取消</button>
+        <button type="submit" class="translator-jargon-save-btn" title="保存到生词本">保存到生词本</button>
+      </div>
+    `;
+
+    const termInput = editor.querySelector("[name=term]") as HTMLInputElement;
+    const explanationInput = editor.querySelector(
+      "[name=explanation]"
+    ) as HTMLTextAreaElement;
+    const sourceContextInput = editor.querySelector(
+      "[name=sourceContext]"
+    ) as HTMLTextAreaElement;
+    const sourceUrlInput = editor.querySelector(
+      "[name=sourceUrl]"
+    ) as HTMLInputElement;
+    const errorEl = editor.querySelector(
+      ".translator-jargon-editor-error"
+    ) as HTMLElement;
+    const explanationSourceEl = editor.querySelector(
+      ".translator-jargon-explanation-source"
+    ) as HTMLElement;
+    const saveButton = editor.querySelector(
+      ".translator-jargon-save-btn"
+    ) as HTMLButtonElement;
+    const cancelButton = editor.querySelector(
+      ".translator-jargon-cancel-btn"
+    ) as HTMLButtonElement;
+    termInput.value = draft.item.term;
+    explanationInput.value = draft.item.explanation;
+    sourceContextInput.value = draft.item.sourceContext || "";
+    sourceUrlInput.value = draft.item.sourceUrl || "";
+    explanationSourceEl.textContent =
+      draft.explanationSource === "vernacular"
+        ? "已选用直白人话，可按自己的理解调整。"
+        : "当前解释来自完整原译文，可按自己的理解调整。";
+
+    const content = popup.querySelector(".translator-content") as HTMLElement | null;
+    const footer = popup.querySelector(
+      ".translator-footer-actions"
+    ) as HTMLElement | null;
+    const vaultButton = popup.querySelector(
+      ".translator-vault-btn"
+    ) as HTMLButtonElement | null;
+    const sourcePopup = popup;
+    const sourceRequestId = this.currentRequestId;
+    const snapshotItem = { ...draft.item };
+    popup.insertBefore(editor, content || null);
+    if (content) content.style.display = "none";
+    if (footer) footer.style.display = "none";
+    vaultButton?.setAttribute("aria-expanded", "true");
+
+    const closeEditor = () => {
+      editor.remove();
+      if (content) content.style.display = "";
+      if (footer) footer.style.display = "";
+      if (vaultButton) {
+        vaultButton.removeAttribute("aria-expanded");
+        this.setVaultAvailability(
+          this.requestFinished && Boolean(this.lastRawContent.trim())
+        );
+      }
+    };
+    cancelButton.addEventListener("click", closeEditor);
+    editor.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (this.jargonSaveInProgress) return;
+
+      const term = termInput.value.trim();
+      const explanation = explanationInput.value.trim();
+      const sourceUrl = sourceUrlInput.value.trim();
+      if (!term || !explanation) {
+        errorEl.textContent = "术语和人话释义不能为空";
+        return;
+      }
+      if (sourceUrl && !getSafeHttpUrl(sourceUrl)) {
+        errorEl.textContent = "来源链接只支持 http(s) 地址";
+        return;
+      }
+
+      this.jargonSaveInProgress = true;
+      saveButton.disabled = true;
+      cancelButton.disabled = true;
+      termInput.disabled = true;
+      explanationInput.disabled = true;
+      sourceContextInput.disabled = true;
+      sourceUrlInput.disabled = true;
+      errorEl.textContent = "保存中...";
+      const item = {
+        ...snapshotItem,
+        term,
+        explanation,
+        sourceContext: sourceContextInput.value.trim(),
+        sourceUrl,
+      };
+      void browser.runtime
+        .sendMessage({ action: MESSAGE_TYPES.SAVE_JARGON_ITEM, item })
+        .then((response: { success?: boolean; error?: string } | undefined) => {
+          if (response?.success !== true) {
+            throw new Error(response?.error || "保存生词本失败");
+          }
+          if (
+            this.currentPopup !== sourcePopup ||
+            this.currentRequestId !== sourceRequestId ||
+            !sourcePopup.querySelector(".translator-jargon-editor")
+          ) {
+            return;
+          }
+          closeEditor();
+          if (vaultButton) {
+            vaultButton.textContent = "已收藏 ✓";
+            vaultButton.disabled = true;
+          }
+        })
+        .catch((error: unknown) => {
+          logger.error("存入生词本失败:", error);
+          if (
+            this.currentPopup !== sourcePopup ||
+            this.currentRequestId !== sourceRequestId
+          ) {
+            return;
+          }
+          errorEl.textContent =
+            error instanceof Error ? error.message : "保存生词本失败，请重试";
+          saveButton.disabled = false;
+          cancelButton.disabled = false;
+          termInput.disabled = false;
+          explanationInput.disabled = false;
+          sourceContextInput.disabled = false;
+          sourceUrlInput.disabled = false;
+        })
+        .finally(() => {
+          if (this.currentPopup === sourcePopup && this.currentRequestId === sourceRequestId) {
+            this.jargonSaveInProgress = false;
+          }
+        });
     });
   }
 
@@ -1266,6 +1455,10 @@ export class PopupManager {
       logger.log("翻译完成");
       elements.loadingEl.style.display = "none";
     }
+
+    this.setVaultAvailability(
+      Boolean(request.done && this.lastRawContent.trim())
+    );
 
     // 如果用户没有手动滚动，则自动滚动到底部
     if (!this.userHasScrolled && elements.contentEl) {

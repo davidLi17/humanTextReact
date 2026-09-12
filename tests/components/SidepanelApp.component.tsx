@@ -16,6 +16,7 @@ import {
   createAttachedPageMeta,
 } from "../../entrypoints/shared/pageContext";
 import { prepareWebReadingOverviewRequest } from "../../entrypoints/shared/webReadingOverview";
+import { JARGON_STORAGE_KEY } from "../../entrypoints/shared/jargonTypes";
 import {
   preserveGlobals,
   setTestGlobal,
@@ -33,6 +34,8 @@ interface BrowserMockOptions {
   tabExtractResponse?: unknown;
   /** 覆盖后台响应，供清理请求等异步边界测试使用。 */
   runtimeSendMessage?: (message: any) => unknown | Promise<unknown>;
+  /** 模拟 storage.local.set 的真实失败边界，回调抛错时不写入。 */
+  localStorageSet?: (items: Record<string, unknown>) => unknown | Promise<unknown>;
 }
 
 function selectStoredValues(
@@ -86,6 +89,9 @@ function createBrowserMock(options: BrowserMockOptions = {}) {
       selectStoredValues(store, keys),
     set: async (items: Record<string, unknown>) => {
       const snapshot = structuredClone(items);
+      if (record && options.localStorageSet) {
+        await options.localStorageSet(snapshot);
+      }
       Object.assign(store, snapshot);
       if (record) localWrites.push(snapshot);
     },
@@ -303,6 +309,52 @@ function createDeferred<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+function createJargonSourceSession() {
+  const sourceContext = {
+    selectedText: "幂等性",
+    paragraph: "支付回调可能重复到达，因此接口需要保证幂等性，避免重复扣款。",
+    source: {
+      title: "支付接口设计",
+      url: "https://docs.example.com/payment/idempotency",
+    },
+  };
+  return {
+    sourceContext,
+    session: {
+      id: "jargon-source-session",
+      title: "支付术语",
+      createdAt: 100,
+      updatedAt: 300,
+      messages: [
+        {
+          id: "jargon-question",
+          role: "user" as const,
+          content: "幂等性",
+          selectionContext: sourceContext,
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "jargon-answer",
+          role: "assistant" as const,
+          content: [
+            "## 🍼 直白人话版",
+            "同一个请求执行多次，最终效果和执行一次一样。",
+            "",
+            "## 👔 向上汇报版",
+            "通过幂等机制提升资金链路稳健性。",
+            "",
+            "## 🔪 犀利真相版",
+            "别让重试把钱扣两遍。",
+          ].join("\n"),
+          createdAt: 200,
+          status: "completed" as const,
+        },
+      ],
+    },
+  };
 }
 
 async function openAttachedPageDetails() {
@@ -1202,5 +1254,194 @@ describe("Sidepanel App 真实 React 交互", () => {
       ).toBe(true);
     });
     expect(getTranslateMessages(mock)).toHaveLength(0);
+  });
+
+  test("侧栏收藏预填选区来源与直白解释，编辑后写入生词本", async () => {
+    const { session, sourceContext } = createJargonSourceSession();
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    fireEvent.click(await screen.findByTitle("存入黑话生词本"));
+
+    expect(await screen.findByRole("dialog", { name: "保存到生词本" })).toBeTruthy();
+    expect((screen.getByLabelText("术语") as HTMLInputElement).value).toBe("幂等性");
+    expect((screen.getByLabelText("人话释义") as HTMLTextAreaElement).value).toBe(
+      "同一个请求执行多次，最终效果和执行一次一样。"
+    );
+    expect(screen.queryByDisplayValue(/资金链路稳健性/)).toBeNull();
+    expect((screen.getByLabelText("原句或提问") as HTMLTextAreaElement).value).toBe(
+      sourceContext.paragraph
+    );
+    expect((screen.getByLabelText("来源链接") as HTMLInputElement).value).toBe(
+      sourceContext.source.url
+    );
+
+    fireEvent.change(screen.getByLabelText("术语"), {
+      target: { value: "支付幂等" },
+    });
+    fireEvent.change(screen.getByLabelText("人话释义"), {
+      target: { value: "重复请求只产生一次扣款结果。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存到生词本" }));
+
+    await waitFor(() => {
+      expect((mock.localStore[JARGON_STORAGE_KEY] as any[])?.[0]?.term).toBe(
+        "支付幂等"
+      );
+    });
+    const saved = (mock.localStore[JARGON_STORAGE_KEY] as any[])[0];
+    expect(saved).toMatchObject({
+      term: "支付幂等",
+      explanation: "重复请求只产生一次扣款结果。",
+      sourceContext: sourceContext.paragraph,
+      sourceUrl: sourceContext.source.url,
+      isStarred: true,
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+  });
+
+  test("取消收藏不写存储，保存失败时保留已编辑内容并可重试", async () => {
+    const { session } = createJargonSourceSession();
+    let failJargonWrite = false;
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+      localStorageSet(items) {
+        if (failJargonWrite && Object.hasOwn(items, JARGON_STORAGE_KEY)) {
+          throw new Error("测试存储写入失败");
+        }
+      },
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const openSaveDialog = async () => {
+      fireEvent.click(await screen.findByTitle("存入黑话生词本"));
+      await screen.findByRole("dialog", { name: "保存到生词本" });
+    };
+
+    await openSaveDialog();
+    fireEvent.change(screen.getByLabelText("术语"), {
+      target: { value: "不应保存的术语" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    expect(mock.localStore[JARGON_STORAGE_KEY]).toBeUndefined();
+
+    await openSaveDialog();
+    fireEvent.change(screen.getByLabelText("术语"), {
+      target: { value: "失败后仍保留" },
+    });
+    fireEvent.change(screen.getByLabelText("人话释义"), {
+      target: { value: "这段编辑不能因存储失败而消失。" },
+    });
+    failJargonWrite = true;
+    fireEvent.click(screen.getByRole("button", { name: "保存到生词本" }));
+
+    expect(await screen.findByText("测试存储写入失败")).toBeTruthy();
+    expect((screen.getByLabelText("术语") as HTMLInputElement).value).toBe(
+      "失败后仍保留"
+    );
+    expect((screen.getByLabelText("人话释义") as HTMLTextAreaElement).value).toBe(
+      "这段编辑不能因存储失败而消失。"
+    );
+    expect(mock.localStore[JARGON_STORAGE_KEY]).toBeUndefined();
+
+    failJargonWrite = false;
+    fireEvent.click(screen.getByRole("button", { name: "保存到生词本" }));
+    await waitFor(() => {
+      expect((mock.localStore[JARGON_STORAGE_KEY] as any[])?.[0]?.term).toBe(
+        "失败后仍保留"
+      );
+    });
+  });
+
+  test("生词本继续问创建新会话并预填完整上下文，主动发送前不请求模型", async () => {
+    const originalSession = createOngoingSession();
+    const mock = createBrowserMock({
+      sessions: [originalSession],
+      activeSessionId: originalSession.id,
+    });
+    const jargonItem = {
+      id: "saved-jargon",
+      term: "幂等性",
+      explanation: "同一个请求重复执行，结果保持一致。",
+      sourceContext: "支付回调重试时必须保证幂等性。",
+      sourceUrl: "https://docs.example.com/idempotency",
+      category: "通用",
+      tags: ["接口"],
+      isStarred: true,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    mock.localStore[JARGON_STORAGE_KEY] = [jargonItem];
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const composer = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(composer, { target: { value: "原会话未发送草稿" } });
+    fireEvent.click(screen.getByRole("button", { name: "切换到生词本" }));
+
+    expect(await screen.findByText(jargonItem.sourceContext, { exact: true })).toBeTruthy();
+    expect(screen.getByTitle("查看原文").getAttribute("href")).toBe(
+      jargonItem.sourceUrl
+    );
+    fireEvent.click(screen.getByTitle("继续问"));
+
+    const followUpDraft = (await screen.findByPlaceholderText(
+      /输入追问、黑话术语或指令/
+    )) as HTMLTextAreaElement;
+    expect(followUpDraft.value).toContain(`术语：${jargonItem.term}`);
+    expect(followUpDraft.value).toContain(`人话释义：${jargonItem.explanation}`);
+    expect(followUpDraft.value).toContain(`原句或提问：${jargonItem.sourceContext}`);
+    expect(followUpDraft.value).toContain(`来源链接：${jargonItem.sourceUrl}`);
+    const expectedFollowUpDraft = followUpDraft.value;
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const originalDrawerItem = screen
+      .getAllByTitle(originalSession.title)
+      .find((element) => element.closest(".drawer-item"))
+      ?.closest(".drawer-item") as HTMLElement;
+    fireEvent.click(originalDrawerItem);
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByPlaceholderText(
+            /输入追问、黑话术语或指令/
+          ) as HTMLTextAreaElement
+        ).value
+      ).toBe("原会话未发送草稿");
+    });
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const newDrawerItem = Array.from(
+      document.querySelectorAll<HTMLElement>(".drawer-item")
+    ).find(
+      (element) =>
+        element.querySelector(".item-title")?.textContent?.trim() === "新对话"
+    );
+    if (!newDrawerItem) throw new Error("未找到继续问新建的会话");
+    fireEvent.click(newDrawerItem);
+    await waitFor(() => {
+      expect(
+        (
+          screen.getByPlaceholderText(
+            /输入追问、黑话术语或指令/
+          ) as HTMLTextAreaElement
+        ).value
+      ).toBe(expectedFollowUpDraft);
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const [request] = getTranslateMessages(mock);
+    expect(request.messages.at(-1).content).toContain(`术语：${jargonItem.term}`);
+    expect(request.messages.at(-1).content).toContain(jargonItem.explanation);
+    expect(request.messages.at(-1).content).toContain(jargonItem.sourceContext);
+    expect(request.messages.at(-1).content).toContain(jargonItem.sourceUrl);
   });
 });

@@ -74,9 +74,15 @@ import {
   getActiveTab,
 } from "@/entrypoints/shared/sidepanelUtils";
 import {
-  inferJargonDetails,
   saveJargonItem,
+  type JargonInput,
+  type JargonItem,
 } from "@/entrypoints/shared/jargonStorage";
+import {
+  buildJargonFollowUpPrompt,
+  createJargonDraftFromMessage,
+  type JargonSaveDraft,
+} from "@/entrypoints/shared/jargonDraft";
 import {
   downloadSessionJsonFile,
   downloadSessionMarkdownFile,
@@ -92,6 +98,7 @@ import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import JargonVaultPanel from "./components/JargonVaultPanel";
+import JargonSaveDialog from "./components/JargonSaveDialog";
 import PrismResultTabs from "./components/PrismResultTabs";
 import PageContextCard from "./components/PageContextCard";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
@@ -273,6 +280,10 @@ export default function SidePanelApp() {
   const [savedVaultMessageIds, setSavedVaultMessageIds] = useState<Set<string>>(
     new Set()
   );
+  const [jargonSaveTarget, setJargonSaveTarget] = useState<{
+    messageId: string;
+    draft: JargonSaveDraft;
+  } | null>(null);
   // 全局 Toast 提示
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -2688,7 +2699,7 @@ export default function SidePanelApp() {
   };
 
   // 新建会话
-  const handleCreateNewSession = () => {
+  const handleCreateNewSession = (initialDraft?: string) => {
     if (isStreaming) {
       void handleStopGenerating();
     }
@@ -2697,13 +2708,24 @@ export default function SidePanelApp() {
     sessionsRef.current = updatedSessions;
     setSessions(updatedSessions);
     void saveSessionsToStorage(updatedSessions);
+    if (initialDraft !== undefined) {
+      saveComposerDraft(composerDraftsRef.current, fresh.id, {
+        inputText: initialDraft,
+        images: [],
+        selectionContext: undefined,
+      });
+    }
     activateSessionWithDraft(fresh.id);
     void saveActiveSessionId(fresh.id);
     setActiveView("chat");
     setShowDrawer(false);
     setExtractError(null);
-    inputRef.current?.focus();
-    showToast("已新建对话");
+    setTimeout(() => inputRef.current?.focus(), 0);
+    showToast(
+      initialDraft
+        ? "已新建会话并填入生词本上下文，确认后发送"
+        : "已新建对话"
+    );
   };
 
   // 删除会话
@@ -2832,56 +2854,41 @@ export default function SidePanelApp() {
     setShowExportMenu(false);
   };
 
-  // 存入黑话生词本
-  const handleSaveMessageToVault = async (
+  const handleOpenJargonSaveDialog = (
     message: ChatMessage,
     session?: ChatSession
   ) => {
     if (!message.content) return;
+    const draft = createJargonDraftFromMessage(message, session);
+    setJargonSaveTarget({
+      messageId: message.id,
+      draft: {
+        ...draft,
+        item: { ...draft.item, isStarred: true },
+      },
+    });
+  };
 
-    // 寻找上一条 user 消息作为黑话术语
-    const msgIdx =
-      session?.messages.findIndex((m) => m.id === message.id) ?? -1;
-    let term = "黑话词条";
-    let sourceUrl: string | undefined;
-
-    if (msgIdx > 0 && session) {
-      const prevUserMsg = session.messages[msgIdx - 1];
-      if (prevUserMsg && prevUserMsg.role === "user") {
-        if (prevUserMsg.pageMeta?.title) {
-          term = prevUserMsg.pageMeta.title;
-          sourceUrl = prevUserMsg.pageMeta.url;
-        } else {
-          term = prevUserMsg.content;
-        }
-      }
-    }
-
-    const inferred = inferJargonDetails(term, message.content, sourceUrl);
-    const sourceContext =
-      term.trim() !== inferred.term.trim() ? term.trim() : undefined;
-
+  const handleSaveJargonDraft = async (item: JargonInput) => {
+    if (!jargonSaveTarget) return;
     try {
-      await saveJargonItem({
-        term: inferred.term,
-        explanation: inferred.explanation,
-        analogy: inferred.analogy,
-        category: inferred.category,
-        tags: inferred.tags,
-        isStarred: true,
-        sourceUrl,
-        sourceContext,
-      });
+      const saved = await saveJargonItem({ ...item, isStarred: true });
 
       setSavedVaultMessageIds((prev) => {
         const next = new Set(prev);
-        next.add(message.id);
+        next.add(jargonSaveTarget.messageId);
         return next;
       });
-      showToast(`⭐ 已将 "${inferred.term}" 存入黑话生词本！`);
+      setJargonSaveTarget(null);
+      showToast(`⭐ 已将 "${saved.term}" 存入黑话生词本！`);
     } catch (err) {
       logger.error("存入生词本失败:", err);
+      throw err;
     }
+  };
+
+  const handleContinueAskingFromVault = (item: JargonItem) => {
+    handleCreateNewSession(buildJargonFollowUpPrompt(item));
   };
 
   // 处理剪贴板图片粘贴
@@ -3105,7 +3112,7 @@ export default function SidePanelApp() {
             type="button"
             className="icon-btn new-chat-btn"
             title="新建对话"
-            onClick={handleCreateNewSession}
+            onClick={() => handleCreateNewSession()}
           >
             <Add theme="outline" size="18" />
           </button>
@@ -3267,6 +3274,14 @@ export default function SidePanelApp() {
         </div>
       )}
 
+      {jargonSaveTarget && (
+        <JargonSaveDialog
+          draft={jargonSaveTarget.draft}
+          onCancel={() => setJargonSaveTarget(null)}
+          onSave={handleSaveJargonDraft}
+        />
+      )}
+
       {/* 顶部抽屉（包含对话历史与生词本双 Tab） */}
       {showDrawer && (
         <div className="drawer-overlay" onClick={() => setShowDrawer(false)}>
@@ -3301,7 +3316,7 @@ export default function SidePanelApp() {
                   <button
                     type="button"
                     className="new-session-cta"
-                    onClick={handleCreateNewSession}
+                    onClick={() => handleCreateNewSession()}
                   >
                     <Add theme="outline" size="14" />
                     <span>新建会话</span>
@@ -3419,7 +3434,10 @@ export default function SidePanelApp() {
 
       {/* 主视图展示：如果处于生词本视图，渲染 JargonVaultPanel */}
       {activeView === "vault" ? (
-        <JargonVaultPanel onSwitchToChat={() => setActiveView("chat")} />
+        <JargonVaultPanel
+          onSwitchToChat={() => setActiveView("chat")}
+          onContinueAsking={handleContinueAskingFromVault}
+        />
       ) : (
         <>
           {/* 消息对话主区域 */}
@@ -3794,8 +3812,9 @@ export default function SidePanelApp() {
                           type="button"
                           className="action-link-btn"
                           title="存入黑话生词本"
+                          disabled={isStreaming || !message.content}
                           onClick={() =>
-                            handleSaveMessageToVault(message, activeSession)
+                            handleOpenJargonSaveDialog(message, activeSession)
                           }
                         >
                           {savedVaultMessageIds.has(message.id) ? (

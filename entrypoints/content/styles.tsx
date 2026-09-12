@@ -126,6 +126,98 @@ export const POPUP_STYLES = /*css*/ `
     transform: translateY(-1px);
   }
 
+  .translator-popup .translator-vault-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .translator-jargon-editor {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    color: #1f2937;
+    font-size: calc(13px * var(--ht-font-scale, 1));
+  }
+
+  .translator-jargon-editor-title {
+    font-size: calc(15px * var(--ht-font-scale, 1));
+    font-weight: 650;
+    margin-bottom: 2px;
+  }
+
+  .translator-jargon-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .translator-jargon-field > span {
+    color: #4b5563;
+    font-size: calc(12px * var(--ht-font-scale, 1));
+    font-weight: 600;
+  }
+
+  .translator-jargon-field input,
+  .translator-jargon-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid rgba(107, 114, 128, 0.28);
+    border-radius: 7px;
+    background: #fff;
+    color: #111827;
+    padding: 8px 9px;
+    font: inherit;
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  .translator-jargon-field input:focus,
+  .translator-jargon-field textarea:focus {
+    outline: 2px solid rgba(79, 70, 229, 0.24);
+    border-color: #6366f1;
+  }
+
+  .translator-jargon-editor-error {
+    min-height: 1.4em;
+    color: #b91c1c;
+    line-height: 1.4;
+  }
+
+  .translator-jargon-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .translator-jargon-editor-actions button {
+    border-radius: 7px;
+    padding: 7px 12px;
+    border: 1px solid rgba(107, 114, 128, 0.28);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .translator-jargon-cancel-btn {
+    background: #fff;
+    color: #4b5563;
+  }
+
+  .translator-jargon-save-btn {
+    background: #4f46e5;
+    color: #fff;
+    border-color: #4f46e5 !important;
+  }
+
+  .translator-jargon-editor-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
   .translator-popup .translator-close-btn {
     cursor: pointer;
     padding: 6px;
@@ -588,6 +680,31 @@ export const POPUP_STYLES = /*css*/ `
     background: linear-gradient(135deg, #0f172a 0%, #172033 100%);
     color: #cbd5e1;
     border-left-color: #64748b;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-editor {
+    color: #e5e7eb;
+    background: #111827;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-editor-title,
+  .translator-popup[data-theme="dark"] .translator-jargon-explanation-source {
+    color: #f3f4f6;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-field > span {
+    color: #cbd5e1;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-field input,
+  .translator-popup[data-theme="dark"] .translator-jargon-field textarea {
+    background: #1f2937;
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #f8fafc;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-editor-error {
+    color: #fca5a5;
+  }
+  .translator-popup[data-theme="dark"] .translator-jargon-cancel-btn {
+    background: #1f2937;
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #cbd5e1;
   }
   .translator-popup[data-theme="dark"] .translator-close-btn,
   .translator-popup[data-theme="dark"] .translator-theme-trigger {

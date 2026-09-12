@@ -13,6 +13,7 @@ import {
   toggleStarJargon,
   updateJargonItem,
 } from "@/entrypoints/shared/jargonStorage";
+import { getSafeHttpUrl } from "@/entrypoints/shared/selectionContext";
 import { parseMarkdown } from "@/shared/utils/markdown";
 import {
   Add,
@@ -28,12 +29,15 @@ import {
   Tag,
   Tips,
   Upload,
+  LinkOne,
+  Topic,
 } from "@icon-park/react";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./JargonVaultPanel.less";
 
 interface JargonVaultPanelProps {
   onSwitchToChat?: () => void;
+  onContinueAsking?: (item: JargonItem) => void;
 }
 
 interface JargonFormData {
@@ -44,6 +48,8 @@ interface JargonFormData {
   category: JargonCategory;
   tagsString: string;
   isStarred: boolean;
+  sourceContext: string;
+  sourceUrl: string;
 }
 
 const INITIAL_FORM: JargonFormData = {
@@ -53,9 +59,14 @@ const INITIAL_FORM: JargonFormData = {
   category: "大厂黑话",
   tagsString: "",
   isStarred: false,
+  sourceContext: "",
+  sourceUrl: "",
 };
 
-export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelProps) {
+export default function JargonVaultPanel({
+  onSwitchToChat,
+  onContinueAsking,
+}: JargonVaultPanelProps) {
   const [items, setItems] = useState<JargonItem[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedCategory, setSelectedCategory] =
@@ -143,8 +154,12 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
       const explanationMatch = item.explanation.toLowerCase().includes(query);
       const analogyMatch = Boolean(item.analogy?.toLowerCase().includes(query));
       const tagsMatch = item.tags.some((t) => t.toLowerCase().includes(query));
+      const sourceMatch = Boolean(
+        item.sourceContext?.toLowerCase().includes(query) ||
+          item.sourceUrl?.toLowerCase().includes(query)
+      );
 
-      return termMatch || explanationMatch || analogyMatch || tagsMatch;
+      return termMatch || explanationMatch || analogyMatch || tagsMatch || sourceMatch;
     });
   }, [items, selectedCategory, searchQuery]);
 
@@ -207,6 +222,8 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
       category: item.category,
       tagsString: (item.tags || []).join(", "),
       isStarred: item.isStarred,
+      sourceContext: item.sourceContext || "",
+      sourceUrl: item.sourceUrl || "",
     });
     setFormError(null);
     setShowModal(true);
@@ -238,6 +255,8 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
           category: formData.category,
           tags,
           isStarred: formData.isStarred,
+          sourceContext: formData.sourceContext.trim() || undefined,
+          sourceUrl: formData.sourceUrl.trim() || undefined,
         });
         if (updated) {
           setItems((prev) =>
@@ -253,6 +272,8 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
           category: formData.category,
           tags,
           isStarred: formData.isStarred,
+          sourceContext: formData.sourceContext.trim() || undefined,
+          sourceUrl: formData.sourceUrl.trim() || undefined,
         });
         setItems((prev) => [saved, ...prev.filter((i) => i.id !== saved.id)]);
         showToast(`已添加 "${formData.term}" 到生词本`);
@@ -591,6 +612,29 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
                 />
               </div>
 
+              {(item.sourceContext || getSafeHttpUrl(item.sourceUrl)) && (
+                <div className="card-source-box">
+                  {item.sourceContext && (
+                    <div className="card-source-context">
+                      <span>原句或提问</span>
+                      <p>{item.sourceContext}</p>
+                    </div>
+                  )}
+                  {getSafeHttpUrl(item.sourceUrl) && (
+                    <a
+                      className="card-source-link"
+                      href={getSafeHttpUrl(item.sourceUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title="查看原文"
+                    >
+                      <LinkOne theme="outline" size="13" />
+                      <span>查看原文</span>
+                    </a>
+                  )}
+                </div>
+              )}
+
               {/* 卡片底部操作栏 */}
               <div className="card-footer-toolbar">
                 <button
@@ -611,6 +655,18 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
                     </>
                   )}
                 </button>
+
+                {onContinueAsking && (
+                  <button
+                    type="button"
+                    className="card-tool-btn"
+                    title="继续问"
+                    onClick={() => onContinueAsking(item)}
+                  >
+                    <Topic theme="outline" size="13" />
+                    <span>继续问</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -743,6 +799,38 @@ export default function JargonVaultPanel({ onSwitchToChat }: JargonVaultPanelPro
                     setFormData((prev) => ({
                       ...prev,
                       tagsString: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="form-row">
+                <label className="form-label">原句或提问（选填）</label>
+                <textarea
+                  className="form-textarea"
+                  rows={3}
+                  placeholder="保存这条解释对应的原句或提问..."
+                  value={formData.sourceContext}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      sourceContext: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="form-row">
+                <label className="form-label">来源链接（选填）</label>
+                <input
+                  type="url"
+                  className="form-input"
+                  placeholder="https://example.com/article"
+                  value={formData.sourceUrl}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      sourceUrl: e.target.value,
                     }))
                   }
                 />

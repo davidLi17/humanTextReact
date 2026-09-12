@@ -470,6 +470,47 @@
         }
       }
 
+      .card-source-box {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--color-bg-secondary);
+        border-left: 2px solid var(--color-border);
+
+        .card-source-context {
+          span {
+            color: var(--color-text-tertiary);
+            font-size: calc(10px * var(--ht-font-scale, 1));
+            font-weight: 600;
+          }
+
+          p {
+            margin: 3px 0 0;
+            color: var(--color-text-secondary);
+            font-size: calc(11px * var(--ht-font-scale, 1));
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+        }
+
+        .card-source-link {
+          display: inline-flex;
+          align-items: center;
+          align-self: flex-start;
+          gap: 4px;
+          color: var(--color-primary);
+          font-size: calc(11px * var(--ht-font-scale, 1));
+          text-decoration: none;
+
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+      }
+
       .card-footer-toolbar {
         display: flex;
         align-items: center;

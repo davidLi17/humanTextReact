@@ -83,21 +83,41 @@ describe("JargonVault 核心存储与管理", () => {
   });
 
   test("规范 JSON 可回导，并兼容 jargonList 包装", async () => {
-    await JargonVault.addJargon({
+    const saved = await JargonVault.addJargon({
       term: "复利",
       explanation: "收益继续参与下一轮增长。",
       category: "金融",
       starred: true,
+      sourceContext: "让收益继续参与下一轮增长。",
+      sourceUrl: "https://example.com/compound-interest",
+    });
+    await JargonVault.updateJargon(saved.id, {
+      explanation: "更新后的解释：收益会继续加入下一轮本金。",
     });
     const json = await JargonVault.exportJargonAsJson();
     const exported = JSON.parse(json);
     expect(exported.items[0].isStarred).toBe(true);
     expect(exported.items[0].starred).toBeUndefined();
+    expect(exported.items[0].explanation).toBe(
+      "更新后的解释：收益会继续加入下一轮本金。"
+    );
+    expect(exported.items[0].sourceContext).toBe("让收益继续参与下一轮增长。");
+    expect(exported.items[0].sourceUrl).toBe(
+      "https://example.com/compound-interest"
+    );
 
     await JargonVault.clearAll();
     const roundTrip = await importJargonItems(json);
     expect(roundTrip.success).toBe(true);
-    expect((await getJargonList())[0].term).toBe("复利");
+    const restored = (await getJargonList())[0];
+    expect(restored.term).toBe("复利");
+    expect(restored.explanation).toBe(
+      "更新后的解释：收益会继续加入下一轮本金。"
+    );
+    expect(restored.sourceContext).toBe("让收益继续参与下一轮增长。");
+    expect(restored.sourceUrl).toBe(
+      "https://example.com/compound-interest"
+    );
 
     const legacyWrapper = await importJargonItems({
       jargonList: [
@@ -329,6 +349,34 @@ describe("JargonVault 核心存储与管理", () => {
     expect(stored.isStarred).toBe(false);
     expect(stored.metaphor).toBeUndefined();
     expect(stored.starred).toBeUndefined();
+  });
+
+  test("合并同名词条时省略来源字段保留旧值，显式空串清除来源", async () => {
+    await JargonVault.addJargon({
+      term: "来源合并",
+      explanation: "测试来源字段的编辑语义。",
+      sourceUrl: "https://example.com/old",
+      sourceContext: "旧原句",
+    });
+
+    const kept = await JargonVault.addJargon({
+      term: "来源合并",
+      explanation: "更新后的解释。",
+    });
+    expect(kept.sourceUrl).toBe("https://example.com/old");
+    expect(kept.sourceContext).toBe("旧原句");
+
+    const cleared = await JargonVault.addJargon({
+      term: "来源合并",
+      explanation: "清除来源后的解释。",
+      sourceUrl: "",
+      sourceContext: "",
+    });
+    expect(cleared.sourceUrl).toBe("");
+    expect(cleared.sourceContext).toBe("");
+    const stored = await getJargonList();
+    expect(stored[0].sourceUrl).toBeUndefined();
+    expect(stored[0].sourceContext).toBeUndefined();
   });
 
   test("删除词条 (deleteJargon)", async () => {

@@ -24,6 +24,7 @@ interface ExtensionHarness {
 }
 
 const SELECTED_TEXT = "对齐颗粒度并形成增长飞轮";
+const VERNACULAR_EXPLANATION = "把合作细节统一好，再让增长持续循环起来。";
 
 function longArticleHtml() {
   const paragraphs = Array.from({ length: 560 }, (_, index) =>
@@ -91,7 +92,14 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
         ? "本地长文第二段结果"
         : serialized.includes("阶段三长文")
         ? "本地长文首段结果"
-        : "本地浮窗翻译结果";
+        : [
+            "### 🍼 直白人话版",
+            `本地浮窗翻译结果：${VERNACULAR_EXPLANATION}`,
+            "### 👔 向上汇报版",
+            "统一协同颗粒度并构建增长闭环。",
+            "### 🔪 犀利真相版",
+            "先把责任边界说清楚，再谈增长。",
+          ].join("\n");
 
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
@@ -155,6 +163,37 @@ async function configureExtension(
     await chromeApi.storage.local.set({ fontScalePercent: 100 });
   }, harness.server.baseUrl);
   await page.close();
+}
+
+async function patchExtensionSettings(
+  harness: Pick<ExtensionHarness, "context" | "extensionId">,
+  patch: Record<string, unknown>
+) {
+  const page = await harness.context.newPage();
+  await page.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  await page.evaluate(async (settingsPatch) => {
+    const chromeApi = (globalThis as any).chrome;
+    const stored = await chromeApi.storage.sync.get("settings");
+    await chromeApi.storage.sync.set({
+      settings: { ...stored.settings, ...settingsPatch },
+    });
+  }, patch);
+  await page.close();
+}
+
+async function getLocalStorageValue<T>(
+  harness: Pick<ExtensionHarness, "context" | "extensionId">,
+  key: string
+): Promise<T | undefined> {
+  const page = await harness.context.newPage();
+  await page.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const value = await page.evaluate(async (storageKey) => {
+    const chromeApi = (globalThis as any).chrome;
+    const stored = await chromeApi.storage.local.get(storageKey);
+    return stored[storageKey];
+  }, key);
+  await page.close();
+  return value as T | undefined;
 }
 
 const test = base.extend<{ harness: ExtensionHarness }>({
@@ -389,6 +428,60 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
   const finalSessions = await readSessions(restoredSidepanel);
   expect(finalSessions).toHaveLength(1);
   expect(finalSessions[0].id).toBe(session.id);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("浮窗收藏可编辑直白释义并保存真实选区来源", async ({ harness }, testInfo) => {
+  await patchExtensionSettings(harness, {
+    contextualSelectionEnabled: true,
+    theme: "dark",
+  });
+  const article = await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/article`);
+  await createVisibleRangeSelection(article);
+
+  await article.getByRole("button", { name: "浮窗翻译" }).click();
+  await expect(article.locator(".translator-popup")).toBeVisible();
+  await article.getByRole("button", { name: "仅解释选中文字" }).click();
+  await expect(article.locator(".translator-translated-text")).toContainText(
+    VERNACULAR_EXPLANATION
+  );
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+
+  await article.getByRole("button", { name: "存入生词本" }).click();
+  const editor = article.getByTestId("translator-jargon-editor");
+  await expect(editor).toBeVisible();
+  await expect(editor.getByLabel("术语")).toHaveValue(SELECTED_TEXT);
+  await expect(editor.getByLabel("人话释义")).toHaveValue(
+    `本地浮窗翻译结果：${VERNACULAR_EXPLANATION}`
+  );
+  await expect(editor.getByLabel("原句或提问")).toHaveValue(SELECTED_TEXT);
+  await expect(editor.getByLabel("来源链接")).toHaveValue(article.url());
+
+  await editor.getByLabel("术语").fill("增长飞轮协同");
+  await editor.getByLabel("人话释义").fill("先统一合作细节，再持续推动增长。");
+  const screenshotPath = testInfo.outputPath("jargon-save.png");
+  await editor.screenshot({ path: screenshotPath });
+  await testInfo.attach("jargon-save", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
+  await editor.getByTitle("保存到生词本").click();
+  await expect(article.getByRole("button", { name: "存入生词本" })).toHaveText(
+    "已收藏 ✓"
+  );
+
+  await expect
+    .poll(async () => {
+      const items = await getLocalStorageValue<any[]>(harness, "jargon_vault_items");
+      return items?.[0];
+    })
+    .toMatchObject({
+      term: "增长飞轮协同",
+      explanation: "先统一合作细节，再持续推动增长。",
+      sourceContext: SELECTED_TEXT,
+      sourceUrl: article.url(),
+    });
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 

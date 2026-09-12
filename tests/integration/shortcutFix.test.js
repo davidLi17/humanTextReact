@@ -236,6 +236,66 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       cleanup();
       expect(globalThis.window._handler).toBeUndefined();
     });
+
+    test("ignores Alt shortcuts from the jargon editor inputs while leaving the editor value untouched", async () => {
+      let shownCount = 0;
+      const mockPopupManager = {
+        showPopup: () => {
+          shownCount += 1;
+        },
+      };
+      const sentMessages = [];
+      setTestGlobal("browser", {
+        runtime: {
+          sendMessage: async (message) => {
+            sentMessages.push(message);
+            return { success: true };
+          },
+        },
+      });
+      setTestGlobal("window", {
+        getSelection: () => ({ toString: () => "编辑中的词条" }),
+        addEventListener: (_event, handler) => {
+          globalThis.window._handler = handler;
+        },
+        removeEventListener: (_event, handler) => {
+          if (globalThis.window._handler === handler) {
+            delete globalThis.window._handler;
+          }
+        },
+      });
+      setTestGlobal("document", { activeElement: null });
+
+      const editorInput = {
+        closest: (selector) => {
+          if (selector === "input, textarea") return editorInput;
+          if (selector === ".translator-jargon-editor") return {};
+          return null;
+        },
+      };
+      const cleanup = initContentShortcuts(mockPopupManager);
+
+      for (const [code, key] of [["KeyD", "∂"], ["KeyS", "ß"]]) {
+        let defaultPrevented = false;
+        await globalThis.window._handler({
+          altKey: true,
+          ctrlKey: false,
+          metaKey: false,
+          code,
+          key,
+          target: editorInput,
+          preventDefault: () => {
+            defaultPrevented = true;
+          },
+          stopPropagation: () => {},
+        });
+        expect(defaultPrevented).toBe(false);
+      }
+
+      expect(shownCount).toBe(0);
+      expect(sentMessages).toEqual([]);
+      cleanup();
+    });
   });
 
   describe("4. Background Commands Dispatcher & ShortcutManager", () => {
