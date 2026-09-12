@@ -9,7 +9,13 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import SidePanelApp from "../../entrypoints/sidepanel/App";
+import type { ChatMessage } from "../../entrypoints/shared/chatTypes";
 import { MESSAGE_TYPES } from "../../entrypoints/shared/constants";
+import {
+  checkChatRequestBudget,
+  createAttachedPageMeta,
+} from "../../entrypoints/shared/pageContext";
+import { prepareWebReadingOverviewRequest } from "../../entrypoints/shared/webReadingOverview";
 import {
   preserveGlobals,
   setTestGlobal,
@@ -20,10 +26,13 @@ type Listener = (...args: any[]) => unknown;
 interface BrowserMockOptions {
   sessions?: unknown[];
   activeSessionId?: string;
+  settings?: Record<string, unknown>;
   /** 模拟当前活动标签页；缺省时 tabs.query 返回空数组，提取链路必然失败 */
   activeTab?: { id: number; url: string; title?: string };
   /** content script 的正文提取响应 */
   tabExtractResponse?: unknown;
+  /** 覆盖后台响应，供清理请求等异步边界测试使用。 */
+  runtimeSendMessage?: (message: any) => unknown | Promise<unknown>;
 }
 
 function selectStoredValues(
@@ -61,6 +70,7 @@ function createBrowserMock(options: BrowserMockOptions = {}) {
       logLevel: "off",
       theme: "light",
       fontScalePercent: 100,
+      ...options.settings,
     },
   };
   const runtimeListeners = new Set<Listener>();
@@ -99,7 +109,9 @@ function createBrowserMock(options: BrowserMockOptions = {}) {
       },
       async sendMessage(message: any) {
         sentMessages.push(structuredClone(message));
-        return { success: true };
+        return options.runtimeSendMessage
+          ? await options.runtimeSendMessage(message)
+          : { success: true };
       },
       async openOptionsPage() {},
       getManifest: () => ({ version: "1.5.3" }),
@@ -176,7 +188,8 @@ function createOngoingSession() {
 
 /** 构造一个能成功提取正文的 browser mock（活动标签页 + 提取响应） */
 function createReadablePageMock(
-  session: ReturnType<typeof createOngoingSession>
+  session: ReturnType<typeof createOngoingSession>,
+  content = "这是被附加的网页正文内容，用于验证上下文附加行为是否正确。"
 ) {
   return createBrowserMock({
     sessions: [session],
@@ -192,8 +205,8 @@ function createReadablePageMock(
         title: "示例文章",
         url: "https://example.com/article",
         // 必须长于 MIN_PAGE_CONTENT_CHARS（15），否则会被“内容过短”守卫拦下
-        content: "这是被附加的网页正文内容，用于验证上下文附加行为是否正确。",
-        wordCount: 27,
+        content,
+        wordCount: content.length,
       },
     },
   });
@@ -233,11 +246,73 @@ function expectAttachedToCurrentSession(
   expect(card.status).toBe("completed");
   expect(card.pageMeta.contextOnly).toBe(true);
   expect(card.pageMeta.sourceContent).toContain("这是被附加的网页正文内容");
+  expect(card.pageMeta.attachedPage).toMatchObject({
+    version: 1,
+    selectedSegments: [1],
+  });
 
   // 全程没有发起模型请求
   expect(
     sentMessages.filter((message) => message.action === MESSAGE_TYPES.TRANSLATE)
   ).toHaveLength(0);
+}
+
+function createSegmentedPageContent() {
+  const createSegment = (marker: string, filler: string) =>
+    marker + filler.repeat(16_000 - marker.length);
+  return [
+    createSegment("首段唯一标记", "甲"),
+    createSegment("中段唯一标记", "乙"),
+    createSegment("末段唯一标记", "丙"),
+  ].join("");
+}
+
+function createAttachedPageMessage(content: string) {
+  return {
+    id: "attached-page",
+    role: "user" as const,
+    content: "通读网页: 《测试网页》",
+    pageMeta: createAttachedPageMeta({
+      title: "测试网页",
+      url: "https://example.com/article",
+      content,
+      wordCount: content.length,
+    }),
+    createdAt: 100,
+    status: "completed" as const,
+  };
+}
+
+function getTranslateMessages(mock: ReturnType<typeof createBrowserMock>) {
+  return mock.sentMessages.filter(
+    (message) => message.action === MESSAGE_TYPES.TRANSLATE
+  );
+}
+
+function getAttachedCard(sessions: any[]) {
+  return sessions[0].messages.find(
+    (message: any) => message.pageMeta?.attachedPage
+  );
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function openAttachedPageDetails() {
+  fireEvent.click(await screen.findByText("预览已保存原文"));
+}
+
+function getReadCurrentPageButton() {
+  return screen.getByRole("button", {
+    name: "通读当前网页",
+  });
 }
 
 const restoreGlobals = preserveGlobals("browser", "chrome");
@@ -404,7 +479,7 @@ describe("Sidepanel App 真实 React 交互", () => {
     // 会话文本出现即代表水合已完成，handleReadCurrentPage 的水合前置守卫才会放行
     await screen.findByText("之前的问题");
 
-    fireEvent.click(screen.getByTitle("一键提取并人话通读当前打开的网页正文"));
+    fireEvent.click(getReadCurrentPageButton());
 
     await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
     expectAttachedToCurrentSession(
@@ -439,5 +514,553 @@ describe("Sidepanel App 真实 React 交互", () => {
     );
     // 消费后清掉待办，避免新鲜度窗口内重载侧边栏被 storage 通道重复触发
     expect(mock.localStore.pendingWebPageRead).toBeUndefined();
+  });
+
+  test("长网页附加后可选择后续段落，选择本身不发起模型请求", async () => {
+    const mock = createReadablePageMock(
+      createOngoingSession(),
+      createSegmentedPageContent()
+    );
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    fireEvent.click(getReadCurrentPageButton());
+
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    const attachedSessions = findAttachedSessions(mock)!;
+    const card = getAttachedCard(attachedSessions);
+    expect(card.pageMeta.attachedPage).toMatchObject({
+      content: createSegmentedPageContent(),
+      selectedSegments: [1],
+    });
+
+    await openAttachedPageDetails();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "第 3 段参与回答" })
+    );
+
+    await waitFor(() => {
+      const saved = findAttachedSessions(mock);
+      expect(getAttachedCard(saved!).pageMeta.attachedPage.selectedSegments).toEqual([
+        1,
+        3,
+      ]);
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+  });
+
+  test("重新挂载后保留选择的末段，并在追问请求中带入末段原文", async () => {
+    const pageContent = createSegmentedPageContent();
+    const mock = createReadablePageMock(createOngoingSession(), pageContent);
+    setTestGlobal("browser", mock.browser);
+
+    const view = render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    fireEvent.click(getReadCurrentPageButton());
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    await openAttachedPageDetails();
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "第 1 段参与回答" })
+    );
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "第 3 段参与回答" })
+    );
+    await waitFor(() => {
+      expect(
+        getAttachedCard(findAttachedSessions(mock)!).pageMeta.attachedPage
+          .selectedSegments
+      ).toEqual([3]);
+    });
+
+    view.unmount();
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    await openAttachedPageDetails();
+    expect(
+      (screen.getByRole("checkbox", {
+        name: "第 3 段参与回答",
+      }) as HTMLInputElement).checked
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", {
+        name: "第 1 段参与回答",
+      }) as HTMLInputElement).checked
+    ).toBe(false);
+
+    const question = "请根据最后一段给出建议";
+    fireEvent.change(
+      screen.getByPlaceholderText(/输入追问、黑话术语或指令/),
+      { target: { value: question } }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const request = await waitFor(() => {
+      const messages = getTranslateMessages(mock);
+      expect(messages).toHaveLength(1);
+      return messages[0];
+    });
+    const payloadText = JSON.stringify(request.messages);
+    expect(payloadText).toContain("末段唯一标记");
+    expect(payloadText).not.toContain("首段唯一标记");
+    expect(request.messages.at(-1)).toMatchObject({
+      role: "user",
+      content: question,
+    });
+  });
+
+  test("超过请求预算时保留草稿与原会话，不发送模型请求", async () => {
+    const pageContent = "网页背景唯一标记" + "甲".repeat(15_900);
+    const attachedPage = createAttachedPageMessage(pageContent);
+    const session = {
+      id: "budget-session",
+      title: "预算测试会话",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        attachedPage,
+        {
+          id: "long-history",
+          role: "user" as const,
+          content: "历史内容".repeat(12_500),
+          createdAt: 200,
+          status: "completed" as const,
+        },
+        {
+          id: "history-answer",
+          role: "assistant" as const,
+          content: "历史回答",
+          createdAt: 201,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("预算测试会话");
+    const input = screen.getByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "这条草稿不能被清空" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(
+      (await screen.findAllByText(/超过 48000 个字符的保守上限/)).length
+    ).toBeGreaterThan(0);
+    expect((input as HTMLTextAreaElement).value).toBe("这条草稿不能被清空");
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+    const stored = mock.localStore.sidepanel_chat_sessions as any[];
+    expect(stored).toHaveLength(1);
+    expect(stored[0].messages.map((message: any) => message.id)).toEqual(
+      session.messages.map((message) => message.id)
+    );
+  });
+
+  test("棱镜模式把全文总览推过预算时不创建消息，也不发送请求", async () => {
+    const runId = "prism-overview-run";
+    const baseMessages: ChatMessage[] = [
+      {
+        id: "overview-source",
+        role: "user",
+        content: "第 1 段",
+        pageMeta: {
+          title: "棱镜预算网页",
+          url: "https://example.com/prism-overview",
+          isWebPageReading: true,
+          readingRunId: runId,
+          segmentIndex: 1,
+          totalSegments: 1,
+          sourceContent: "网页原文",
+        },
+        createdAt: 100,
+        status: "completed",
+      },
+      {
+        id: "overview-answer",
+        role: "assistant",
+        content: "x",
+        createdAt: 101,
+        status: "completed",
+      },
+    ];
+    const baseRequest = prepareWebReadingOverviewRequest(baseMessages, runId);
+    expect(baseRequest.success).toBe(true);
+    if (!baseRequest.success) throw new Error("总览夹具应当可生成请求");
+    const staticChars = baseRequest.inputChars - 1;
+    const messages: ChatMessage[] = [
+      baseMessages[0],
+      {
+        ...baseMessages[1],
+        content: "甲".repeat(47_900 - staticChars),
+      },
+    ];
+    const prepared = prepareWebReadingOverviewRequest(messages, runId);
+    expect(prepared.success).toBe(true);
+    if (!prepared.success) throw new Error("接近上限的总览应通过原始校验");
+    expect(prepared.inputChars).toBe(47_900);
+    expect(
+      checkChatRequestBudget(prepared.messages, {
+        systemPrompt: "测试提示词",
+        prismMode: true,
+      }).ok
+    ).toBe(false);
+
+    const session = {
+      id: "prism-overview-session",
+      title: "棱镜总览预算",
+      createdAt: 100,
+      updatedAt: 101,
+      messages,
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+      settings: { prismModeEnabled: true },
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const overviewButton = await screen.findByRole("button", {
+      name: "生成全文总览",
+    });
+    fireEvent.click(overviewButton);
+    expect(
+      (await screen.findAllByText(/超过 48000 个字符的保守上限/)).length
+    ).toBeGreaterThan(0);
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+    expect(
+      (mock.localStore.sidepanel_chat_sessions as any[])[0].messages.map(
+        (message: any) => message.id
+      )
+    ).toEqual(messages.map((message) => message.id));
+
+    fireEvent.click(overviewButton);
+    await waitFor(() => expect(getTranslateMessages(mock)).toHaveLength(0));
+  });
+
+  test("编辑与重新生成普通问题时都会带入已选网页原文", async () => {
+    const pageContent = "编辑重试网页原文唯一标记" + "甲".repeat(3_000);
+    const attachedPage = createAttachedPageMessage(pageContent);
+    const session = {
+      id: "edit-retry-session",
+      title: "编辑重试测试",
+      createdAt: 100,
+      updatedAt: 300,
+      messages: [
+        attachedPage,
+        {
+          id: "ordinary-question",
+          role: "user" as const,
+          content: "原来的普通问题",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+        {
+          id: "ordinary-answer",
+          role: "assistant" as const,
+          content: "原来的普通回答",
+          createdAt: 300,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("原来的普通问题");
+    fireEvent.click(screen.getAllByTitle("编辑消息").at(-1)!);
+    const editor = await screen.findByPlaceholderText("输入修改后的消息...");
+    fireEvent.change(editor, { target: { value: "编辑后的普通问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新发送" }));
+
+    const editedRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect(JSON.stringify(editedRequest.messages)).toContain(pageContent);
+    expect(JSON.stringify(editedRequest.messages)).toContain("编辑后的普通问题");
+
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: editedRequest.requestId,
+        sessionId: editedRequest.sessionId,
+        content: "编辑后的回答",
+        done: true,
+      });
+    });
+    expect(await screen.findByText("编辑后的回答")).toBeTruthy();
+    fireEvent.click(await screen.findByTitle("重新生成回答"));
+
+    const retryRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    expect(JSON.stringify(retryRequest.messages)).toContain(pageContent);
+    expect(JSON.stringify(retryRequest.messages)).toContain("编辑后的普通问题");
+  });
+
+  test("立即发送等待 CLEANUP 时拒绝并发普通发送，并保留期间写入的新草稿", async () => {
+    const cleanup = createDeferred<{ success: true }>();
+    const mock = createBrowserMock({
+      runtimeSendMessage(message) {
+        if (message.action === MESSAGE_TYPES.CLEANUP) return cleanup.promise;
+        return { success: true };
+      },
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const input = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "正在生成的原问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(getTranslateMessages(mock)).toHaveLength(1));
+
+    fireEvent.change(input, { target: { value: "后续队列题" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByText("后续队列题");
+
+    fireEvent.change(input, { target: { value: "优先题" } });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => {
+      expect(
+        mock.sentMessages.filter(
+          (message) => message.action === MESSAGE_TYPES.CLEANUP
+        )
+      ).toHaveLength(1);
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(1);
+    const draftWrittenDuringCleanup = "清理等待期间的新草稿";
+    fireEvent.change(input, { target: { value: draftWrittenDuringCleanup } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    expect(getTranslateMessages(mock)).toHaveLength(1);
+    expect((input as HTMLTextAreaElement).value).toBe(draftWrittenDuringCleanup);
+
+    await act(async () => {
+      cleanup.resolve({ success: true });
+      await cleanup.promise;
+    });
+    await waitFor(() => {
+      const translations = getTranslateMessages(mock);
+      expect(translations).toHaveLength(2);
+      expect(translations[1].messages.at(-1)).toMatchObject({
+        role: "user",
+        content: "优先题",
+      });
+    });
+    expect((input as HTMLTextAreaElement).value).toBe(draftWrittenDuringCleanup);
+    const remainingQueue = screen.getByRole("region", {
+      name: "排队中的提示词队列",
+    });
+    expect(remainingQueue.textContent).toContain("后续队列题");
+    expect(remainingQueue.textContent).not.toContain("优先题");
+  });
+
+  test("超限的立即发送保留草稿，且不向原请求发 CLEANUP", async () => {
+    const session = {
+      id: "immediate-budget-session",
+      title: "立即发送预算测试",
+      createdAt: 100,
+      updatedAt: 100,
+      messages: [
+        {
+          id: "near-budget-history",
+          role: "user" as const,
+          content: "历史内容".repeat(11_950),
+          createdAt: 100,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("立即发送预算测试");
+    const input = screen.getByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "原请求" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => expect(getTranslateMessages(mock)).toHaveLength(1));
+
+    const immediateDraft = "立即发送但超过预算".repeat(80);
+    fireEvent.change(input, { target: { value: immediateDraft } });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+    expect(
+      (await screen.findAllByText(/超过 48000 个字符的保守上限/)).length
+    ).toBeGreaterThan(0);
+    expect((input as HTMLTextAreaElement).value).toBe(immediateDraft);
+    expect(getTranslateMessages(mock)).toHaveLength(1);
+    expect(
+      mock.sentMessages.filter(
+        (message) => message.action === MESSAGE_TYPES.CLEANUP
+      )
+    ).toHaveLength(0);
+  });
+
+  test("清空 A 队列不影响 B，切回 B 后自动派发其队首", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const input = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "A 会话原问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const aRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    fireEvent.change(input, { target: { value: "A 待清空一" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByText("A 待清空一");
+    fireEvent.change(input, { target: { value: "A 待清空二" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+
+    fireEvent.click(screen.getByTitle("新建对话"));
+    await screen.findByText("人话翻译与长文通读");
+    fireEvent.change(input, { target: { value: "B 会话原问题" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const bRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    fireEvent.change(input, { target: { value: "B 待保留题" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByText("B 待保留题");
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const aDrawerItem = screen
+      .getAllByTitle("A 会话原问题")
+      .find((element) => element.closest(".drawer-item"))
+      ?.closest(".drawer-item") as HTMLElement | undefined;
+    expect(aDrawerItem).toBeDefined();
+    fireEvent.click(aDrawerItem!);
+    fireEvent.click(await screen.findByTitle(/查看更多 1 条排队中的问题/));
+    fireEvent.click(screen.getByTitle("清空所有排队问题"));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "排队中的提示词队列" })
+      ).toBeNull()
+    );
+
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: bRequest.requestId,
+        sessionId: bRequest.sessionId,
+        content: "B 的原问题完成",
+        done: true,
+      });
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(2);
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const bDrawerItem = screen
+      .getAllByTitle("B 会话原问题")
+      .find((element) => element.closest(".drawer-item"))
+      ?.closest(".drawer-item") as HTMLElement | undefined;
+    expect(bDrawerItem).toBeDefined();
+    fireEvent.click(bDrawerItem!);
+    const bQueuedRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(3);
+      return requests[2];
+    });
+    expect(bQueuedRequest.sessionId).toBe(bRequest.sessionId);
+    expect(bQueuedRequest.sessionId).not.toBe(aRequest.sessionId);
+    expect(bQueuedRequest.messages.at(-1)).toMatchObject({
+      role: "user",
+      content: "B 待保留题",
+    });
+  });
+
+  test("队列只属于创建它的会话，切换与删除都不会把题目路由到其他会话", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const input = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "A 会话的原请求" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+    const aRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+
+    fireEvent.change(input, { target: { value: "A 会话优先题" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByText("A 会话优先题");
+
+    fireEvent.click(screen.getByTitle("新建对话"));
+    await screen.findByText("人话翻译与长文通读");
+    expect(
+      screen.queryByRole("region", { name: "排队中的提示词队列" })
+    ).toBeNull();
+    expect((input as HTMLTextAreaElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => {
+      expect(getTranslateMessages(mock)).toHaveLength(1);
+      expect(
+        getTranslateMessages(mock).filter(
+          (message) => message.sessionId !== aRequest.sessionId
+        )
+      ).toHaveLength(0);
+    });
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const aDrawerItem = screen
+      .getAllByTitle("A 会话的原请求")
+      .find((element) => element.closest(".drawer-item"))
+      ?.closest(".drawer-item") as HTMLElement | undefined;
+    expect(aDrawerItem).toBeDefined();
+    fireEvent.click(aDrawerItem!);
+    await screen.findByText("A 会话优先题");
+    const promotedRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    expect(promotedRequest.sessionId).toBe(aRequest.sessionId);
+    expect(promotedRequest.messages.at(-1)).toMatchObject({
+      role: "user",
+      content: "A 会话优先题",
+    });
+
+    fireEvent.change(input, { target: { value: "A 会话待清除题" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    await screen.findByText("A 会话待清除题");
+    expect(screen.getByText("A 会话待清除题")).toBeTruthy();
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    fireEvent.click(screen.getByTitle("删除会话"));
+    await screen.findByText("人话翻译与长文通读");
+    expect(
+      screen.queryByRole("region", { name: "排队中的提示词队列" })
+    ).toBeNull();
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => {
+      expect(getTranslateMessages(mock)).toHaveLength(2);
+      expect(
+        getTranslateMessages(mock).some(
+          (message) =>
+            message.sessionId !== aRequest.sessionId &&
+            message.messages.at(-1)?.content === "A 会话待清除题"
+        )
+      ).toBe(false);
+    });
   });
 });

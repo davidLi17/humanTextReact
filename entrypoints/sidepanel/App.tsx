@@ -18,10 +18,17 @@ import {
   watchSystemTheme,
 } from "@/entrypoints/shared/theme";
 import {
-  buildHistoryPayload,
+  type ChatPayloadMessage,
   ChatMessage,
   ChatSession,
 } from "@/entrypoints/shared/chatTypes";
+import {
+  checkChatRequestBudget,
+  createAttachedPageMeta,
+  getAttachedPageSnapshot,
+  MAX_TOTAL_ATTACHED_PAGE_CHARS,
+  selectAttachedPageSegments,
+} from "@/entrypoints/shared/pageContext";
 import { retryAssistantMessageAndTruncate } from "@/entrypoints/shared/chatEditRetry";
 import {
   buildWebReadingContinuationPrompt,
@@ -81,6 +88,7 @@ import CollapsibleThinkingChain from "@/entrypoints/popup/components/Collapsible
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
 import JargonVaultPanel from "./components/JargonVaultPanel";
 import PrismResultTabs from "./components/PrismResultTabs";
+import PageContextCard from "./components/PageContextCard";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
 import QuoteInputCapsule from "./components/QuoteInputCapsule";
 import PromptQueueBar, {
@@ -250,6 +258,17 @@ export default function SidePanelApp() {
 
   // 提示词排队队列状态 (Prompt Queue System)
   const [promptQueue, setPromptQueue] = useState<QueuedPrompt[]>([]);
+  const [queueBlocked, setQueueBlocked] = useState(false);
+  const [isManualDispatching, setIsManualDispatching] = useState(false);
+  const queueBlockedSessionIdRef = useRef<string | null>(null);
+  const manualDispatchRef = useRef(false);
+  const requestSettingsRef = useRef<{
+    systemPrompt: string;
+    prismMode: boolean;
+  }>({
+    systemPrompt: DEFAULT_SETTINGS.promptTemplate,
+    prismMode: DEFAULT_SETTINGS.prismModeEnabled,
+  });
 
   // 用户消息行内编辑状态
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -265,6 +284,24 @@ export default function SidePanelApp() {
   }>({ left: 0, top: 0, placement: "top" });
   const [selectedQuoteText, setSelectedQuoteText] = useState<string>("");
   const [activeQuotedText, setActiveQuotedText] = useState<string | null>(null);
+  const composerSnapshot = useMemo(
+    () => ({
+      sessionId: activeSessionId,
+      inputText,
+      images,
+      selectionContext: pendingSelectionContext,
+      quotedText: activeQuotedText,
+    }),
+    [
+      activeSessionId,
+      inputText,
+      images,
+      pendingSelectionContext,
+      activeQuotedText,
+    ]
+  );
+  const composerSnapshotRef = useRef(composerSnapshot);
+  composerSnapshotRef.current = composerSnapshot;
 
   // 虚拟长文与截断检测提示
   const [virtualScrollNotice, setVirtualScrollNotice] = useState<{
@@ -314,6 +351,14 @@ export default function SidePanelApp() {
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
+  const currentSessionQueue = activeSession
+    ? promptQueue.filter((prompt) => prompt.sessionId === activeSession.id)
+    : [];
+  const currentQueueBlocked = Boolean(
+    activeSession &&
+      queueBlocked &&
+      queueBlockedSessionIdRef.current === activeSession.id
+  );
 
   const activateSessionWithDraft = (
     nextSessionId: string,
@@ -618,6 +663,10 @@ export default function SidePanelApp() {
     const initSettings = async () => {
       try {
         const settings = await SettingsUtils.getSettings();
+        requestSettingsRef.current = {
+          systemPrompt: settings.promptTemplate,
+          prismMode: settings.prismModeEnabled,
+        };
         if (settings.theme) {
           setThemeMode(normalizeThemeMode(settings.theme));
         }
@@ -631,6 +680,10 @@ export default function SidePanelApp() {
     void initSettings();
 
     const unsubscribe = SettingsUtils.onSettingsChanged((newSettings) => {
+      requestSettingsRef.current = {
+        systemPrompt: newSettings.promptTemplate ?? requestSettingsRef.current.systemPrompt,
+        prismMode: newSettings.prismModeEnabled ?? requestSettingsRef.current.prismMode,
+      };
       if (newSettings.theme) {
         setThemeMode(normalizeThemeMode(newSettings.theme));
       }
@@ -727,6 +780,35 @@ export default function SidePanelApp() {
     persistWebReadingProgress(webReadingProgressRef.current, id, {
       activeSessionId: id,
     });
+  };
+
+  const validateRequestBudget = (payload: ChatPayloadMessage[]) => {
+    const result = checkChatRequestBudget(payload, {
+      systemPrompt: requestSettingsRef.current.systemPrompt,
+      prismMode: requestSettingsRef.current.prismMode,
+    });
+    if (!result.ok) {
+      const error = result.error || "请求内容超过当前字符预算，请缩减网页范围后重试。";
+      setExtractError(error);
+      showToast("请求已暂停，请缩减网页段落后重试");
+      return false;
+    }
+    return true;
+  };
+
+  const prepareRegularRequest = (
+    currentMessage?: Parameters<typeof buildWebReadingHistoryPayload>[1],
+    sessionId = activeSessionIdRef.current
+  ) => {
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === sessionId
+    );
+    if (!currentSession) return undefined;
+    const payload = buildWebReadingHistoryPayload(
+      currentSession.messages,
+      currentMessage
+    );
+    return { session: currentSession, payload };
   };
 
   // 检查是否有待翻译文本或通读请求
@@ -1206,28 +1288,94 @@ export default function SidePanelApp() {
 
       // 只把正文作为上下文附加到当前会话：
       // 不新建会话、不创建助手占位、不发起模型请求——用户随后自己决定问什么。
-      const alreadyAttached = extractionSession.messages.some(
-        (message) =>
-          message.pageMeta?.contextOnly === true &&
-          message.pageMeta?.url === pageData.url &&
-          message.pageMeta?.sourceContent ===
-            (pageData.content || "").slice(0, MAX_PAGE_CONTENT_CHARS)
+      const existingAttachment = extractionSession.messages.find((message) => {
+        const meta = message.pageMeta;
+        const attached = meta ? getAttachedPageSnapshot(meta) : undefined;
+        return (
+          meta?.contextOnly === true &&
+          meta.url === pageData.url &&
+          Boolean(attached) &&
+          attached?.capturedChars === pageData.content.length &&
+          attached.content === pageData.content.slice(0, attached.content.length)
+        );
+      });
+      const existingAttachedChars = existingAttachment?.pageMeta
+        ? getAttachedPageSnapshot(existingAttachment.pageMeta)?.content.length ?? 0
+        : 0;
+
+      const usedAttachedChars = latestSessions.reduce(
+        (total, session) =>
+          total +
+          session.messages.reduce(
+            (messageTotal, message) =>
+              messageTotal +
+                (message.pageMeta
+                  ? getAttachedPageSnapshot(message.pageMeta)?.content.length ?? 0
+                  : 0) -
+                (session.id === extractionSession.id &&
+                message.id === existingAttachment?.id
+                  ? existingAttachedChars
+                  : 0),
+            0
+          ),
+        0
       );
-      if (alreadyAttached) {
+      const remainingAttachedChars =
+        MAX_TOTAL_ATTACHED_PAGE_CHARS - usedAttachedChars;
+      if (remainingAttachedChars <= 0) {
+        const error =
+          "网页正文附加空间已用完，请删除不再需要的旧网页会话后再试。";
+        setExtractError(error);
+        showToast("网页正文附加空间已用完，请删除旧网页会话后重试");
         setIsExtractingPage(false);
-        showToast("该网页正文已在当前对话中，无需重复附加");
+        return;
+      }
+
+      const attachedPageMeta = createAttachedPageMeta(
+        pageData,
+        remainingAttachedChars
+      );
+
+      if (existingAttachment) {
+        const newContentLength = attachedPageMeta.attachedPage?.content.length ?? 0;
+        if (newContentLength <= existingAttachedChars) {
+          setIsExtractingPage(false);
+          showToast("该网页正文已在当前对话中，无需重复附加");
+          return;
+        }
+        const previousSelected = existingAttachment.pageMeta
+          ? getAttachedPageSnapshot(existingAttachment.pageMeta)?.selectedSegments ?? [1]
+          : [1];
+        const expandedMeta = selectAttachedPageSegments(
+          attachedPageMeta,
+          previousSelected
+        );
+        const updatedSession: ChatSession = {
+          ...extractionSession,
+          messages: extractionSession.messages.map((message) =>
+            message.id === existingAttachment.id
+              ? { ...message, pageMeta: expandedMeta }
+              : message
+          ),
+          updatedAt: Date.now(),
+        };
+        const nextSessions = latestSessions.map((session) =>
+          session.id === extractionSession.id ? updatedSession : session
+        );
+        sessionsRef.current = nextSessions;
+        setSessions(nextSessions);
+        void saveSessionsToStorage(nextSessions);
+        setIsExtractingPage(false);
+        scrollToBottom(true);
+        showToast("已补充网页正文快照，可调整参与回答的范围");
         return;
       }
 
       const userMessage: ChatMessage = {
         id: createRequestId(),
         role: "user",
-        content: `通读网页: 《${pageData.title}》`,
-        pageMeta: createWebReadingPageMeta(pageData, {
-          segmentIndex: 1,
-          totalSegments: 1,
-          contextOnly: true,
-        }),
+        content: `附加网页正文: 《${pageData.title}》`,
+        pageMeta: attachedPageMeta,
         createdAt: Date.now(),
         status: "completed",
       };
@@ -1237,7 +1385,7 @@ export default function SidePanelApp() {
         // 仅空会话按网页命名；已有对话保持原标题，别打断用户正在进行的话题
         title:
           extractionSession.messages.length === 0
-            ? `速读: ${pageData.title.slice(0, 12)}...`
+            ? `网页资料: ${pageData.title.slice(0, 12)}...`
             : extractionSession.title,
         messages: [...extractionSession.messages, userMessage],
         updatedAt: Date.now(),
@@ -1264,6 +1412,44 @@ export default function SidePanelApp() {
     }
   };
 
+  const handlePageContextSelectionChange = (
+    sessionId: string,
+    messageId: string,
+    segments: number[]
+  ) => {
+    if (isStreaming || isExtractingPage) return;
+    const currentSessions = sessionsRef.current;
+    const currentSession = currentSessions.find(
+      (session) => session.id === sessionId
+    );
+    if (!currentSession) return;
+    let changed = false;
+    const nextSessions = currentSessions.map((session) => {
+      if (session.id !== sessionId) return session;
+      const messages = session.messages.map((message) => {
+        if (
+          message.id !== messageId ||
+          message.pageMeta?.contextOnly !== true
+        ) {
+          return message;
+        }
+        changed = true;
+        return {
+          ...message,
+          pageMeta: selectAttachedPageSegments(message.pageMeta, segments),
+        };
+      });
+      return changed ? { ...session, messages, updatedAt: Date.now() } : session;
+    });
+    if (!changed) return;
+    sessionsRef.current = nextSessions;
+    setSessions(nextSessions);
+    void saveSessionsToStorage(nextSessions);
+    setExtractError(null);
+    queueBlockedSessionIdRef.current = null;
+    setQueueBlocked(false);
+  };
+
   // 继续解读网页长文的剩余分段（同会话上下文顺序解读，直至读完）
   const handleContinueWebReading = async () => {
     if (
@@ -1277,6 +1463,11 @@ export default function SidePanelApp() {
     const progress = webReadingProgressMap.get(activeSession.id);
     if (!isWebReadingContinueReady(progress)) return;
 
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === activeSession.id
+    );
+    if (!currentSession) return;
+
     const segmentIndex = progress.segmentIndex;
     const segmentEnd = Math.min(
       progress.nextStart + MAX_PAGE_CONTENT_CHARS,
@@ -1289,18 +1480,39 @@ export default function SidePanelApp() {
     if (!segmentContent.trim()) {
       commitWebReadingProgress((prev) => {
         const next = new Map(prev);
-        next.delete(activeSession.id);
+        next.delete(currentSession.id);
         return next;
-      }, activeSession.id);
+      }, currentSession.id);
       return;
     }
+
+    const historyPayload = buildWebReadingHistoryPayload(
+      currentSession.messages
+    );
+    const hasSystem = historyPayload.some((message) => message.role === "system");
+    const messagesPayload: ChatPayloadMessage[] = [
+      ...(hasSystem
+        ? []
+        : [{ role: "system" as const, content: WEB_READING_SYSTEM_PROMPT }]),
+      ...historyPayload,
+      {
+        role: "user" as const,
+        content: buildWebReadingContinuationPrompt({
+          title: progress.title,
+          segmentContent,
+          segmentIndex,
+          totalSegments: progress.totalSegments,
+        }),
+      },
+    ];
+    if (!validateRequestBudget(messagesPayload)) return;
 
     const userMessageId = createRequestId();
     const assistantMessageId = createRequestId();
     const currentRequestId = createRequestId();
     registerActiveRequest({
       requestId: currentRequestId,
-      sessionId: activeSession.id,
+      sessionId: currentSession.id,
       assistantMessageId,
       readingRunId: progress.readingRunId,
     });
@@ -1337,24 +1549,24 @@ export default function SidePanelApp() {
     };
 
     const updatedSession: ChatSession = {
-      ...activeSession,
-      messages: [...activeSession.messages, userMessage, assistantMessage],
+      ...currentSession,
+      messages: [...currentSession.messages, userMessage, assistantMessage],
       updatedAt: Date.now(),
     };
 
     const nextSessions = sessionsRef.current.map((s) =>
-      s.id === activeSession.id ? updatedSession : s
+      s.id === currentSession.id ? updatedSession : s
     );
     sessionsRef.current = nextSessions;
     setSessions(nextSessions);
 
     // 请求期间只记录 pending，不提前推进，避免失败后跳段或末段入口消失。
     commitWebReadingProgress((prev) => {
-      const current = prev.get(activeSession.id);
+      const current = prev.get(currentSession.id);
       if (!current) return prev;
       const next = new Map(prev);
       next.set(
-        activeSession.id,
+        currentSession.id,
         beginWebReadingSegment(current, {
           requestId: currentRequestId,
           segmentIndex,
@@ -1363,54 +1575,32 @@ export default function SidePanelApp() {
         })
       );
       return next;
-    }, activeSession.id);
+    }, currentSession.id);
 
     setIsStreaming(true);
     setExtractError(null);
     scrollToBottom(true);
 
     try {
-      const historyPayload = buildWebReadingHistoryPayload(
-        activeSession.messages
-      );
-      const hasSystem = historyPayload.some(
-        (message) => message.role === "system"
-      );
-      const messagesPayload = [
-        ...(hasSystem
-          ? []
-          : [{ role: "system" as const, content: WEB_READING_SYSTEM_PROMPT }]),
-        ...historyPayload,
-        {
-          role: "user" as const,
-          content: buildWebReadingContinuationPrompt({
-            title: progress.title,
-            segmentContent,
-            segmentIndex,
-            totalSegments: progress.totalSegments,
-          }),
-        },
-      ];
-
       const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
-        sessionId: activeSession.id,
+        sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
       })) as WebReadingResponse;
       if (!isSuccessfulWebReadingResponse(response)) {
         markAssistantMessageAsError(
-          activeSession.id,
+          currentSession.id,
           assistantMessageId,
           response?.error || "续读未返回有效结果，请重试当前分段",
           currentRequestId
         );
       }
       settleSessionWebReadingProgress(
-        activeSession.id,
+        currentSession.id,
         progress.readingRunId,
         currentRequestId,
         response
@@ -1418,7 +1608,7 @@ export default function SidePanelApp() {
     } catch (error: any) {
       logger.error("发送续读请求失败:", error);
       markAssistantMessageAsError(
-        activeSession.id,
+        currentSession.id,
         assistantMessageId,
         error?.message || "续读请求发送失败，请检查网络或设置",
         currentRequestId
@@ -1462,6 +1652,10 @@ export default function SidePanelApp() {
       overviewRequestIdRef.current = undefined;
       setExtractError(prepared.error);
       showToast(prepared.error);
+      return;
+    }
+    if (!validateRequestBudget(prepared.messages)) {
+      overviewRequestIdRef.current = undefined;
       return;
     }
 
@@ -1541,30 +1735,65 @@ export default function SidePanelApp() {
   useEffect(() => {
     if (
       !isStreaming &&
+      !(queueBlocked && queueBlockedSessionIdRef.current === activeSession?.id) &&
+      !manualDispatchRef.current &&
+      !isManualDispatching &&
       promptQueue.length > 0 &&
       activeSession &&
       !isExtractingPage
     ) {
-      const nextPrompt = promptQueue[0];
-      // 若属于当前会话，则自动出队并派发
-      if (nextPrompt.sessionId === activeSession.id) {
-        setPromptQueue((prev) => prev.slice(1));
-        void executeSendMessage(
+      const nextPrompt = promptQueue.find(
+        (prompt) => prompt.sessionId === activeSession.id
+      );
+      // 先校验并派发，只有真正接受后才移除队首。
+      if (nextPrompt) {
+        const accepted = executeSendMessage(
           nextPrompt.text,
           nextPrompt.images,
           nextPrompt.selectionContext
         );
+        if (accepted) {
+          setPromptQueue((prev) =>
+            prev.filter((prompt) => prompt.id !== nextPrompt.id)
+          );
+        } else {
+          queueBlockedSessionIdRef.current = activeSession.id;
+          setQueueBlocked(true);
+        }
       }
     }
-  }, [isStreaming, promptQueue, activeSession?.id, isExtractingPage]);
+  }, [
+    isStreaming,
+    promptQueue,
+    queueBlocked,
+    activeSession?.id,
+    isExtractingPage,
+    isManualDispatching,
+  ]);
 
   // 底层实际执行消息发送与后台流式通信
-  const executeSendMessage = async (
+  const executeSendMessage = (
     text: string,
     imagesToSend?: ChatMessage["images"],
-    contextToSend?: SelectionContext
-  ) => {
-    if (!activeSession) return;
+    contextToSend?: SelectionContext,
+    options: { allowDuringManualDispatch?: boolean } = {}
+  ): boolean => {
+    if (manualDispatchRef.current && !options.allowDuringManualDispatch) {
+      return false;
+    }
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === activeSessionIdRef.current
+    );
+    if (!currentSession || !text.trim()) return false;
+
+    const userMessagePreview: ChatPayloadMessage = {
+      role: "user",
+      content: text,
+      images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
+      selectionContext: contextToSend,
+    };
+    const prepared = prepareRegularRequest(userMessagePreview, currentSession.id);
+    if (!prepared || !validateRequestBudget(prepared.payload)) return false;
 
     setActiveView("chat");
     const userMessageId = createRequestId();
@@ -1572,7 +1801,7 @@ export default function SidePanelApp() {
     const currentRequestId = createRequestId();
     registerActiveRequest({
       requestId: currentRequestId,
-      sessionId: activeSession.id,
+      sessionId: currentSession.id,
       assistantMessageId,
     });
 
@@ -1598,21 +1827,21 @@ export default function SidePanelApp() {
 
     // 自动更新会话标题（若为第一条消息且非网页速读）
     const isFirstUserMessage =
-      activeSession.messages.filter((m) => m.role === "user").length === 0;
+      currentSession.messages.filter((m) => m.role === "user").length === 0;
     const newTitle =
-      isFirstUserMessage && !activeSession.title.startsWith("速读:")
+      isFirstUserMessage && !currentSession.title.startsWith("速读:")
         ? text.slice(0, 18) + (text.length > 18 ? "..." : "")
-        : activeSession.title;
+        : currentSession.title;
 
     const updatedSession: ChatSession = {
-      ...activeSession,
+      ...currentSession,
       title: newTitle,
-      messages: [...activeSession.messages, userMessage, assistantMessage],
+      messages: [...currentSession.messages, userMessage, assistantMessage],
       updatedAt: Date.now(),
     };
 
     const nextSessions = sessionsRef.current.map((s) =>
-      s.id === activeSession.id ? updatedSession : s
+      s.id === currentSession.id ? updatedSession : s
     );
     sessionsRef.current = nextSessions;
     setSessions(nextSessions);
@@ -1622,46 +1851,44 @@ export default function SidePanelApp() {
     setExtractError(null);
     scrollToBottom(true);
 
-    try {
-      // 走网页感知的历史组装：把会话里附加过的网页正文还原成真实 Prompt。
-      // 否则用户追问时，模型只看到「通读网页: 《标题》」这句卡片文案，正文是丢的。
-      const historyPayload = buildWebReadingHistoryPayload(
-        activeSession.messages,
-        {
-          role: "user",
-          content: text,
-          images: userMessage.images,
-          selectionContext: userMessage.selectionContext,
-        }
-      );
-
-      await browser.runtime.sendMessage({
+    void browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
-        sessionId: activeSession.id,
-        messages: historyPayload,
+        sessionId: currentSession.id,
+        messages: prepared.payload,
         thinkingEnabled,
-      });
-    } catch (error: any) {
+      }).catch((error: any) => {
       logger.error("发送翻译请求失败:", error);
       markAssistantMessageAsError(
-        activeSession.id,
+        currentSession.id,
         assistantMessageId,
         error?.message || "请求发送失败，请检查网络或设置",
         currentRequestId
       );
-    }
+      });
+    return true;
   };
 
   // 发送常规消息或进入排队队列（忙碌态允许排队）
   const handleSendMessage = async (textToSend?: string) => {
+    if (manualDispatchRef.current) return;
     const text = (textToSend ?? inputText).trim();
     if (!text || isExtractingPage || !activeSession) return;
 
     // 忙碌态允许排队：当正在流式输出时，将问题存入 promptQueue（先进先出队列）
     if (isStreaming) {
+      const prepared = prepareRegularRequest(
+        {
+          role: "user",
+          content: text,
+          images: images && images.length > 0 ? images : undefined,
+          selectionContext: pendingSelectionContext,
+        },
+        activeSession.id
+      );
+      if (!prepared || !validateRequestBudget(prepared.payload)) return;
       const queuedItem: QueuedPrompt = {
         id: createRequestId(),
         sessionId: activeSession.id,
@@ -1671,6 +1898,8 @@ export default function SidePanelApp() {
         createdAt: Date.now(),
       };
       setPromptQueue((prev) => [...prev, queuedItem]);
+      queueBlockedSessionIdRef.current = null;
+      setQueueBlocked(false);
       setInputText("");
       setActiveQuotedText(null);
       setImages([]);
@@ -1684,79 +1913,150 @@ export default function SidePanelApp() {
     // 空闲态直接执行发送
     const imagesToSend = images;
     const contextToSend = pendingSelectionContext;
+    const accepted = executeSendMessage(text, imagesToSend, contextToSend);
+    if (!accepted) return;
     setInputText("");
     setActiveQuotedText(null);
     setImages([]);
     setPendingSelectionContext(undefined);
     composerDraftsRef.current.delete(activeSession.id);
-
-    await executeSendMessage(text, imagesToSend, contextToSend);
   };
 
   // 快捷键 ⌘+Enter (Mac) / Ctrl+Enter (Win/Linux) 或点击提升按钮：直接打断当前流式输出并立即发送
   const handleInterruptAndSendImmediate = async (textToSend?: string) => {
     if (!activeSession || isExtractingPage) return;
+    if (manualDispatchRef.current) return;
+    manualDispatchRef.current = true;
+    setIsManualDispatching(true);
+    const initialComposerSnapshot = composerSnapshotRef.current;
+    try {
     const currentInput = (textToSend ?? inputText).trim();
 
     let targetText = currentInput;
     let targetImages = images;
     let targetContext = pendingSelectionContext;
+    let queuedId: string | undefined;
 
     // 如果输入框没有新文字，但队列中有排队项，直接取队首
     if (!targetText && promptQueue.length > 0) {
-      const head = promptQueue[0];
+      const head = promptQueue.find(
+        (prompt) => prompt.sessionId === activeSession.id
+      );
+      if (!head) return;
       targetText = head.text;
       targetImages = head.images;
       targetContext = head.selectionContext;
-      setPromptQueue((prev) => prev.slice(1));
+      queuedId = head.id;
     }
 
     if (!targetText) return;
 
-    setInputText("");
-    setActiveQuotedText(null);
-    setImages([]);
-    setPendingSelectionContext(undefined);
-    composerDraftsRef.current.delete(activeSession.id);
+    const sessionId = activeSessionIdRef.current;
+    const prepared = prepareRegularRequest(
+      {
+        role: "user",
+        content: targetText,
+        images: targetImages && targetImages.length > 0 ? targetImages : undefined,
+        selectionContext: targetContext,
+      },
+      sessionId
+    );
+    if (!prepared || !validateRequestBudget(prepared.payload)) return;
 
     // 打断当前生成
     if (isStreaming) {
       await handleStopGenerating();
     }
-
-    setTimeout(() => {
-      void executeSendMessage(targetText, targetImages, targetContext);
-    }, 60);
+    if (activeSessionIdRef.current !== sessionId) return;
+    const accepted = executeSendMessage(
+      targetText,
+      targetImages,
+      targetContext,
+      { allowDuringManualDispatch: true }
+    );
+    if (!accepted) return;
+    queueBlockedSessionIdRef.current = null;
+    setQueueBlocked(false);
+    if (queuedId) {
+      setPromptQueue((prev) => prev.filter((item) => item.id !== queuedId));
+    } else if (composerSnapshotRef.current === initialComposerSnapshot) {
+      setInputText("");
+      setActiveQuotedText(null);
+      setImages([]);
+      setPendingSelectionContext(undefined);
+      composerDraftsRef.current.delete(sessionId);
+    }
+    } finally {
+      manualDispatchRef.current = false;
+      setIsManualDispatching(false);
+    }
   };
 
   // 队列条操作：提升/优先发送
   const handlePromoteQueuedPrompt = async (id: string) => {
     const target = promptQueue.find((p) => p.id === id);
     if (!target || !activeSession) return;
+    if (manualDispatchRef.current) return;
+    manualDispatchRef.current = true;
+    setIsManualDispatching(true);
+    try {
 
-    setPromptQueue((prev) => prev.filter((p) => p.id !== id));
+    const sessionId = activeSessionIdRef.current;
+    if (target.sessionId !== sessionId) {
+      showToast("请回到该问题所属会话后发送");
+      return;
+    }
+    const prepared = prepareRegularRequest(
+      {
+        role: "user",
+        content: target.text,
+        images: target.images,
+        selectionContext: target.selectionContext,
+      },
+      sessionId
+    );
+    if (!prepared || !validateRequestBudget(prepared.payload)) return;
 
     if (isStreaming) {
       await handleStopGenerating();
     }
-
-    setTimeout(() => {
-      void executeSendMessage(
-        target.text,
-        target.images,
-        target.selectionContext
-      );
-    }, 60);
+    if (activeSessionIdRef.current !== sessionId) return;
+    const accepted = executeSendMessage(
+      target.text,
+      target.images,
+      target.selectionContext,
+      { allowDuringManualDispatch: true }
+    );
+    if (accepted) {
+      setPromptQueue((prev) => prev.filter((p) => p.id !== id));
+      queueBlockedSessionIdRef.current = null;
+      setQueueBlocked(false);
+    }
+    } finally {
+      manualDispatchRef.current = false;
+      setIsManualDispatching(false);
+    }
   };
 
   // 队列条操作：移除单项
   const handleRemoveQueuedPrompt = (id: string) => {
     setPromptQueue((prev) => prev.filter((p) => p.id !== id));
+    if (queueBlockedSessionIdRef.current === activeSessionIdRef.current) {
+      queueBlockedSessionIdRef.current = null;
+    }
+    setQueueBlocked(false);
   };
 
   // 队列条操作：清空全部
   const handleClearAllQueue = () => {
-    setPromptQueue([]);
+    const sessionId = activeSessionIdRef.current;
+    setPromptQueue((prev) =>
+      prev.filter((prompt) => prompt.sessionId !== sessionId)
+    );
+    if (queueBlockedSessionIdRef.current === sessionId) {
+      queueBlockedSessionIdRef.current = null;
+      setQueueBlocked(false);
+    }
   };
 
   // 开启用户消息行内编辑
@@ -1802,14 +2102,17 @@ export default function SidePanelApp() {
   // 保存用户编辑后的内容并重新发起生成
   const handleSaveAndResendMessage = async (messageId: string) => {
     const text = editingText.trim();
-    if (!text || isStreaming || !activeSession) return;
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === activeSessionIdRef.current
+    );
+    if (!text || isStreaming || !currentSession) return;
 
-    const userMsgIndex = activeSession.messages.findIndex(
+    const userMsgIndex = currentSession.messages.findIndex(
       (m) => m.id === messageId
     );
     if (userMsgIndex === -1) return;
 
-    const oldUserMsg = activeSession.messages[userMsgIndex];
+    const oldUserMsg = currentSession.messages[userMsgIndex];
     const isWebReadingMessage = oldUserMsg.pageMeta?.isWebPageReading === true;
     const userInstruction =
       isWebReadingMessage && text !== oldUserMsg.content
@@ -1825,25 +2128,7 @@ export default function SidePanelApp() {
     }
 
     // 截断该消息之后的所有历史轮次
-    const preservedHistory = activeSession.messages.slice(0, userMsgIndex);
-
-    const assistantMessageId = createRequestId();
-    const currentRequestId = createRequestId();
-    const replayReadingRunId = replayPrompt?.success
-      ? oldUserMsg.pageMeta?.readingRunId
-      : undefined;
-    const ownedReplayRunId =
-      replayReadingRunId &&
-      webReadingProgressRef.current.get(activeSession.id)?.readingRunId ===
-        replayReadingRunId
-        ? replayReadingRunId
-        : undefined;
-    registerActiveRequest({
-      requestId: currentRequestId,
-      sessionId: activeSession.id,
-      assistantMessageId,
-      readingRunId: ownedReplayRunId,
-    });
+    const preservedHistory = currentSession.messages.slice(0, userMsgIndex);
 
     const updatedUserMsg: ChatMessage = {
       ...oldUserMsg,
@@ -1857,6 +2142,44 @@ export default function SidePanelApp() {
       createdAt: Date.now(),
       status: "completed",
     };
+
+    let messagesPayload: ChatPayloadMessage[];
+    if (replayPrompt?.success) {
+      const historyPayload = buildWebReadingHistoryPayload(preservedHistory);
+      const hasSystem = historyPayload.some((message) => message.role === "system");
+      const needsReadingSystem = oldUserMsg.pageMeta?.contextOnly !== true;
+      messagesPayload = [
+        ...(needsReadingSystem && !hasSystem
+          ? [{ role: "system" as const, content: WEB_READING_SYSTEM_PROMPT }]
+          : []),
+        ...historyPayload,
+        { role: "user" as const, content: replayPrompt.prompt },
+      ];
+    } else {
+      messagesPayload = buildWebReadingHistoryPayload(
+        preservedHistory,
+        updatedUserMsg
+      );
+    }
+    if (!validateRequestBudget(messagesPayload)) return;
+
+    const assistantMessageId = createRequestId();
+    const currentRequestId = createRequestId();
+    const replayReadingRunId = replayPrompt?.success
+      ? oldUserMsg.pageMeta?.readingRunId
+      : undefined;
+    const ownedReplayRunId =
+      replayReadingRunId &&
+      webReadingProgressRef.current.get(currentSession.id)?.readingRunId ===
+        replayReadingRunId
+        ? replayReadingRunId
+        : undefined;
+    registerActiveRequest({
+      requestId: currentRequestId,
+      sessionId: currentSession.id,
+      assistantMessageId,
+      readingRunId: ownedReplayRunId,
+    });
 
     const assistantMessage: ChatMessage = {
       id: assistantMessageId,
@@ -1872,9 +2195,9 @@ export default function SidePanelApp() {
     const isFirstUserMessage =
       preservedHistory.filter((m) => m.role === "user").length === 0;
     const newTitle =
-      isFirstUserMessage && !activeSession.title.startsWith("速读:")
+      isFirstUserMessage && !currentSession.title.startsWith("速读:")
         ? text.slice(0, 18) + (text.length > 18 ? "..." : "")
-        : activeSession.title;
+        : currentSession.title;
 
     const nextMessages = [
       ...preservedHistory,
@@ -1882,14 +2205,14 @@ export default function SidePanelApp() {
       assistantMessage,
     ];
     const updatedSession: ChatSession = {
-      ...activeSession,
+      ...currentSession,
       title: newTitle,
       messages: nextMessages,
       updatedAt: Date.now(),
     };
 
     const nextSessions = sessionsRef.current.map((s) =>
-      s.id === activeSession.id ? updatedSession : s
+      s.id === currentSession.id ? updatedSession : s
     );
     sessionsRef.current = nextSessions;
     setSessions(nextSessions);
@@ -1903,7 +2226,7 @@ export default function SidePanelApp() {
 
     const savedWithReadingProgress = replayPrompt?.success
       ? rewindSessionWebReadingProgress(
-        activeSession.id,
+        currentSession.id,
         updatedUserMsg,
         currentRequestId,
         assistantMessageId
@@ -1914,51 +2237,26 @@ export default function SidePanelApp() {
     }
 
     try {
-      let messagesPayload: any[];
-      if (replayPrompt?.success) {
-        const historyPayload = buildWebReadingHistoryPayload(preservedHistory);
-        const hasSystem = historyPayload.some(
-          (message) => message.role === "system"
-        );
-        messagesPayload = [
-          ...(hasSystem
-            ? []
-            : [
-                {
-                  role: "system" as const,
-                  content: WEB_READING_SYSTEM_PROMPT,
-                },
-              ]),
-          ...historyPayload,
-          { role: "user" as const, content: replayPrompt.prompt },
-        ];
-      } else {
-        messagesPayload = buildHistoryPayload(
-          preservedHistory,
-          updatedUserMsg
-        );
-      }
-
       const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
-        sessionId: activeSession.id,
+        sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
-            activeSession.id,
+            currentSession.id,
             assistantMessageId,
             response?.error || "网页通读未返回有效结果，请重试",
             currentRequestId
           );
         }
         settleSessionWebReadingProgress(
-          activeSession.id,
+          currentSession.id,
           oldUserMsg.pageMeta?.readingRunId,
           currentRequestId,
           response
@@ -1967,7 +2265,7 @@ export default function SidePanelApp() {
     } catch (error: any) {
       logger.error("重新发送编辑消息失败:", error);
       markAssistantMessageAsError(
-        activeSession.id,
+        currentSession.id,
         assistantMessageId,
         error?.message || "请求发送失败，请检查网络或设置",
         currentRequestId
@@ -2006,6 +2304,10 @@ export default function SidePanelApp() {
       overviewRequestIdRef.current = undefined;
       setExtractError(prepared.error);
       showToast(prepared.error);
+      return;
+    }
+    if (!validateRequestBudget(prepared.messages)) {
+      overviewRequestIdRef.current = undefined;
       return;
     }
 
@@ -2073,15 +2375,18 @@ export default function SidePanelApp() {
     assistantMessageId: string,
     bypassJargonVault = false
   ) => {
-    if (isStreaming || !activeSession) return;
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === activeSessionIdRef.current
+    );
+    if (isStreaming || !currentSession) return;
 
-    const targetAssistantIndex = activeSession.messages.findIndex(
+    const targetAssistantIndex = currentSession.messages.findIndex(
       (message) =>
         message.id === assistantMessageId && message.role === "assistant"
     );
     const precedingUserMessage =
       targetAssistantIndex > 0
-        ? activeSession.messages[targetAssistantIndex - 1]
+        ? currentSession.messages[targetAssistantIndex - 1]
         : undefined;
     if (
       precedingUserMessage?.role === "user" &&
@@ -2095,13 +2400,13 @@ export default function SidePanelApp() {
     }
 
     const retryResult = retryAssistantMessageAndTruncate(
-      activeSession.messages,
+      currentSession.messages,
       assistantMessageId
     );
     const { assistantIndex } = retryResult;
 
     // 截取该回答之前的所有上下文
-    const historyMessages = activeSession.messages.slice(0, assistantIndex);
+    const historyMessages = currentSession.messages.slice(0, assistantIndex);
     if (historyMessages.length === 0) return;
 
     const prevUserMsg = historyMessages[historyMessages.length - 1];
@@ -2116,6 +2421,27 @@ export default function SidePanelApp() {
       return;
     }
 
+    let messagesPayload: ChatPayloadMessage[];
+    if (replayPrompt?.success) {
+      const earlierHistoryPayload = buildWebReadingHistoryPayload(
+        historyMessages.slice(0, -1)
+      );
+      const hasSystem = earlierHistoryPayload.some(
+        (message) => message.role === "system"
+      );
+      const needsReadingSystem = prevUserMsg.pageMeta?.contextOnly !== true;
+      messagesPayload = [
+        ...(needsReadingSystem && !hasSystem
+          ? [{ role: "system" as const, content: WEB_READING_SYSTEM_PROMPT }]
+          : []),
+        ...earlierHistoryPayload,
+        { role: "user" as const, content: replayPrompt.prompt },
+      ];
+    } else {
+      messagesPayload = buildWebReadingHistoryPayload(historyMessages);
+    }
+    if (!validateRequestBudget(messagesPayload)) return;
+
     setRegeneratingId(assistantMessageId);
     setTimeout(() => setRegeneratingId(null), 800);
 
@@ -2125,25 +2451,25 @@ export default function SidePanelApp() {
       : undefined;
     const ownedReplayRunId =
       replayReadingRunId &&
-      webReadingProgressRef.current.get(activeSession.id)?.readingRunId ===
+      webReadingProgressRef.current.get(currentSession.id)?.readingRunId ===
         replayReadingRunId
         ? replayReadingRunId
         : undefined;
     registerActiveRequest({
       requestId: currentRequestId,
-      sessionId: activeSession.id,
+      sessionId: currentSession.id,
       assistantMessageId,
       readingRunId: ownedReplayRunId,
     });
 
     const updatedSession: ChatSession = {
-      ...activeSession,
+      ...currentSession,
       messages: retryResult.updatedMessages,
       updatedAt: Date.now(),
     };
 
     const nextSessions = sessionsRef.current.map((s) =>
-      s.id === activeSession.id ? updatedSession : s
+      s.id === currentSession.id ? updatedSession : s
     );
     sessionsRef.current = nextSessions;
     setSessions(nextSessions);
@@ -2154,7 +2480,7 @@ export default function SidePanelApp() {
 
     const savedWithReadingProgress = replayPrompt?.success
       ? rewindSessionWebReadingProgress(
-        activeSession.id,
+        currentSession.id,
         prevUserMsg,
         currentRequestId,
         assistantMessageId
@@ -2165,36 +2491,12 @@ export default function SidePanelApp() {
     }
 
     try {
-      let messagesPayload: any[];
-      if (replayPrompt?.success) {
-        const earlierHistoryPayload = buildWebReadingHistoryPayload(
-          historyMessages.slice(0, -1)
-        );
-        const hasSystem = earlierHistoryPayload.some(
-          (message) => message.role === "system"
-        );
-        messagesPayload = [
-          ...(hasSystem
-            ? []
-            : [
-                {
-                  role: "system" as const,
-                  content: WEB_READING_SYSTEM_PROMPT,
-                },
-              ]),
-          ...earlierHistoryPayload,
-          { role: "user" as const, content: replayPrompt.prompt },
-        ];
-      } else {
-        messagesPayload = buildHistoryPayload(historyMessages);
-      }
-
       const response = (await browser.runtime.sendMessage({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
         source: "sidepanel",
-        sessionId: activeSession.id,
+        sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
         bypassJargonVault,
@@ -2202,14 +2504,14 @@ export default function SidePanelApp() {
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
-            activeSession.id,
+            currentSession.id,
             assistantMessageId,
             response?.error || "网页通读未返回有效结果，请重试",
             currentRequestId
           );
         }
         settleSessionWebReadingProgress(
-          activeSession.id,
+          currentSession.id,
           prevUserMsg.pageMeta?.readingRunId,
           currentRequestId,
           response
@@ -2218,7 +2520,7 @@ export default function SidePanelApp() {
     } catch (error: any) {
       logger.error("重新生成回答失败:", error);
       markAssistantMessageAsError(
-        activeSession.id,
+        currentSession.id,
         assistantMessageId,
         error?.message || "重新生成失败，请检查网络或设置",
         currentRequestId
@@ -2328,6 +2630,13 @@ export default function SidePanelApp() {
     }
     const hadWebReadingProgress = webReadingProgressRef.current.has(sessionId);
     const filtered = sessionsRef.current.filter((s) => s.id !== sessionId);
+    setPromptQueue((prev) =>
+      prev.filter((prompt) => prompt.sessionId !== sessionId)
+    );
+    if (queueBlockedSessionIdRef.current === sessionId) {
+      queueBlockedSessionIdRef.current = null;
+      setQueueBlocked(false);
+    }
     composerDraftsRef.current.delete(sessionId);
     if (filtered.length === 0) {
       const fresh = createNewSession();
@@ -2763,7 +3072,7 @@ export default function SidePanelApp() {
             <button
               type="button"
               className={`web-read-btn ${isExtractingPage ? "loading" : ""}`}
-              title="一键提取并人话通读当前打开的网页正文"
+              title="将当前网页正文加入对话"
               disabled={isStreaming || isExtractingPage}
               onClick={() => void handleReadCurrentPage()}
             >
@@ -2815,7 +3124,7 @@ export default function SidePanelApp() {
         <div className="notification-bar virtual-scroll-banner">
           <Tips theme="outline" size="16" />
           <span className="banner-text">
-            检测到当前页面疑似超长虚拟文档（预估约 {virtualScrollNotice.totalScreens} 屏），当前仅通读了已渲染的前段。
+            检测到当前页面疑似超长虚拟文档（预估约 {virtualScrollNotice.totalScreens} 屏），当前已采集已渲染的前段。
           </span>
           <button
             type="button"
@@ -2913,7 +3222,11 @@ export default function SidePanelApp() {
                       <button
                         type="button"
                         className="delete-item-btn"
-                        title="删除会话"
+                        title={
+                          session.id === activeSessionId
+                            ? "删除会话"
+                            : `删除会话：${session.title}`
+                        }
                         onClick={(e) => handleDeleteSession(session.id, e)}
                       >
                         <Delete theme="outline" size="14" />
@@ -2973,7 +3286,7 @@ export default function SidePanelApp() {
                 </div>
                 <h2 className="empty-title">人话翻译与长文通读</h2>
                 <p className="empty-desc">
-                  一键提取网页长文输出接地气速读报告，支持多轮深度追问与黑话生词沉淀。
+                  将当前网页正文附加到对话，选择参与回答的范围，再输入问题。
                 </p>
 
                 {/* 突出展示的一键通读当前网页卡片 */}
@@ -2986,11 +3299,7 @@ export default function SidePanelApp() {
                     <h3 className="hero-title">📄 一键人话通读当前网页</h3>
                   </div>
                   <p className="hero-desc">
-                    智能提取正文并一键输出：
-                    <strong>💡大白话总览</strong> +{" "}
-                    <strong>📖核心黑话速查表</strong> +{" "}
-                    <strong>🎯要点与行动项</strong> +{" "}
-                    <strong>💬深度追问指引</strong>。
+                    提取正文后，你可以在网页上下文卡片中选择范围，再围绕原文提问。
                   </p>
                   <button
                     type="button"
@@ -3005,7 +3314,7 @@ export default function SidePanelApp() {
                           size="16"
                           className="spin-icon"
                         />
-                        <span>正在提取网页正文并生成人话速读...</span>
+                        <span>正在采集网页正文...</span>
                       </>
                     ) : (
                       <>
@@ -3152,6 +3461,19 @@ export default function SidePanelApp() {
                                 </span>
                               </div>
                             </div>
+                          ) :
+                            message.pageMeta?.contextOnly ? (
+                            <PageContextCard
+                              meta={message.pageMeta}
+                              disabled={isStreaming || isExtractingPage}
+                              onSelectionChange={(segments) =>
+                                handlePageContextSelectionChange(
+                                  activeSession.id,
+                                  message.id,
+                                  segments
+                                )
+                              }
+                            />
                           ) : message.pageMeta?.isWebPageReading ? (
                             <div className="webpage-user-card">
                               <div className="webpage-badge">
@@ -3523,13 +3845,29 @@ export default function SidePanelApp() {
               )}
 
             {/* 提示词排队队列卡片条 (Prompt Queue Bar) */}
-            {promptQueue.length > 0 && (
-              <PromptQueueBar
-                queue={promptQueue}
-                onPromote={handlePromoteQueuedPrompt}
-                onRemove={handleRemoveQueuedPrompt}
-                onClearAll={handleClearAllQueue}
-              />
+            {currentSessionQueue.length > 0 && (
+              <>
+                <PromptQueueBar
+                  queue={currentSessionQueue}
+                  onPromote={handlePromoteQueuedPrompt}
+                  onRemove={handleRemoveQueuedPrompt}
+                  onClearAll={handleClearAllQueue}
+                />
+                {currentQueueBlocked && (
+                  <div className="prompt-queue-blocked" role="status">
+                    <span>排队已暂停，请减少网页段落后重试</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        queueBlockedSessionIdRef.current = null;
+                        setQueueBlocked(false);
+                      }}
+                    >
+                      重试队首
+                    </button>
+                  </div>
+                )}
+              </>
             )}
 
             {/* 划词引用胶囊预览条 */}

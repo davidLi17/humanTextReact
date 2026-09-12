@@ -11,6 +11,7 @@ import {
   MAX_PAGE_CONTENT_CHARS,
   type WebPageMetadata,
 } from "./webReadingPrompt";
+import { buildAttachedPageReplayPrompt } from "./pageContext";
 
 export const WEB_READING_REPLAY_MISSING_MESSAGE =
   "这条旧网页记录没有保存可重放的正文，请重新点击「通读当前网页」。";
@@ -74,7 +75,8 @@ export function buildReplayableWebReadingPrompt(
 ): ReplayableWebReadingPromptResult {
   const meta = message.pageMeta;
   const sourceContent = meta?.sourceContent?.trim();
-  if (!meta?.isWebPageReading || !sourceContent) {
+  const hasAttachedPage = Boolean(meta?.attachedPage);
+  if (!meta?.isWebPageReading || (!sourceContent && !hasAttachedPage)) {
     return { success: false, error: WEB_READING_REPLAY_MISSING_MESSAGE };
   }
 
@@ -83,17 +85,19 @@ export function buildReplayableWebReadingPrompt(
   const page: WebPageMetadata = {
     title: meta.title,
     url: meta.url,
-    content: sourceContent,
+    content: sourceContent || "",
     wordCount: meta.wordCount,
   };
   let basePrompt: string;
   if (meta.contextOnly) {
-    // 仅附加正文：重放中性背景，避免把“请生成速读报告”重新塞回历史
-    basePrompt = buildAttachedPageContextPrompt(page);
+    // 新快照按用户已选范围重放；早期记录继续沿用原有中性背景 Prompt。
+    basePrompt = meta.attachedPage
+      ? buildAttachedPageReplayPrompt(meta)
+      : buildAttachedPageContextPrompt(page);
   } else if (segmentIndex > 1) {
     basePrompt = buildWebReadingContinuationPrompt({
       title: meta.title,
-      segmentContent: sourceContent,
+      segmentContent: sourceContent || "",
       segmentIndex,
       totalSegments,
     });

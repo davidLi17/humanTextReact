@@ -27,7 +27,9 @@ const SELECTED_TEXT = "对齐颗粒度并形成增长飞轮";
 
 function longArticleHtml() {
   const paragraphs = Array.from({ length: 560 }, (_, index) =>
-    `<p>第 ${index + 1} 段阶段三长文正文：围绕用户价值、交付节奏和反馈闭环展开，保留唯一段落序号以验证真实分段恢复和继续通读流程。</p>`
+    `<p>第 ${index + 1} 段阶段三长文正文：围绕用户价值、交付节奏和反馈闭环展开，保留唯一段落序号以验证真实分段恢复和继续通读流程。${
+      index === 559 ? "末段唯一标记：只应在用户选中末段后进入真实模型请求。" : ""
+    }</p>`
   ).join("");
   return `<!doctype html>
     <html lang="zh-CN">
@@ -277,7 +279,7 @@ test("真实选区经过 Content、Background 和本地 SSE 显示浮窗结果",
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
-test("网页正文附加到当前会话，重开侧边栏后追问携带正文", async ({ harness }) => {
+test("网页正文附加到当前会话，重开侧边栏后追问携带正文", async ({ harness }, testInfo) => {
   const article = await harness.context.newPage();
   await article.goto(`${harness.server.baseUrl}/long-article`);
   const sidepanel = await harness.context.newPage();
@@ -323,20 +325,45 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
   expect(card.pageMeta?.contextOnly).toBe(true);
   expect(card.pageMeta?.url).toBe(`${harness.server.baseUrl}/long-article`);
   expect(card.pageMeta?.sourceContent).toContain("第 1 段阶段三长文正文");
+  expect(card.pageMeta?.attachedPage).toMatchObject({
+    version: 1,
+    selectedSegments: [1],
+  });
   expect(harness.server.modelRequests).toHaveLength(0);
+
+  // 只选末段后，重开侧边栏和真实请求都必须沿用这一持久化范围。
+  const pageContextCard = sidepanel.getByLabel("网页上下文");
+  await pageContextCard.getByText("预览已保存原文", { exact: true }).click();
+  const segmentCheckboxes = pageContextCard.getByRole("checkbox", {
+    name: /第 \d+ 段参与回答/,
+  });
+  const segmentCount = await segmentCheckboxes.count();
+  expect(segmentCount).toBeGreaterThan(1);
+  await segmentCheckboxes.nth(0).uncheck();
+  await segmentCheckboxes.nth(segmentCount - 1).check();
+  await expect.poll(async () => {
+    const sessions = await readSessions(sidepanel);
+    return sessions[0]?.messages[2]?.pageMeta?.attachedPage?.selectedSegments;
+  }).toEqual([segmentCount]);
+  const selectedAttachedSessions = await readSessions(sidepanel);
+  await sidepanel.setViewportSize({ width: 400, height: 800 });
+  await sidepanel.screenshot({
+    path: testInfo.outputPath("page-context.png"),
+    fullPage: true,
+  });
 
   // 等待明确的去重反馈，避免在异步提取结束前检查消息数量。
   await expect(readButton).toBeEnabled();
   await readButton.evaluate((element) => (element as HTMLButtonElement).click());
   await expect(sidepanel.getByText("该网页正文已在当前对话中，无需重复附加", { exact: true })).toBeVisible();
-  expect(await readSessions(sidepanel)).toEqual(attachedSessions);
+  expect(await readSessions(sidepanel)).toEqual(selectedAttachedSessions);
   expect(harness.server.modelRequests).toHaveLength(0);
 
   await sidepanel.close();
   const restoredSidepanel = await harness.context.newPage();
   await restoredSidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
   await expect(restoredSidepanel.getByText(session.messages[0].content, { exact: true })).toBeVisible();
-  expect(await readSessions(restoredSidepanel)).toEqual(attachedSessions);
+  expect(await readSessions(restoredSidepanel)).toEqual(selectedAttachedSessions);
   expect(harness.server.modelRequests).toHaveLength(0);
 
   const question = "结合网页正文，给出一个改进交付的建议。";
@@ -355,8 +382,9 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
     typeof message.content === "string" && message.content.includes("【网页正文内容】")
   );
   expect(pageContext).toBeDefined();
-  expect(pageContext.content).toContain(card.pageMeta!.sourceContent);
-  expect(pageContext.content).toContain("以上网页正文已作为背景资料附加到本次对话");
+  expect(pageContext.content).toContain("末段唯一标记：只应在用户选中末段后进入真实模型请求。");
+  expect(pageContext.content).not.toContain("第 1 段阶段三长文正文");
+  expect(pageContext.content).toContain("作为背景资料附加到本次对话");
   expect(pageContext.content).not.toContain("请按照系统提示词的四个板块");
   const finalSessions = await readSessions(restoredSidepanel);
   expect(finalSessions).toHaveLength(1);

@@ -1,0 +1,195 @@
+.page-context-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: calc(12px * var(--ht-font-scale, 1));
+  line-height: 1.45;
+
+  &__header,
+  &__heading,
+  &__metrics,
+  &__selection-actions,
+  &__segment-option,
+  &__preview-tabs {
+    display: flex;
+    align-items: center;
+  }
+
+  &__header {
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  &__heading {
+    min-width: 0;
+    gap: 6px;
+
+    strong {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--color-text-primary);
+      font-size: calc(13px * var(--ht-font-scale, 1));
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  &__badge {
+    flex: 0 0 auto;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--color-primary-light);
+    color: var(--color-primary);
+    font-size: calc(10px * var(--ht-font-scale, 1));
+    font-weight: 600;
+  }
+
+  &__source {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__metrics {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    color: var(--color-text-secondary);
+    font-size: calc(11px * var(--ht-font-scale, 1));
+
+    span {
+      white-space: nowrap;
+    }
+  }
+
+  &__notice {
+    margin: 0;
+    color: var(--color-text-tertiary);
+    font-size: calc(11px * var(--ht-font-scale, 1));
+  }
+
+  &__details {
+    border-top: 1px solid var(--color-border-subtle);
+    padding-top: 6px;
+
+    summary {
+      cursor: pointer;
+      color: var(--color-text-primary);
+      font-weight: 600;
+    }
+  }
+
+  &__preview-tabs {
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+
+    button,
+    & + .page-context-card__preview + .page-context-card__selection button {
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      background: var(--color-bg-primary);
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      font-size: calc(11px * var(--ht-font-scale, 1));
+      line-height: 1.35;
+
+      &:hover:not(:disabled),
+      &[aria-pressed="true"] {
+        border-color: var(--color-primary);
+        background: var(--color-primary-light);
+        color: var(--color-primary);
+      }
+
+      &:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+    }
+
+    button {
+      padding: 3px 7px;
+    }
+  }
+
+  &__preview {
+    max-height: 140px;
+    margin: 7px 0 0;
+    overflow: auto;
+    padding: 7px;
+    border-radius: 6px;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font: inherit;
+    font-size: calc(11px * var(--ht-font-scale, 1));
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  &__selection {
+    min-width: 0;
+    margin: 8px 0 0;
+    padding: 7px;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 6px;
+
+    legend {
+      padding: 0 3px;
+      color: var(--color-text-primary);
+      font-size: calc(11px * var(--ht-font-scale, 1));
+    }
+  }
+
+  &__selection-actions {
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+    color: var(--color-text-tertiary);
+    font-size: calc(11px * var(--ht-font-scale, 1));
+
+    button {
+      padding: 3px 6px;
+      white-space: nowrap;
+    }
+  }
+
+  &__segment-option {
+    gap: 5px;
+    min-width: 0;
+    padding: 4px 0;
+    color: var(--color-text-primary);
+    cursor: pointer;
+
+    input {
+      flex: 0 0 auto;
+    }
+
+    span {
+      min-width: 0;
+    }
+
+    em {
+      margin-left: auto;
+      color: var(--color-text-tertiary);
+      font-size: calc(10px * var(--ht-font-scale, 1));
+      font-style: normal;
+      white-space: nowrap;
+    }
+
+    &:has(input:disabled) {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+  }
+}

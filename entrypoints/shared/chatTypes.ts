@@ -122,6 +122,22 @@ export interface ChatMessage {
     contextOnly?: boolean;
     /** 当前网页通读消息可重放的原文片段，最多保存一段。 */
     sourceContent?: string;
+    /**
+     * 网页作为背景资料时保存的有界正文快照。sourceContent 保留首段，
+     * 让早期记录与旧版重放逻辑继续可用。
+     */
+    attachedPage?: {
+      version: 1;
+      content: string;
+      /** 页面提取器实际拿到的正文长度，可能大于已保存快照。 */
+      capturedChars: number;
+      /** 仅表示页面可能还有尚未加载的内容，不表示本地快照被截断。 */
+      hasMoreContent: boolean;
+      /** 本轮带入模型的段序号，从 1 开始。空数组表示禁用该网页背景。 */
+      selectedSegments: number[];
+      /** 旧记录仅保存 sourceContent，升级选择时标记为不完整快照。 */
+      legacyPartial?: true;
+    };
     /** 当前原文片段在整篇网页中的序号，从 1 开始。 */
     segmentIndex?: number;
     /** 整篇网页预计分段数。 */
