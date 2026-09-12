@@ -1444,4 +1444,187 @@ describe("Sidepanel App 真实 React 交互", () => {
     expect(request.messages.at(-1).content).toContain(jargonItem.sourceContext);
     expect(request.messages.at(-1).content).toContain(jargonItem.sourceUrl);
   });
+
+  test("回答补讲保留旧回答，沿用网页上下文并固定关闭棱镜", async () => {
+    const attached = createAttachedPageMessage(
+      "补讲需要沿用的网页正文唯一标记" + "甲".repeat(80)
+    );
+    const session = {
+      id: "refinement-session",
+      title: "补讲测试",
+      createdAt: 100,
+      updatedAt: 300,
+      messages: [
+        attached,
+        {
+          id: "refinement-user",
+          role: "user" as const,
+          content: "解释这段内容",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+        {
+          id: "refinement-answer",
+          role: "assistant" as const,
+          content: "这是原回答，请换一种方式说明。",
+          createdAt: 300,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+      settings: { prismModeEnabled: true },
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("这是原回答，请换一种方式说明。");
+    fireEvent.click(screen.getByRole("button", { name: "这里没看懂" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "再白一点" }));
+
+    const request = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect(request.prismMode).toBe(false);
+    expect(request.bypassJargonVault).toBe(true);
+    expect(request.messages.at(-1).content).toContain(
+      "这是原回答，请换一种方式说明。"
+    );
+    expect(
+      request.messages.some((message: any) =>
+        String(message.content).includes("补讲需要沿用的网页正文唯一标记")
+      )
+    ).toBe(true);
+    expect(
+      (mock.localStore.sidepanel_chat_sessions as any[])[0].messages.some(
+        (message: any) => message.id === "refinement-answer"
+      )
+    ).toBe(true);
+  });
+
+  test("补讲选区只接受同一回答，跨回答时回退当前回答片段", async () => {
+    const session = {
+      id: "refinement-selection-session",
+      title: "补讲选区测试",
+      createdAt: 100,
+      updatedAt: 400,
+      messages: [
+        {
+          id: "q1",
+          role: "user" as const,
+          content: "问题一",
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "a1",
+          role: "assistant" as const,
+          content: "第一个回答片段",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+        {
+          id: "q2",
+          role: "user" as const,
+          content: "问题二",
+          createdAt: 300,
+          status: "completed" as const,
+        },
+        {
+          id: "a2",
+          role: "assistant" as const,
+          content: "第二个回答应该被引用",
+          createdAt: 400,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("第二个回答应该被引用");
+
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-message-id]")
+    );
+    const firstAnswer = rows.find((row) => row.dataset.messageId === "a1");
+    if (!firstAnswer) throw new Error("未找到第一个回答气泡");
+    const range = document.createRange();
+    range.selectNodeContents(firstAnswer);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".chat-content")!);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const actions = screen.getAllByRole("button", { name: "这里没看懂" });
+    fireEvent.click(actions[1]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "按原文逐句讲" }));
+
+    const request = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect(request.messages.at(-1).content).toContain("第二个回答应该被引用");
+    expect(request.messages.at(-1).content).not.toContain("第一个回答片段");
+  });
+
+  test("补讲回答失败后重试仍物化同一份定向指令", async () => {
+    const session = {
+      id: "refinement-retry-session",
+      title: "补讲重试测试",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        {
+          id: "retry-answer",
+          role: "assistant" as const,
+          content: "需要补讲的原回答",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("需要补讲的原回答");
+    fireEvent.click(screen.getByRole("button", { name: "这里没看懂" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "换个贴合本文的例子" }));
+    const firstRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    const firstAssistantId = firstRequest.requestId;
+    mock.emitRuntimeMessage({
+      action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+      requestId: firstAssistantId,
+      sessionId: session.id,
+      content: "补讲结果",
+      done: true,
+    });
+    await screen.findByText("补讲结果");
+    const retryButtons = screen.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(retryButtons.at(-1)!);
+    const retryRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    expect(retryRequest.prismMode).toBe(false);
+    expect(retryRequest.bypassJargonVault).toBe(true);
+    expect(retryRequest.messages.at(-1).content).toContain("需要补讲的原回答");
+  });
 });

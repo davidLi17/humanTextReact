@@ -84,6 +84,12 @@ import {
   type JargonSaveDraft,
 } from "@/entrypoints/shared/jargonDraft";
 import {
+  buildExplanationRefinementMessageText,
+  createExplanationRefinementMeta,
+  normalizeExplanationRefinementMeta,
+  type ExplanationRefinementMode,
+} from "@/entrypoints/shared/explanationRefinement";
+import {
   downloadSessionJsonFile,
   downloadSessionMarkdownFile,
   formatSessionAsMarkdown,
@@ -315,6 +321,13 @@ export default function SidePanelApp() {
   }>({ left: 0, top: 0, placement: "top" });
   const [selectedQuoteText, setSelectedQuoteText] = useState<string>("");
   const [activeQuotedText, setActiveQuotedText] = useState<string | null>(null);
+  const [refinementSelection, setRefinementSelection] = useState<{
+    assistantMessageId: string;
+    text: string;
+  } | null>(null);
+  const [refinementMenuMessageId, setRefinementMenuMessageId] = useState<
+    string | null
+  >(null);
   const composerSnapshot = useMemo(
     () => ({
       sessionId: activeSessionId,
@@ -832,10 +845,13 @@ export default function SidePanelApp() {
     });
   };
 
-  const validateRequestBudget = (payload: ChatPayloadMessage[]) => {
+  const validateRequestBudget = (
+    payload: ChatPayloadMessage[],
+    options?: { prismMode?: boolean }
+  ) => {
     const result = checkChatRequestBudget(payload, {
       systemPrompt: requestSettingsRef.current.systemPrompt,
-      prismMode: requestSettingsRef.current.prismMode,
+      prismMode: options?.prismMode ?? requestSettingsRef.current.prismMode,
     });
     if (!result.ok) {
       const error = result.error || "请求内容超过当前字符预算，请缩减网页范围后重试。";
@@ -1146,14 +1162,43 @@ export default function SidePanelApp() {
 
       if (!isValidMessageSelection(selection, chatContentRef.current)) {
         setQuoteBarVisible(false);
+        setRefinementSelection(null);
         return;
       }
 
       const text = selection.toString().trim();
       if (!text) {
         setQuoteBarVisible(false);
+        setRefinementSelection(null);
         return;
       }
+
+      const messageElement = (node: Node | null) => {
+        const element = node?.nodeType === Node.TEXT_NODE
+          ? node.parentElement
+          : (node as HTMLElement | null);
+        return element?.closest<HTMLElement>("[data-message-id]");
+      };
+      const startMessage = messageElement(selection.anchorNode);
+      const endMessage = messageElement(selection.focusNode);
+      const selectedAssistantId =
+        startMessage?.dataset.messageId &&
+        startMessage.dataset.messageId === endMessage?.dataset.messageId
+          ? startMessage.dataset.messageId
+          : undefined;
+      const selectedAssistant = selectedAssistantId
+        ? sessionsRef.current
+            .find((session) => session.id === activeSessionIdRef.current)
+            ?.messages.find(
+            (message) =>
+              message.id === selectedAssistantId && message.role === "assistant"
+            )
+        : undefined;
+      setRefinementSelection(
+        selectedAssistant
+          ? { assistantMessageId: selectedAssistant.id, text: text.slice(0, 1000) }
+          : null
+      );
 
       try {
         const range = selection.getRangeAt(0);
@@ -1187,6 +1232,7 @@ export default function SidePanelApp() {
 
     const handleScroll = () => {
       setQuoteBarVisible(false);
+      setRefinementSelection(null);
       if (chatContentRef.current) {
         const { scrollTop, scrollHeight, clientHeight } = chatContentRef.current;
         const nextState = getScrollFollowState(
@@ -1885,7 +1931,12 @@ export default function SidePanelApp() {
     text: string,
     imagesToSend?: ChatMessage["images"],
     contextToSend?: SelectionContext,
-    options: { allowDuringManualDispatch?: boolean } = {}
+    options: {
+      allowDuringManualDispatch?: boolean;
+      refinementMeta?: ChatMessage["refinementMeta"];
+      prismMode?: boolean;
+      bypassJargonVault?: boolean;
+    } = {}
   ): boolean => {
     if (manualDispatchRef.current && !options.allowDuringManualDispatch) {
       return false;
@@ -1900,9 +1951,17 @@ export default function SidePanelApp() {
       content: text,
       images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
       selectionContext: contextToSend,
+      refinementMeta: options.refinementMeta,
     };
     const prepared = prepareRegularRequest(userMessagePreview, currentSession.id);
-    if (!prepared || !validateRequestBudget(prepared.payload)) return false;
+    if (
+      !prepared ||
+      !validateRequestBudget(prepared.payload, {
+        prismMode: options.prismMode,
+      })
+    ) {
+      return false;
+    }
 
     setActiveView("chat");
     const userMessageId = createRequestId();
@@ -1920,6 +1979,7 @@ export default function SidePanelApp() {
       content: text,
       images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
       selectionContext: contextToSend,
+      refinementMeta: options.refinementMeta,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -1968,6 +2028,8 @@ export default function SidePanelApp() {
         sessionId: currentSession.id,
         messages: prepared.payload,
         thinkingEnabled,
+        prismMode: options.prismMode ?? requestSettingsRef.current.prismMode,
+        ...(options.bypassJargonVault ? { bypassJargonVault: true } : {}),
       }).catch((error: any) => {
       logger.error("发送翻译请求失败:", error);
       markAssistantMessageAsError(
@@ -1978,6 +2040,52 @@ export default function SidePanelApp() {
       );
       });
     return true;
+  };
+
+  const handleExplanationRefinement = (
+    assistantMessage: ChatMessage,
+    mode: ExplanationRefinementMode
+  ) => {
+    if (
+      assistantMessage.role !== "assistant" ||
+      !assistantMessage.content?.trim() ||
+      assistantMessage.status !== "completed" ||
+      isStreaming ||
+      isExtractingPage ||
+      !activeSession
+    ) {
+      return;
+    }
+    const assistantIndex = activeSession.messages.findIndex(
+      (message) => message.id === assistantMessage.id
+    );
+    const sourceUserMessage =
+      assistantIndex > 0 ? activeSession.messages[assistantIndex - 1] : undefined;
+    const excerpt =
+      refinementSelection?.assistantMessageId === assistantMessage.id
+        ? refinementSelection.text
+        : assistantMessage.content.slice(0, 1000);
+    const refinementMeta = createExplanationRefinementMeta({
+      mode,
+      targetAssistantMessageId: assistantMessage.id,
+      sourceUserMessageId:
+        sourceUserMessage?.role === "user" ? sourceUserMessage.id : undefined,
+      targetExcerpt: excerpt,
+    });
+    if (!refinementMeta) return;
+    const accepted = executeSendMessage(
+      buildExplanationRefinementMessageText(mode),
+      undefined,
+      undefined,
+      {
+        refinementMeta,
+        prismMode: false,
+        bypassJargonVault: true,
+      }
+    );
+    if (accepted) {
+      setRefinementSelection(null);
+    }
   };
 
   // 发送常规消息或进入排队队列（忙碌态允许排队）
@@ -2520,6 +2628,9 @@ export default function SidePanelApp() {
 
     const prevUserMsg = historyMessages[historyMessages.length - 1];
     if (prevUserMsg.role !== "user") return;
+    const refinementMeta = normalizeExplanationRefinementMeta(
+      prevUserMsg.refinementMeta
+    );
 
     const replayPrompt = prevUserMsg.pageMeta?.isWebPageReading
       ? buildReplayableWebReadingPrompt(prevUserMsg)
@@ -2549,7 +2660,13 @@ export default function SidePanelApp() {
     } else {
       messagesPayload = buildWebReadingHistoryPayload(historyMessages);
     }
-    if (!validateRequestBudget(messagesPayload)) return;
+    if (
+      !validateRequestBudget(messagesPayload, {
+        prismMode: refinementMeta ? false : undefined,
+      })
+    ) {
+      return;
+    }
 
     setRegeneratingId(assistantMessageId);
     setTimeout(() => setRegeneratingId(null), 800);
@@ -2608,7 +2725,8 @@ export default function SidePanelApp() {
         sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
-        bypassJargonVault,
+        prismMode: refinementMeta ? false : requestSettingsRef.current.prismMode,
+        bypassJargonVault: refinementMeta ? true : bypassJargonVault,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
@@ -3706,7 +3824,7 @@ export default function SidePanelApp() {
                           )}
 
                           {/* 悬浮操作区：编辑按钮 */}
-                          {!message.overviewMeta && (
+                          {!message.overviewMeta && !message.refinementMeta && (
                             <div className="user-bubble-actions">
                               <button
                                 type="button"
@@ -3784,6 +3902,48 @@ export default function SidePanelApp() {
                     {/* 卡片底部操作 */}
                     {message.content && message.role === "assistant" && (
                       <div className="bubble-footer">
+                        <div className="refinement-action-group">
+                          <button
+                            type="button"
+                            className="action-link-btn"
+                            title="针对这条回答补讲"
+                            disabled={
+                              isStreaming ||
+                              isExtractingPage ||
+                              message.status !== "completed"
+                            }
+                            onClick={() =>
+                              setRefinementMenuMessageId((current) =>
+                                current === message.id ? null : message.id
+                              )
+                            }
+                          >
+                            <span>这里没看懂</span>
+                          </button>
+                          {refinementMenuMessageId === message.id && (
+                            <div className="refinement-action-menu" role="menu">
+                              {(
+                                [
+                                  ["simpler", "再白一点"],
+                                  ["source-walkthrough", "按原文逐句讲"],
+                                  ["context-example", "换个贴合本文的例子"],
+                                ] as const
+                              ).map(([mode, label]) => (
+                                <button
+                                  key={mode}
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setRefinementMenuMessageId(null);
+                                    handleExplanationRefinement(message, mode);
+                                  }}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         {message.resultSource === "jargon-vault" && (
                           <span className="vault-result-badge">
                             来自生词本

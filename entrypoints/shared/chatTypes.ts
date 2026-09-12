@@ -2,6 +2,19 @@ import type { SelectionContext } from "./selectionContext";
 
 export type ChatRole = "system" | "user" | "assistant";
 
+export type ExplanationRefinementMode =
+  | "simpler"
+  | "source-walkthrough"
+  | "context-example";
+
+export interface ExplanationRefinementMeta {
+  version: 1;
+  mode: ExplanationRefinementMode;
+  targetAssistantMessageId: string;
+  sourceUserMessageId?: string;
+  targetExcerpt: string;
+}
+
 export interface ChatImageContent {
   data: string;
   mimeType: string;
@@ -27,6 +40,7 @@ export interface ChatPayloadMessage {
   content: string | MultimodalContentItem[];
   images?: ChatImageContent[];
   selectionContext?: SelectionContext;
+  refinementMeta?: ExplanationRefinementMeta;
 }
 
 /**
@@ -109,6 +123,7 @@ export interface ChatMessage {
   hasReasoning?: boolean;
   images?: ChatImageContent[];
   selectionContext?: SelectionContext;
+  refinementMeta?: ExplanationRefinementMeta;
   pageMeta?: {
     title: string;
     url: string;

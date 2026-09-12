@@ -12,6 +12,7 @@ import {
   type WebPageMetadata,
 } from "./webReadingPrompt";
 import { buildAttachedPageReplayPrompt } from "./pageContext";
+import { materializeExplanationRefinementMessage } from "./explanationRefinement";
 
 export const WEB_READING_REPLAY_MISSING_MESSAGE =
   "这条旧网页记录没有保存可重放的正文，请重新点击「通读当前网页」。";
@@ -122,13 +123,21 @@ export function buildWebReadingHistoryPayload(
 ) {
   return buildHistoryPayload(
     messages.map((message) => {
-      if (message.role !== "user" || !message.pageMeta?.isWebPageReading) {
-        return message;
+      const materialized = materializeExplanationRefinementMessage(message);
+      if (
+        materialized.role !== "user" ||
+        !materialized.pageMeta?.isWebPageReading
+      ) {
+        return materialized;
       }
-      const replay = buildReplayableWebReadingPrompt(message);
-      return replay.success ? { ...message, content: replay.prompt } : message;
+      const replay = buildReplayableWebReadingPrompt(materialized);
+      return replay.success
+        ? { ...materialized, content: replay.prompt }
+        : materialized;
     }),
     currentMessage
+      ? materializeExplanationRefinementMessage(currentMessage)
+      : currentMessage
   );
 }
 
