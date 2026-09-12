@@ -92,7 +92,21 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
       const groundedSegmentIndex = Number(
         serialized.match(/【原文第 (\d+) 段｜/)?.[1] || 1
       );
-      const content = serialized.includes("human-text-evidence:v1")
+      const content = serialized.includes("【对话主线回顾任务 v1】")
+        ? [
+            "## 当前目标",
+            "让本周交付按时完成。",
+            "",
+            "## 已确认结论",
+            "责任边界需要明确。",
+            "",
+            "## 未解决问题",
+            "验收时间尚未确定。",
+            "",
+            "## 下一步",
+            "今天确认验收时间并同步负责人。",
+          ].join("\n")
+        : serialized.includes("human-text-evidence:v1")
         ? [
             "围绕末段的交付信号优先推进验证。[依据:E1]",
             "",
@@ -601,6 +615,152 @@ test("按目标提取只用冻结选段，依据可核对且刷新后恢复", as
   await expect(
     restoredSidepanel.getByRole("button", { name: `查看第 ${segmentCount} 段原文` })
   ).toBeVisible();
+  expect(await readSessions(restoredSidepanel)).toEqual(stored);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("回顾对话主线只请求当前会话，四节结果和覆盖范围刷新后恢复", async ({ harness }, testInfo) => {
+  const sidepanel = await harness.context.newPage();
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const now = Date.now();
+  const currentSession: ChatSession = {
+    id: "recap-e2e-current",
+    title: "当前回顾会话",
+    createdAt: now,
+    updatedAt: now + 4,
+    messages: [
+      {
+        id: "recap-e2e-user",
+        role: "user",
+        content: "当前目标是让本周交付按时完成",
+        createdAt: now,
+        status: "completed",
+      },
+      {
+        id: "recap-e2e-answer-one",
+        role: "assistant",
+        content: "已经确认需要明确每个人的责任边界。",
+        createdAt: now + 1,
+        status: "completed",
+      },
+      {
+        id: "recap-e2e-page",
+        role: "user",
+        content: "通读网页: 《F3 回顾来源》",
+        pageMeta: {
+          title: "F3 回顾来源网页标题",
+          url: `${harness.server.baseUrl}/long-article`,
+          isWebPageReading: true,
+          contextOnly: true,
+          sourceContent: "F3网页正文绝不能重复进入回顾请求",
+          attachedPage: {
+            version: 1,
+            content: "F3网页正文绝不能重复进入回顾请求",
+            capturedChars: 20,
+            hasMoreContent: false,
+            selectedSegments: [1],
+          },
+        },
+        createdAt: now + 2,
+        status: "completed",
+      },
+      {
+        id: "recap-e2e-answer-two",
+        role: "assistant",
+        content: "尚未确认验收时间，需要下一步跟进。",
+        createdAt: now + 3,
+        status: "completed",
+      },
+    ],
+  };
+  const otherSession: ChatSession = {
+    id: "recap-e2e-other",
+    title: "另一会话",
+    createdAt: now,
+    updatedAt: now,
+    messages: [{
+      id: "recap-e2e-other-user",
+      role: "user",
+      content: "另一会话绝不进入当前回顾请求",
+      createdAt: now,
+      status: "completed",
+    }],
+  };
+  await sidepanel.evaluate(async ({ currentSession, otherSession }) => {
+    await (globalThis as any).chrome.storage.local.set({
+      sidepanel_chat_sessions: [currentSession, otherSession],
+      sidepanel_active_session_id: currentSession.id,
+    });
+  }, { currentSession, otherSession });
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await sidepanel.setViewportSize({ width: 380, height: 800 });
+  await expect(sidepanel.getByText("当前目标是让本周交付按时完成", { exact: true })).toBeVisible();
+
+  const readSessions = (page: import("@playwright/test").Page): Promise<ChatSession[]> =>
+    page.evaluate(async () => {
+      const stored = await (globalThis as any).chrome.storage.local.get("sidepanel_chat_sessions");
+      return stored.sidepanel_chat_sessions || [];
+    });
+  const recapButton = sidepanel.getByRole("button", { name: "回顾对话主线" });
+  await expect(recapButton).toBeVisible();
+  await recapButton.click();
+  await expect(sidepanel.getByText("当前目标", { exact: true })).toBeVisible();
+  await expect(sidepanel.getByText("已确认结论", { exact: true })).toBeVisible();
+  await expect(sidepanel.getByText("未解决问题", { exact: true })).toBeVisible();
+  await expect(sidepanel.getByText("下一步", { exact: true })).toBeVisible();
+  await expect(sidepanel.locator(".conversation-recap-scope")).toHaveText(
+    /本次覆盖\s*4\/4\s*条消息/
+  );
+  await expect.poll(() => sidepanel.evaluate(() =>
+    document.documentElement.scrollWidth <= window.innerWidth
+  )).toBe(true);
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+  const request = harness.server.modelRequests[0];
+  expect(request.authorization).toBe("Bearer fixture-only-key");
+  expect(request.body.messages).toHaveLength(2);
+  expect(request.body.messages[0].content).toContain("【对话主线回顾任务 v1】");
+  expect(request.body.messages[1].content).toContain("【覆盖信息】");
+  expect(request.body.messages[1].content).toContain("【本次覆盖的当前会话文字】");
+  const requestText = JSON.stringify(request.body.messages);
+  expect(requestText).toContain("当前目标是让本周交付按时完成");
+  expect(requestText).toContain("F3 回顾来源网页标题");
+  expect(requestText).not.toContain("F3网页正文绝不能重复进入回顾请求");
+  expect(requestText).not.toContain("另一会话绝不进入当前回顾请求");
+
+  const stored = await readSessions(sidepanel);
+  const recapUser = stored[0].messages.find((message: any) => message.conversationRecapMeta);
+  expect(recapUser).toMatchObject({
+    role: "user",
+    content: "回顾对话主线",
+    conversationRecapMeta: expect.objectContaining({
+      version: 1,
+      totalMessageCount: 4,
+      coveredMessageCount: 4,
+      truncated: false,
+      sourceMessageIds: expect.arrayContaining([
+        "recap-e2e-user",
+        "recap-e2e-answer-one",
+        "recap-e2e-page",
+        "recap-e2e-answer-two",
+      ]),
+    }),
+  });
+
+  const screenshotPath = testInfo.outputPath("conversation-recap.png");
+  await sidepanel.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach("conversation-recap", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
+  await sidepanel.close();
+  const restoredSidepanel = await harness.context.newPage();
+  await restoredSidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await expect(restoredSidepanel.locator("main")).toContainText(
+    "今天确认验收时间并同步负责人。"
+  );
+  await expect(restoredSidepanel.locator(".conversation-recap-scope")).toHaveText(
+    /本次覆盖\s*4\/4\s*条消息/
+  );
   expect(await readSessions(restoredSidepanel)).toEqual(stored);
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });

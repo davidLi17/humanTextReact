@@ -2004,4 +2004,182 @@ describe("Sidepanel App 真实 React 交互", () => {
     expect(retryRequest.bypassJargonVault).toBe(true);
     expect(retryRequest.messages.at(-1).content).toContain("需要补讲的原回答");
   });
+
+  test("回顾对话主线只发送当前会话，保留冻结范围并在刷新后恢复四节结果", async () => {
+    const pageCard = createAttachedPageMessage("回顾网页正文绝不能重复进入专用总结请求");
+    pageCard.pageMeta.title = "回顾来源网页标题";
+    const currentSession = {
+      id: "recap-current-session",
+      title: "当前会话",
+      createdAt: 100,
+      updatedAt: 400,
+      messages: [
+        {
+          id: "recap-user-1",
+          role: "user" as const,
+          content: "当前目标是让本周交付按时完成",
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "recap-assistant-1",
+          role: "assistant" as const,
+          content: "已经确认需要明确每个人的责任边界。",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+        pageCard,
+        {
+          id: "recap-assistant-2",
+          role: "assistant" as const,
+          content: "尚未确认验收时间，需要下一步跟进。",
+          createdAt: 400,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const otherSession = {
+      id: "recap-other-session",
+      title: "不应进入请求的会话",
+      createdAt: 500,
+      updatedAt: 600,
+      messages: [
+        {
+          id: "other-user",
+          role: "user" as const,
+          content: "另一会话绝不发送到当前回顾请求",
+          createdAt: 500,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [currentSession, otherSession],
+      activeSessionId: currentSession.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    const view = render(<SidePanelApp />);
+    await screen.findByText("当前目标是让本周交付按时完成");
+    fireEvent.click(screen.getByRole("button", { name: "回顾对话主线" }));
+    const request = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect(request.prismMode).toBe(false);
+    expect(request.bypassJargonVault).toBe(true);
+    expect(request.messages).toHaveLength(2);
+    expect(request.messages[0].content).toContain("【对话主线回顾任务 v1】");
+    expect(request.messages[1].content).toContain("【覆盖信息】");
+    expect(request.messages[1].content).toContain("【本次覆盖的当前会话文字】");
+    const requestText = JSON.stringify(request.messages);
+    expect(requestText).toContain("当前目标是让本周交付按时完成");
+    expect(requestText).toContain("回顾来源网页标题");
+    expect(requestText).not.toContain("回顾网页正文绝不能重复进入专用总结请求");
+    expect(requestText).not.toContain("另一会话绝不发送到当前回顾请求");
+
+    const storedAfterRequest = mock.localStore.sidepanel_chat_sessions as any[];
+    const recapUser = storedAfterRequest[0].messages.at(-2);
+    expect(recapUser).toMatchObject({
+      role: "user",
+      content: "回顾对话主线",
+      conversationRecapMeta: expect.objectContaining({
+        version: 1,
+        sourceFingerprint: expect.any(String),
+        totalMessageCount: 4,
+        coveredMessageCount: 4,
+        truncated: false,
+        sourceMessageIds: expect.arrayContaining([
+          "recap-user-1",
+          "recap-assistant-1",
+          pageCard.id,
+          "recap-assistant-2",
+        ]),
+      }),
+    });
+
+    const recapContent = [
+      "## 当前目标",
+      "让本周交付按时完成。",
+      "## 已确认结论",
+      "责任边界需要明确。",
+      "## 未解决问题",
+      "验收时间尚未确定。",
+      "## 下一步",
+      "今天确认验收时间并同步负责人。",
+    ].join("\n\n");
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        content: recapContent,
+        done: true,
+      });
+    });
+    await screen.findByText("当前目标", { exact: true });
+    expect(screen.getByText("已确认结论", { exact: true })).toBeTruthy();
+    expect(screen.getByText("未解决问题", { exact: true })).toBeTruthy();
+    expect(screen.getByText("下一步", { exact: true })).toBeTruthy();
+    expect(
+      document.querySelector(".conversation-recap-scope")?.textContent?.replace(/\s+/g, "")
+    ).toBe("本次覆盖4/4条消息");
+
+    view.unmount();
+    render(<SidePanelApp />);
+    await screen.findByText("今天确认验收时间并同步负责人。");
+    expect(
+      document.querySelector(".conversation-recap-scope")?.textContent?.replace(/\s+/g, "")
+    ).toBe("本次覆盖4/4条消息");
+  });
+
+  test("回顾失败重试仍使用首次冻结范围，空会话和忙时按钮禁用", async () => {
+    const emptyMock = createBrowserMock();
+    setTestGlobal("browser", emptyMock.browser);
+    const emptyView = render(<SidePanelApp />);
+    await screen.findByText("人话翻译与长文通读");
+    expect(
+      (screen.getByRole("button", {
+        name: "回顾对话主线",
+      }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    emptyView.unmount();
+
+    const session = createOngoingSession();
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    const recapButton = screen.getByRole("button", { name: "回顾对话主线" });
+    fireEvent.click(recapButton);
+    const firstRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect((recapButton as HTMLButtonElement).disabled).toBe(true);
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: firstRequest.requestId,
+        sessionId: firstRequest.sessionId,
+        error: "回顾服务暂时不可用",
+        done: true,
+      });
+    });
+    await screen.findByText("回顾服务暂时不可用");
+    fireEvent.click(screen.getByTitle("重试生成"));
+    const retryRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    expect(retryRequest.prismMode).toBe(false);
+    expect(retryRequest.bypassJargonVault).toBe(true);
+    expect(retryRequest.messages).toEqual(firstRequest.messages);
+  });
 });

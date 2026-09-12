@@ -43,6 +43,7 @@ export interface ChatPayloadMessage {
   selectionContext?: SelectionContext;
   refinementMeta?: ExplanationRefinementMeta;
   groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
+  conversationRecapMeta?: import("./conversationRecap").ConversationRecapMeta;
 }
 
 /**
@@ -134,6 +135,7 @@ export interface ChatMessage {
   selectionContext?: SelectionContext;
   refinementMeta?: ExplanationRefinementMeta;
   groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
+  conversationRecapMeta?: import("./conversationRecap").ConversationRecapMeta;
   pageMeta?: {
     title: string;
     url: string;

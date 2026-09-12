@@ -96,6 +96,10 @@ import {
   stripGroundedEvidenceBlock,
 } from "@/entrypoints/shared/groundedGoal";
 import {
+  normalizeConversationRecapMeta,
+  prepareConversationRecapRequest,
+} from "@/entrypoints/shared/conversationRecap";
+import {
   downloadSessionJsonFile,
   downloadSessionMarkdownFile,
   formatSessionAsMarkdown,
@@ -278,6 +282,9 @@ export default function SidePanelApp() {
   const [isGroundedGoalRequesting, setIsGroundedGoalRequesting] =
     useState<boolean>(false);
   const groundedGoalRequestRef = useRef(false);
+  const [isConversationRecapRequesting, setIsConversationRecapRequesting] =
+    useState<boolean>(false);
+  const conversationRecapRequestRef = useRef(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
   const [copyAllSuccess, setCopyAllSuccess] = useState<boolean>(false);
@@ -1997,6 +2004,64 @@ export default function SidePanelApp() {
     return accepted;
   };
 
+  const handleConversationRecap = (): boolean => {
+    if (
+      conversationRecapRequestRef.current ||
+      isStreaming ||
+      isExtractingPage ||
+      manualDispatchRef.current ||
+      isManualDispatching ||
+      activeRequestIdRef.current
+    ) {
+      return false;
+    }
+    const sessionId = activeSessionIdRef.current;
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === sessionId
+    );
+    if (
+      !currentSession ||
+      !currentSession.messages.some(
+        (message) => message.role === "user" || message.role === "assistant"
+      )
+    ) {
+      return false;
+    }
+
+    conversationRecapRequestRef.current = true;
+    setIsConversationRecapRequesting(true);
+    const release = () => {
+      conversationRecapRequestRef.current = false;
+      setIsConversationRecapRequesting(false);
+    };
+    const prepared = prepareConversationRecapRequest(
+      currentSession.messages
+    );
+    if (!prepared.success) {
+      setExtractError(prepared.error);
+      showToast(prepared.error);
+      release();
+      return false;
+    }
+    if (!validateRequestBudget(prepared.messages, { prismMode: false })) {
+      release();
+      return false;
+    }
+    const accepted = executeSendMessage(
+      "回顾对话主线",
+      undefined,
+      undefined,
+      {
+        conversationRecapMeta: prepared.meta,
+        payloadOverride: prepared.messages,
+        prismMode: false,
+        bypassJargonVault: true,
+      }
+    );
+    release();
+    return accepted;
+  };
+
   // 底层实际执行消息发送与后台流式通信
   const executeSendMessage = (
     text: string,
@@ -2006,6 +2071,7 @@ export default function SidePanelApp() {
       allowDuringManualDispatch?: boolean;
       refinementMeta?: ChatMessage["refinementMeta"];
       groundedGoalMeta?: ChatMessage["groundedGoalMeta"];
+      conversationRecapMeta?: ChatMessage["conversationRecapMeta"];
       payloadOverride?: ChatPayloadMessage[];
       prismMode?: boolean;
       bypassJargonVault?: boolean;
@@ -2026,6 +2092,7 @@ export default function SidePanelApp() {
       selectionContext: contextToSend,
       refinementMeta: options.refinementMeta,
       groundedGoalMeta: options.groundedGoalMeta,
+      conversationRecapMeta: options.conversationRecapMeta,
     };
     const prepared = options.payloadOverride
       ? { session: currentSession, payload: options.payloadOverride }
@@ -2057,6 +2124,7 @@ export default function SidePanelApp() {
       selectionContext: contextToSend,
       refinementMeta: options.refinementMeta,
       groundedGoalMeta: options.groundedGoalMeta,
+      conversationRecapMeta: options.conversationRecapMeta,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -2712,6 +2780,9 @@ export default function SidePanelApp() {
     const groundedGoalMeta = normalizeGroundedGoalMeta(
       prevUserMsg.groundedGoalMeta
     );
+    const conversationRecapMeta = normalizeConversationRecapMeta(
+      prevUserMsg.conversationRecapMeta
+    );
     let messagesPayload: ChatPayloadMessage[] = [];
 
     if (groundedGoalMeta) {
@@ -2736,7 +2807,30 @@ export default function SidePanelApp() {
       messagesPayload = preparedGrounded.messages;
     }
 
-    const replayPrompt = !groundedGoalMeta && prevUserMsg.pageMeta?.isWebPageReading
+    if (conversationRecapMeta) {
+      const preparedRecap = prepareConversationRecapRequest(
+        historyMessages.slice(0, -1),
+        conversationRecapMeta
+      );
+      if (!preparedRecap.success) {
+        setExtractError(preparedRecap.error);
+        showToast(preparedRecap.error);
+        return;
+      }
+      if (
+        !validateRequestBudget(preparedRecap.messages, {
+          prismMode: false,
+        })
+      ) {
+        return;
+      }
+      messagesPayload = preparedRecap.messages;
+    }
+
+    const replayPrompt =
+      !groundedGoalMeta &&
+      !conversationRecapMeta &&
+      prevUserMsg.pageMeta?.isWebPageReading
       ? buildReplayableWebReadingPrompt(prevUserMsg)
       : undefined;
     if (replayPrompt && !replayPrompt.success) {
@@ -2745,7 +2839,7 @@ export default function SidePanelApp() {
       return;
     }
 
-    if (groundedGoalMeta) {
+    if (groundedGoalMeta || conversationRecapMeta) {
       // 已在上方完成冻结来源与预算校验。
     } else if (replayPrompt?.success) {
       const earlierHistoryPayload = buildWebReadingHistoryPayload(
@@ -2767,7 +2861,10 @@ export default function SidePanelApp() {
     }
     if (
       !validateRequestBudget(messagesPayload, {
-        prismMode: refinementMeta || groundedGoalMeta ? false : undefined,
+        prismMode:
+          refinementMeta || groundedGoalMeta || conversationRecapMeta
+            ? false
+            : undefined,
       })
     ) {
       return;
@@ -2831,11 +2928,13 @@ export default function SidePanelApp() {
         messages: messagesPayload,
         thinkingEnabled,
         prismMode:
-          refinementMeta || groundedGoalMeta
+          refinementMeta || groundedGoalMeta || conversationRecapMeta
             ? false
             : requestSettingsRef.current.prismMode,
         bypassJargonVault:
-          refinementMeta || groundedGoalMeta ? true : bypassJargonVault,
+          refinementMeta || groundedGoalMeta || conversationRecapMeta
+            ? true
+            : bypassJargonVault,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
@@ -3441,6 +3540,31 @@ export default function SidePanelApp() {
               <Brain theme="outline" size="14" />
               <span>深度思考</span>
             </button>
+
+            <button
+              type="button"
+              className={`recap-toggle-btn ${
+                isConversationRecapRequesting ? "loading" : ""
+              }`}
+              title="回顾当前对话的主线、结论与待办"
+              disabled={
+                !activeSession ||
+                !activeSession.messages.some(
+                  (message) =>
+                    message.role === "user" || message.role === "assistant"
+                ) ||
+                isStreaming ||
+                isExtractingPage ||
+                isManualDispatching ||
+                isConversationRecapRequesting
+              }
+              onClick={() => {
+                handleConversationRecap();
+              }}
+            >
+              <History theme="outline" size="14" />
+              <span>回顾对话主线</span>
+            </button>
           </div>
 
           <div className="quick-bar-right">
@@ -3779,6 +3903,12 @@ export default function SidePanelApp() {
                 message.role === "user"
                   ? normalizeGroundedGoalMeta(message.groundedGoalMeta)
                   : undefined;
+              const ownConversationRecapMeta =
+                message.role === "user"
+                  ? normalizeConversationRecapMeta(
+                      message.conversationRecapMeta
+                    )
+                  : undefined;
               const groundedResult =
                 message.role === "assistant" &&
                 message.content &&
@@ -3862,7 +3992,23 @@ export default function SidePanelApp() {
                         </div>
                       ) : (
                         <div className="user-bubble-wrapper">
-                          {message.overviewMeta ? (
+                          {ownConversationRecapMeta ? (
+                            <div className="conversation-recap-user-card">
+                              <div className="webpage-badge">
+                                <History theme="filled" size="13" />
+                                <span>回顾对话主线</span>
+                              </div>
+                              <div className="conversation-recap-scope">
+                                本次覆盖 {ownConversationRecapMeta.coveredMessageCount}/
+                                {ownConversationRecapMeta.totalMessageCount} 条消息
+                                {ownConversationRecapMeta.truncated && (
+                                  <span className="conversation-recap-truncated">
+                                    部分较早或较长内容未纳入
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : message.overviewMeta ? (
                             <div className="webpage-user-card overview-user-card">
                               <div className="webpage-badge">
                                 <DocDetail theme="filled" size="13" />
@@ -3972,6 +4118,7 @@ export default function SidePanelApp() {
                           {/* 悬浮操作区：编辑按钮 */}
                           {!message.overviewMeta &&
                             !ownGroundedGoalMeta &&
+                            !ownConversationRecapMeta &&
                             !validRefinementMeta && (
                             <div className="user-bubble-actions">
                               <button
