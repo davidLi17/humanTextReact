@@ -41,7 +41,7 @@ Notes:
 - `bun run build` creates the Chrome extension build.
 - `bun run zip` creates the distributable extension archive.
 - The only automated quality gates are `tsc --noEmit` and `bun test`. This repository has no ESLint, Prettier, or Biome configuration.
-- The extension version lives in two places and both must be bumped together: `wxt.config.ts` (packaged manifest version) and `package.json` (zip file name). Both currently read `1.5.3`.
+- The extension version lives in two places and both must be bumped together: `wxt.config.ts` (packaged manifest version) and `package.json` (zip file name). Both currently read `1.6.0`.
 - Local build artifacts should stay out of git. Use `artifacts/` for local exports and keep generated zip/7z files ignored.
 
 ## Stability Phase Priorities
