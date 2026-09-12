@@ -24,6 +24,7 @@ interface ExtensionHarness {
 }
 
 const SELECTED_TEXT = "对齐颗粒度并形成增长飞轮";
+const CONTEXTUAL_PARAGRAPH = `项目讨论时，${SELECTED_TEXT}，这样可以避免协作双方对目标理解不一致。`;
 const VERNACULAR_EXPLANATION = "把合作细节统一好，再让增长持续循环起来。";
 
 function longArticleHtml() {
@@ -65,7 +66,7 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
           <body>
             <main>
               <h1>阶段三本地文章</h1>
-              <p id="selection">${SELECTED_TEXT}</p>
+              <p id="selection">项目讨论时，<span id="selection-text">${SELECTED_TEXT}</span>，这样可以避免协作双方对目标理解不一致。</p>
               <p>这是完全由本地测试服务提供的文章，不访问外部内容。</p>
             </main>
           </body>
@@ -154,7 +155,6 @@ async function configureExtension(
         promptTemplate: "只返回本地测试内容",
         thinkingEnabled: false,
         showSelectionToolbar: true,
-        contextualSelectionEnabled: false,
         logLevel: "off",
         theme: "light",
         fontScalePercent: 100,
@@ -291,7 +291,7 @@ async function createVisibleRangeSelection(page: import("@playwright/test").Page
   await expect(page.locator("#translator-popup-style")).toHaveCount(1);
   await page.locator("#selection").evaluate((element) => {
     const range = document.createRange();
-    range.selectNodeContents(element);
+    range.selectNodeContents(document.querySelector("#selection-text") || element);
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
@@ -300,7 +300,7 @@ async function createVisibleRangeSelection(page: import("@playwright/test").Page
   await expect(page.locator(".translator-action-bar")).toBeVisible();
 }
 
-test("真实选区经过 Content、Background 和本地 SSE 显示浮窗结果", async ({ harness }) => {
+test("默认开启的段落解释在划词工具条点击后直接发送一次带上下文的请求", async ({ harness }, testInfo) => {
   const article = await harness.context.newPage();
   await article.goto(`${harness.server.baseUrl}/article`);
   await createVisibleRangeSelection(article);
@@ -314,7 +314,64 @@ test("真实选区经过 Content、Background 和本地 SSE 显示浮窗结果",
 
   const request = harness.server.modelRequests[0];
   expect(request.authorization).toBe("Bearer fixture-only-key");
-  expect(JSON.stringify(request.body.messages)).toContain(SELECTED_TEXT);
+  const requestMessages = JSON.stringify(request.body.messages);
+  expect(requestMessages).toContain("<selected_text>");
+  expect(requestMessages).toContain(SELECTED_TEXT);
+  expect(requestMessages).toContain("<current_paragraph>");
+  expect(requestMessages).toContain(
+    "项目讨论时"
+  );
+  expect(requestMessages).toContain(
+    "这样可以避免协作双方对目标理解不一致。"
+  );
+  const screenshotPath = testInfo.outputPath("contextual-selection-direct.png");
+  await article.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach("contextual-selection-direct", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("Alt/Option+D 在开启时携带段落，关闭后只发送选中文字", async ({ harness }) => {
+  const contextualArticle = await harness.context.newPage();
+  await contextualArticle.goto(`${harness.server.baseUrl}/article`);
+  await createVisibleRangeSelection(contextualArticle);
+
+  await contextualArticle.keyboard.press("Alt+d");
+  await expect(contextualArticle.locator(".translator-popup")).toBeVisible();
+  await expect(contextualArticle.locator(".translator-translated-text")).toContainText(
+    "本地浮窗翻译结果"
+  );
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+  const contextualMessages = JSON.stringify(
+    harness.server.modelRequests[0].body.messages
+  );
+  expect(contextualMessages).toContain("<selected_text>");
+  expect(contextualMessages).toContain("<current_paragraph>");
+  expect(contextualMessages).toContain(SELECTED_TEXT);
+
+  await patchExtensionSettings(harness, {
+    contextualSelectionEnabled: false,
+  });
+  const textOnlyArticle = await harness.context.newPage();
+  await textOnlyArticle.goto(`${harness.server.baseUrl}/article`);
+  await createVisibleRangeSelection(textOnlyArticle);
+
+  await textOnlyArticle.keyboard.press("Alt+d");
+  await expect(textOnlyArticle.locator(".translator-popup")).toBeVisible();
+  await expect(textOnlyArticle.locator(".translator-translated-text")).toContainText(
+    "本地浮窗翻译结果"
+  );
+  await expect.poll(() => harness.server.modelRequests.length).toBe(2);
+  const textOnlyRequest = harness.server.modelRequests[1];
+  expect(textOnlyRequest.body.messages.at(-1)).toMatchObject({
+    role: "user",
+    content: SELECTED_TEXT,
+  });
+  expect(JSON.stringify(textOnlyRequest.body.messages)).not.toContain(
+    "<current_paragraph>"
+  );
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
@@ -433,7 +490,6 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
 
 test("浮窗收藏可编辑直白释义并保存真实选区来源", async ({ harness }, testInfo) => {
   await patchExtensionSettings(harness, {
-    contextualSelectionEnabled: true,
     theme: "dark",
   });
   const article = await harness.context.newPage();
@@ -442,7 +498,12 @@ test("浮窗收藏可编辑直白释义并保存真实选区来源", async ({ ha
 
   await article.getByRole("button", { name: "浮窗翻译" }).click();
   await expect(article.locator(".translator-popup")).toBeVisible();
-  await article.getByRole("button", { name: "仅解释选中文字" }).click();
+  await expect(
+    article.getByRole("button", { name: "结合本段解释" })
+  ).toBeHidden();
+  await expect(
+    article.getByRole("button", { name: "仅解释选中文字" })
+  ).toBeHidden();
   await expect(article.locator(".translator-translated-text")).toContainText(
     VERNACULAR_EXPLANATION
   );
@@ -455,7 +516,9 @@ test("浮窗收藏可编辑直白释义并保存真实选区来源", async ({ ha
   await expect(editor.getByLabel("人话释义")).toHaveValue(
     `本地浮窗翻译结果：${VERNACULAR_EXPLANATION}`
   );
-  await expect(editor.getByLabel("原句或提问")).toHaveValue(SELECTED_TEXT);
+  await expect(editor.getByLabel("原句或提问")).toHaveValue(
+    CONTEXTUAL_PARAGRAPH
+  );
   await expect(editor.getByLabel("来源链接")).toHaveValue(article.url());
 
   await editor.getByLabel("术语").fill("增长飞轮协同");
@@ -479,7 +542,7 @@ test("浮窗收藏可编辑直白释义并保存真实选区来源", async ({ ha
     .toMatchObject({
       term: "增长飞轮协同",
       explanation: "先统一合作细节，再持续推动增长。",
-      sourceContext: SELECTED_TEXT,
+      sourceContext: CONTEXTUAL_PARAGRAPH,
       sourceUrl: article.url(),
     });
   expect(harness.unexpectedExternalRequests).toEqual([]);

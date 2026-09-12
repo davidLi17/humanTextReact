@@ -24,6 +24,44 @@ function createBrowser(sendMessage: (message: unknown) => Promise<unknown>) {
 }
 
 describe("Content 浮窗生词本编辑器", () => {
+  test("自动携带段落时保留可展开预览并隐藏确认按钮", () => {
+    const page = new Window({ url: "https://example.com/article" });
+    setTestGlobal("window", page);
+    setTestGlobal("document", page.document);
+    setTestGlobal("navigator", page.navigator);
+    setTestGlobal(
+      "browser",
+      createBrowser(async () => ({ success: true }))
+    );
+
+    const manager = new PopupManager();
+    const popup = manager.showPopup(
+      "RAG",
+      "popup-context-request",
+      false,
+      {
+        selectedText: "RAG",
+        paragraph: "当前段落中的 RAG 完整上下文，用于自动翻译预览。",
+        source: { title: "示例文章", url: "https://example.com/article" },
+      },
+      false
+    );
+    const preview = popup.querySelector(
+      ".translator-context-preview"
+    ) as HTMLElement;
+    const actions = popup.querySelector(
+      ".translator-context-actions"
+    ) as HTMLElement;
+    const paragraph = popup.querySelector(
+      ".translator-context-paragraph"
+    ) as HTMLElement;
+    expect(preview.style.display).toBe("");
+    expect(preview.getAttribute("role")).toBe("button");
+    expect(actions.style.display).toBe("none");
+    expect(paragraph.style.maxHeight).toBe("4.5em");
+    manager.destroy();
+  });
+
   test("无选区上下文时使用展示瞬间捕获的页面 URL，保存失败恢复四字段编辑", async () => {
     const page = new Window({ url: "https://example.com/article" });
     setTestGlobal("window", page);

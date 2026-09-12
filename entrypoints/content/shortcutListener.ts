@@ -1,4 +1,7 @@
-import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
+import {
+  DEFAULT_SETTINGS,
+  MESSAGE_TYPES,
+} from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
 import type { PopupManager } from "./popupManager";
@@ -75,7 +78,8 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
   let lastTranslateTriggerTime = 0;
   let lastSidepanelTriggerTime = 0;
   const THROTTLE_MS = 350;
-  let contextualSelectionEnabled = false;
+  let contextualSelectionEnabled: boolean =
+    DEFAULT_SETTINGS.contextualSelectionEnabled;
   void SettingsUtils.getSettings().then((settings) => {
     contextualSelectionEnabled = settings.contextualSelectionEnabled === true;
   });
@@ -119,10 +123,8 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
           requestId,
           false,
           useContext ? selectionContext : undefined,
-          useContext
+          false
         );
-
-        if (useContext) return;
 
         // 向后台发起翻译请求
         const browserApi =
@@ -132,6 +134,9 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
             action: MESSAGE_TYPES.TRANSLATE,
             text: selectedText,
             requestId,
+            selectionContext: useContext ? selectionContext : undefined,
+            thinkingEnabled: settings.thinkingEnabled ?? false,
+            prismMode: settings.prismModeEnabled ?? false,
           });
         } catch (err) {
           logger.error("❌ [Content Shortcut] 发送翻译请求失败:", err);

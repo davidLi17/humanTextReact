@@ -49,7 +49,7 @@ describe("SettingsUtils", () => {
       expect(settings.baseUrl).toBe(DEFAULT_SETTINGS.baseUrl);
       expect(settings.temperature).toBe(DEFAULT_SETTINGS.temperature);
       expect(settings.showSelectionToolbar).toBe(DEFAULT_SETTINGS.showSelectionToolbar);
-      expect(settings.contextualSelectionEnabled).toBe(false);
+      expect(settings.contextualSelectionEnabled).toBe(true);
       expect(settings.theme).toBe(DEFAULT_SETTINGS.theme);
       expect(settings.logLevel).toBe(DEFAULT_SETTINGS.logLevel);
     });

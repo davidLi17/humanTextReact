@@ -523,6 +523,9 @@ export class PopupManager {
       ) as HTMLElement | null;
       const paragraph = popup.querySelector(".translator-context-paragraph");
       const source = popup.querySelector(".translator-context-source");
+      const contextActions = popup.querySelector(
+        ".translator-context-actions"
+      ) as HTMLElement | null;
       if (paragraph) paragraph.textContent = selectionContext.paragraph;
       if (source) {
         const safeUrl = getSafeHttpUrl(selectionContext.source?.url);
@@ -541,7 +544,44 @@ export class PopupManager {
           source.appendChild(link);
         }
       }
-      if (preview) preview.style.display = deferTranslation ? "" : "none";
+      if (preview) {
+        preview.style.display = "";
+        if (!deferTranslation) {
+          if (contextActions) contextActions.style.display = "none";
+          preview.setAttribute(
+            "title",
+            "已结合当前段落，点击查看完整上下文"
+          );
+          preview.setAttribute("role", "button");
+          preview.tabIndex = 0;
+          preview.style.cursor = "pointer";
+          if (paragraph) {
+            (paragraph as HTMLElement).style.maxHeight = "4.5em";
+            (paragraph as HTMLElement).style.overflow = "hidden";
+          }
+          const toggleContextPreview = (event: Event) => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest?.("a, button")) return;
+            const collapsed = (paragraph as HTMLElement | null)?.style.maxHeight;
+            if (paragraph) {
+              const isExpanded = collapsed === "none";
+              (paragraph as HTMLElement).style.maxHeight = isExpanded
+                ? "4.5em"
+                : "none";
+              (paragraph as HTMLElement).style.overflow = isExpanded
+                ? "hidden"
+                : "visible";
+            }
+          };
+          preview.addEventListener("click", toggleContextPreview);
+          preview.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              toggleContextPreview(event);
+            }
+          });
+        }
+      }
     }
     if (deferTranslation) {
       const loading = popup.querySelector(".translator-loading") as HTMLElement;

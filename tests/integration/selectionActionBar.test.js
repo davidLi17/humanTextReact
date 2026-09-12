@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   calculateActionBarPosition,
   isValidSelectionText,
@@ -7,6 +7,16 @@ import {
   isSelectionInsideExcludedElement,
   SelectionActionBar,
 } from "../../entrypoints/content/selectionActionBar.ts";
+import {
+  preserveGlobals,
+  setTestGlobal,
+} from "../helpers/testEnvironment.js";
+
+const restoreGlobals = preserveGlobals("browser");
+
+afterEach(() => {
+  restoreGlobals();
+});
 
 // 构造简易 Mock DOM 节点
 function createMockElement(tagName = "div", attributes = {}, className = "") {
@@ -522,6 +532,56 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
     );
 
     expect(calledText).toBe("端到端打通");
+    bar.destroy();
+  });
+
+  test("关闭段落上下文时浮窗点击直接只发起一次纯文本翻译", async () => {
+    const shownArguments = [];
+    const sentMessages = [];
+    setTestGlobal("browser", {
+      storage: {
+        sync: {
+          get: async (key) =>
+            key === "settings"
+              ? { settings: { contextualSelectionEnabled: false } }
+              : {},
+        },
+        local: { get: async () => ({}) },
+      },
+      runtime: {
+        sendMessage: async (message) => {
+          sentMessages.push(message);
+          return { success: true };
+        },
+      },
+    });
+    const popupManager = {
+      showPopup: (...args) => shownArguments.push(args),
+    };
+    const bar = new SelectionActionBar(popupManager);
+    bar.show(
+      "只解释这个词",
+      { top: 100, bottom: 120, left: 100, right: 200, width: 100, height: 20 },
+      createMockWindow(),
+      createMockDocument()
+    );
+    bar
+      .getContainer()
+      ?.querySelector(".translator-action-btn-popup")
+      ?.dispatchEvent({
+        type: "click",
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shownArguments).toHaveLength(1);
+    expect(shownArguments[0][4]).toBe(false);
+    expect(sentMessages).toHaveLength(1);
+    expect(sentMessages[0]).toMatchObject({
+      action: "translate",
+      text: "只解释这个词",
+    });
     bar.destroy();
   });
 });

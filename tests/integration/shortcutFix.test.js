@@ -163,11 +163,12 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       expect(propagationStopped).toBe(true);
       expect(shownSelection).toBe("颗粒度对齐");
       expect(shownRequestId).toBeString();
-      expect(sentMessage).toEqual({
+      expect(sentMessage).toMatchObject({
         action: "translate",
         text: "颗粒度对齐",
         requestId: shownRequestId,
       });
+      expect(sentMessage.selectionContext).toBeUndefined();
 
       cleanup();
       expect(globalThis.window._handler).toBeUndefined();
@@ -372,11 +373,12 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
 
         expect(sentTabMessage).toEqual({
           tabId: 101,
-          msg: { action: "getSelectedText" },
+          msg: { action: "getSelectedText", includeSelectionContext: true },
         });
         expect(handledClickInfo).toEqual({
           menuItemId: "translateSelection",
           selectionText: "赋能商业闭环",
+          selectionContextCaptured: true,
         });
         expect(handledClickTab.id).toBe(101);
       } finally {

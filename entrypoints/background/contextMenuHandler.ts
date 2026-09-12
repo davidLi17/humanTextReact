@@ -162,16 +162,11 @@ export class ContextMenuHandler {
               requestId,
               text: selectedText,
               selectionContext,
-              deferTranslation: Boolean(selectionContext),
+              deferTranslation: false,
             });
           if (!popupDelivery.delivered) {
             logger.warn("页面无法接收翻译弹窗消息，终止本次翻译");
             RequestManager.cleanupRequest(requestId);
-            return;
-          }
-
-          if (selectionContext) {
-            // 浮窗内由用户选择“结合本段”或“仅解释文字”后再领取请求。
             return;
           }
 

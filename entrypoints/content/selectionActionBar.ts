@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SETTINGS,
   MESSAGE_TYPES,
   THEME_MODES,
   type ThemeMode,
@@ -258,7 +259,8 @@ export class SelectionActionBar {
   private container: HTMLElement | null = null;
   private currentSelectedText = "";
   private currentSelectionContext: SelectionContext | undefined;
-  private contextualSelectionEnabled = false;
+  private contextualSelectionEnabled: boolean =
+    DEFAULT_SETTINGS.contextualSelectionEnabled;
   private isVisible = false;
   private themeMode: ThemeMode = THEME_MODES.SYSTEM;
   private settingsCleanup: (() => void) | null = null;
@@ -534,21 +536,18 @@ export class SelectionActionBar {
         const useContext = Boolean(
           settings.contextualSelectionEnabled && selectionContext
         );
-        if (useContext) {
-          this.popupManager.showPopup(
-            text,
-            requestId,
-            false,
-            selectionContext,
-            true
-          );
-          return;
-        }
-        this.popupManager.showPopup(text, requestId);
+        this.popupManager.showPopup(
+          text,
+          requestId,
+          false,
+          useContext ? selectionContext : undefined,
+          false
+        );
         await browser.runtime.sendMessage({
           action: MESSAGE_TYPES.TRANSLATE,
           requestId,
           text,
+          selectionContext: useContext ? selectionContext : undefined,
           thinkingEnabled: settings.thinkingEnabled ?? false,
           prismMode: settings.prismModeEnabled ?? false,
         });

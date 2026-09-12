@@ -107,7 +107,7 @@ export const DEFAULT_SETTINGS = {
   apiKey: "your_api_key",
   thinkingEnabled: false,
   showSelectionToolbar: true,
-  contextualSelectionEnabled: false,
+  contextualSelectionEnabled: true,
   prismModeEnabled: false,
   logLevel: LOG_LEVELS.OFF as LogLevel,
   theme: THEME_MODES.SYSTEM as ThemeMode,
