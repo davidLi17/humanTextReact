@@ -50,8 +50,14 @@
 
 本项提交后核对 CI，随后统一升级版本并走现有商店发布工作流。
 
-## 1.7.0 发布准备
+## 1.7.0 发布交付
 
-第三项 F3 已提交到 main：`c0d57af`。对应 CI [34708249043](https://github.com/davidLi17/humanTextReact/actions/runs/34708249043) 成功。本次版本定为 `1.7.0`，发布内容包括当前段落上下文默认直译、按目标提取网页重点并回查原文依据、以及一键回顾对话主线并沿冻结范围重试。当前记录表示已获用户授权直接进入 main 与商店发布流程，发布动作由后续调度完成。
+第三项 F3 已提交到 main：`c0d57af`。对应 CI [34708249043](https://github.com/davidLi17/humanTextReact/actions/runs/34708249043) 成功。本次版本为 `1.7.0`，发布内容包括当前段落上下文默认直译、按目标提取网页重点并回查原文依据、以及一键回顾对话主线并沿冻结范围重试。
+
+发布提交 `c631fa7`，标签 `v1.7.0`，已推送 origin。main CI [34708497866](https://github.com/davidLi17/humanTextReact/actions/runs/34708497866) 和标签 CI [34708505066](https://github.com/davidLi17/humanTextReact/actions/runs/34708505066) 均成功。
+
+商店发布工作流 [34708505063](https://github.com/davidLi17/humanTextReact/actions/runs/34708505063) 成功：上传及提交审核步骤已通过，采用审核通过后自动发布的方式。此处记录已提交审核，商店实际公开上线时间取决于审核结果。
+
+本地发布包：`.output/human-language-translator-1.7.0-chrome.zip`，326,577 bytes；SHA-256：`57E579E7FA33F6D6BAC4D65E2532E61E5D2351EE5D8982409A97EFF3E5D0D2CE`。package、构建 manifest、ZIP 内 manifest 均为 `1.7.0`，发布构建的 8 条 E2E 全部通过。构建与打包日志：`artifacts/verification/release-1.7.0-{zip,e2e}.log`。
 
 本地原有 `docs/diagrams/` 继续保留。构建产物不进入版本控制。
