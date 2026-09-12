@@ -14,6 +14,7 @@ import { MESSAGE_TYPES } from "../../entrypoints/shared/constants";
 import {
   checkChatRequestBudget,
   createAttachedPageMeta,
+  selectAttachedPageSegments,
 } from "../../entrypoints/shared/pageContext";
 import { prepareWebReadingOverviewRequest } from "../../entrypoints/shared/webReadingOverview";
 import { JARGON_STORAGE_KEY } from "../../entrypoints/shared/jargonTypes";
@@ -269,7 +270,7 @@ function createSegmentedPageContent() {
   return [
     createSegment("首段唯一标记", "甲"),
     createSegment("中段唯一标记", "乙"),
-    createSegment("末段唯一标记", "丙"),
+    createSegment("末段唯一标记如何完成这个季度目标需要明确责任人", "丙"),
   ].join("");
 }
 
@@ -663,6 +664,196 @@ describe("Sidepanel App 真实 React 交互", () => {
     });
   });
 
+  test("按目标提取只发送冻结末段，核实依据可查看且伪造引文不产生入口", async () => {
+    const pageContent = createSegmentedPageContent();
+    const mock = createReadablePageMock(createOngoingSession(), pageContent);
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    fireEvent.click(getReadCurrentPageButton());
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    await openAttachedPageDetails();
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 1 段参与回答" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 3 段参与回答" }));
+    await waitFor(() => {
+      expect(
+        getAttachedCard(findAttachedSessions(mock)!).pageMeta.attachedPage
+          .selectedSegments
+      ).toEqual([3]);
+    });
+
+    const goal = "找出对当前交付最有用的一项行动";
+    fireEvent.change(screen.getByLabelText("这次想解决什么问题？"), {
+      target: { value: goal },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提取对我有用的信息" }));
+    const request = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    expect(request.prismMode).toBe(false);
+    expect(request.bypassJargonVault).toBe(true);
+    expect(request.messages).toHaveLength(2);
+    const requestText = JSON.stringify(request.messages);
+    expect(requestText).toContain(goal);
+    expect(requestText).toContain("末段唯一标记");
+    expect(requestText).not.toContain("首段唯一标记");
+    expect(request.messages[0].content).toContain("human-text-evidence:v1");
+    expect(request.messages[1].content).toContain("【用户目标】");
+    expect(request.messages[1].content).toContain("【本次冻结的已选原文】");
+
+    const storedAfterRequest = mock.localStore.sidepanel_chat_sessions as any[];
+    const groundedUser = storedAfterRequest[0].messages.at(-2);
+    const sourcePage = storedAfterRequest[0].messages.find(
+      (message: any) => message.pageMeta?.attachedPage
+    );
+    expect(groundedUser).toMatchObject({
+      role: "user",
+      groundedGoalMeta: expect.objectContaining({
+        version: 1,
+        goal,
+        sourcePageMessageId: sourcePage.id,
+        sourceSnapshotFingerprint: expect.any(String),
+        selectedSegments: [expect.objectContaining({ index: 3, start: 32_000, end: 48_000 })],
+      }),
+    });
+
+    const validQuote = "如何完成这个季度目标需要明确责任人";
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        content: [
+          "建议先围绕末段提到的唯一标记做验证。[依据:E1]",
+          "",
+          "<!-- human-text-evidence:v1",
+          JSON.stringify({
+            citations: [
+              { id: "E1", segmentIndex: 3, quote: validQuote },
+              { id: "E2", segmentIndex: 1, quote: "首段唯一标记甲甲甲甲" },
+            ],
+          }),
+          "-->",
+        ].join("\n"),
+        done: true,
+      });
+    });
+    await screen.findByText(/原文依据/);
+    expect(screen.getByRole("button", { name: "查看第 3 段原文" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "查看第 1 段原文" })).toBeNull();
+    expect(screen.queryByText(/human-text-evidence:v1/)).toBeNull();
+    expect(
+      Array.from(document.querySelectorAll(".suggested-pill-btn")).some((button) =>
+        button.textContent?.includes(validQuote)
+      )
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "查看第 3 段原文" }));
+    expect(document.querySelector("mark")?.textContent).toBe(validQuote);
+  });
+
+  test("目标提取失败后改勾选范围，重试仍使用首次冻结的末段", async () => {
+    const mock = createReadablePageMock(
+      createOngoingSession(),
+      createSegmentedPageContent()
+    );
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("之前的问题");
+    fireEvent.click(getReadCurrentPageButton());
+    await waitFor(() => expect(findAttachedSessions(mock)).toBeDefined());
+    await openAttachedPageDetails();
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 1 段参与回答" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 3 段参与回答" }));
+    await waitFor(() => expect(getAttachedCard(findAttachedSessions(mock)!).pageMeta.attachedPage.selectedSegments).toEqual([3]));
+
+    fireEvent.change(screen.getByLabelText("这次想解决什么问题？"), {
+      target: { value: "只分析最后一段" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提取对我有用的信息" }));
+    const firstRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: firstRequest.requestId,
+        sessionId: firstRequest.sessionId,
+        error: "本地模型故障",
+        done: true,
+      });
+    });
+    await screen.findByText("本地模型故障");
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 3 段参与回答" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "第 2 段参与回答" }));
+    await waitFor(() => expect(getAttachedCard(findAttachedSessions(mock)!).pageMeta.attachedPage.selectedSegments).toEqual([2]));
+
+    fireEvent.click(screen.getByTitle("重试生成"));
+    const retryRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    const retryText = JSON.stringify(retryRequest.messages);
+    expect(retryText).toContain("末段唯一标记");
+    expect(retryText).not.toContain("中段唯一标记");
+    expect(retryRequest.prismMode).toBe(false);
+    expect(retryRequest.bypassJargonVault).toBe(true);
+  });
+
+  test("目标提取超过预算时保留目标和旧消息，不创建空回答", async () => {
+    const attached = createAttachedPageMessage(createSegmentedPageContent());
+    attached.pageMeta = selectAttachedPageSegments(attached.pageMeta, [1, 2, 3]);
+    const session = {
+      id: "grounded-budget-session",
+      title: "目标提取预算测试",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        attached,
+        {
+          id: "old-question",
+          role: "user" as const,
+          content: "已经存在的问题",
+          createdAt: 110,
+          status: "completed" as const,
+        },
+        {
+          id: "old-answer",
+          role: "assistant" as const,
+          content: "已经存在的回答",
+          createdAt: 120,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("已经存在的回答");
+
+    const goalInput = screen.getByLabelText("这次想解决什么问题？") as HTMLTextAreaElement;
+    fireEvent.change(goalInput, { target: { value: "这条目标草稿不能被清空" } });
+    fireEvent.click(screen.getByRole("button", { name: "提取对我有用的信息" }));
+
+    expect(
+      (await screen.findAllByText(/超过 48000 个字符的保守上限/)).length
+    ).toBeGreaterThan(0);
+    expect(goalInput.value).toBe("这条目标草稿不能被清空");
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+    const stored = mock.localStore.sidepanel_chat_sessions as any[];
+    expect(stored[0].messages.map((message: any) => message.id)).toEqual(
+      session.messages.map((message) => message.id)
+    );
+  });
+
   test("超过请求预算时保留草稿与原会话，不发送模型请求", async () => {
     const pageContent = "网页背景唯一标记" + "甲".repeat(15_900);
     const attachedPage = createAttachedPageMessage(pageContent);
@@ -861,6 +1052,42 @@ describe("Sidepanel App 真实 React 交互", () => {
     });
     expect(JSON.stringify(retryRequest.messages)).toContain(pageContent);
     expect(JSON.stringify(retryRequest.messages)).toContain("编辑后的普通问题");
+  });
+
+  test("导入的损坏目标提取元数据仍按普通用户消息显示编辑入口", async () => {
+    const session = {
+      id: "invalid-grounded-meta-session",
+      title: "损坏目标元数据",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        {
+          id: "invalid-grounded-user",
+          role: "user" as const,
+          content: "这是一条仍应可编辑的普通问题",
+          groundedGoalMeta: {} as never,
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "invalid-grounded-answer",
+          role: "assistant" as const,
+          content: "这是一条普通回答",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+
+    await screen.findByText("这是一条仍应可编辑的普通问题");
+    fireEvent.click(screen.getByTitle("编辑消息"));
+    expect(await screen.findByPlaceholderText("输入修改后的消息...")).toBeTruthy();
   });
 
   test("立即发送等待 CLEANUP 时拒绝并发普通发送，并保留期间写入的新草稿", async () => {

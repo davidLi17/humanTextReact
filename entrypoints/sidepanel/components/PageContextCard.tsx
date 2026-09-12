@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { ChatMessage } from "@/entrypoints/shared/chatTypes";
 import {
   getAttachedPageSegments,
@@ -16,6 +16,7 @@ export interface PageContextCardProps {
   meta: PageMeta;
   disabled: boolean;
   onSelectionChange: (segments: number[]) => void;
+  onExtractGoal?: (goal: string) => boolean;
 }
 
 function formatChars(chars: number) {
@@ -30,6 +31,7 @@ export default function PageContextCard({
   meta,
   disabled,
   onSelectionChange,
+  onExtractGoal,
 }: PageContextCardProps) {
   const attachedPage = useMemo(() => getAttachedPageSnapshot(meta), [meta]);
   const segments = useMemo(() => getAttachedPageSegments(meta), [meta]);
@@ -70,6 +72,8 @@ export default function PageContextCard({
   const previewSegment =
     segments.find((segment) => segment.index === previewSegmentIndex) ??
     segments[0];
+  const [extractGoal, setExtractGoal] = useState("");
+  const extractGoalId = `${useId()}-page-context-extract-goal`;
 
   const updateSelection = (segmentIndex: number, checked: boolean) => {
     if (disabled) return;
@@ -77,6 +81,21 @@ export default function PageContextCard({
       ? [...new Set([...selectedSegments, segmentIndex])]
       : selectedSegments.filter((index) => index !== segmentIndex);
     onSelectionChange(next.sort((left, right) => left - right));
+  };
+
+  const handleExtractGoal = () => {
+    const goal = extractGoal.trim();
+    if (
+      !onExtractGoal ||
+      disabled ||
+      selectedSegments.length === 0 ||
+      !goal
+    ) {
+      return;
+    }
+    if (onExtractGoal(goal)) {
+      setExtractGoal("");
+    }
   };
 
   return (
@@ -128,6 +147,32 @@ export default function PageContextCard({
         <p className="page-context-card__notice" role="status">
           正在生成回答，暂时不能修改参与回答的段落。
         </p>
+      )}
+
+      {onExtractGoal && (
+        <div className="page-context-card__goal">
+          <label htmlFor={extractGoalId}>
+            这次想解决什么问题？
+          </label>
+          <textarea
+            id={extractGoalId}
+            value={extractGoal}
+            maxLength={500}
+            rows={2}
+            placeholder="例如：找出这篇文章对我的工作最有用的三点"
+            disabled={disabled}
+            onChange={(event) => setExtractGoal(event.target.value)}
+          />
+          <button
+            type="button"
+            disabled={
+              disabled || selectedSegments.length === 0 || !extractGoal.trim()
+            }
+            onClick={handleExtractGoal}
+          >
+            提取对我有用的信息
+          </button>
+        </div>
       )}
 
       {segments.length > 0 ? (

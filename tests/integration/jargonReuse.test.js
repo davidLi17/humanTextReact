@@ -255,6 +255,35 @@ describe("TranslationService 生词本复用", () => {
     expect(sentMessages.at(-1).resultSource).toBeUndefined();
   });
 
+  test("模型引用尾块原样交付侧栏，同时全局历史只保存可读正文", async () => {
+    const rawAnswer = [
+      "应优先修复支付失败率。[依据:E1]",
+      "<!-- human-text-evidence:v1",
+      '{"citations":[{"id":"E1","segmentIndex":2,"quote":"应优先修复支付失败率"}]}',
+      "-->",
+    ].join("\n");
+    setTestGlobal("fetch", async () => {
+      fetchCalls += 1;
+      return createAiResponse(rawAnswer);
+    });
+    const { context } = createRequest();
+
+    await expect(
+      TranslationService.translateText(
+        { text: "按目标提取", bypassJargonVault: true },
+        context
+      )
+    ).resolves.toBe(rawAnswer);
+
+    expect(sentMessages.at(-1)).toMatchObject({
+      content: rawAnswer,
+      done: true,
+    });
+    expect(savedHistory).toHaveLength(1);
+    expect(savedHistory[0][1]).toBe("应优先修复支付失败率。[依据:E1]");
+    expect(savedHistory[0][1]).not.toContain("human-text-evidence:v1");
+  });
+
   test("未命中且只有默认占位 Key 时提示配置，不发起请求", async () => {
     SettingsUtils.getSettings = async () => ({
       apiKey: "your_api_key",

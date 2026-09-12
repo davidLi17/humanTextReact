@@ -1,4 +1,5 @@
 import type { SelectionContext } from "./selectionContext";
+import { stripGroundedEvidenceBlock } from "./groundedGoal";
 
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -41,6 +42,7 @@ export interface ChatPayloadMessage {
   images?: ChatImageContent[];
   selectionContext?: SelectionContext;
   refinementMeta?: ExplanationRefinementMeta;
+  groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
 }
 
 /**
@@ -53,7 +55,10 @@ export function formatMessageForPayload(message: {
   selectionContext?: SelectionContext;
 }): ChatPayloadMessage {
   const selectionContext = message.selectionContext;
-  const content = message.content;
+  const content =
+    message.role === "assistant" && typeof message.content === "string"
+      ? stripGroundedEvidenceBlock(message.content)
+      : message.content;
   const images = message.images;
   if (!images || images.length === 0) {
     return {
@@ -101,6 +106,7 @@ export function buildHistoryPayload(
     images?: ChatImageContent[];
     selectionContext?: SelectionContext;
     refinementMeta?: unknown;
+    groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
   }>,
   currentMessage?: {
     role: ChatRole;
@@ -108,6 +114,7 @@ export function buildHistoryPayload(
     images?: ChatImageContent[];
     selectionContext?: SelectionContext;
     refinementMeta?: unknown;
+    groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
   }
 ): ChatPayloadMessage[] {
   const payload = messages.map(formatMessageForPayload);
@@ -126,6 +133,7 @@ export interface ChatMessage {
   images?: ChatImageContent[];
   selectionContext?: SelectionContext;
   refinementMeta?: ExplanationRefinementMeta;
+  groundedGoalMeta?: import("./groundedGoal").GroundedGoalMeta;
   pageMeta?: {
     title: string;
     url: string;

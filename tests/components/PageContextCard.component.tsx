@@ -165,4 +165,74 @@ describe("PageContextCard", () => {
     fireEvent.click(screen.getByText("预览已保存原文"));
     expect(screen.getByLabelText("第 1 段原文").textContent).toBe("A".repeat(16_000));
   });
+
+  test("填写目标后调用父级提取，成功返回才清空目标", () => {
+    const goals: string[] = [];
+    const { rerender } = render(
+      <PageContextCard
+        meta={createMeta()}
+        disabled={false}
+        onSelectionChange={() => {}}
+        onExtractGoal={(goal) => {
+          goals.push(goal);
+          return false;
+        }}
+      />
+    );
+    const input = screen.getByLabelText("这次想解决什么问题？") as HTMLTextAreaElement;
+    const button = screen.getByRole("button", { name: "提取对我有用的信息" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(input, { target: { value: "  找出对我的工作最有用的三点  " } });
+    fireEvent.click(button);
+    expect(goals).toEqual(["找出对我的工作最有用的三点"]);
+    expect(input.value).toBe("  找出对我的工作最有用的三点  ");
+
+    rerender(
+      <PageContextCard
+        meta={createMeta()}
+        disabled={false}
+        onSelectionChange={() => {}}
+        onExtractGoal={() => true}
+      />
+    );
+    fireEvent.change(screen.getByLabelText("这次想解决什么问题？"), {
+      target: { value: "需要清空的目标" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "提取对我有用的信息" }));
+    expect((screen.getByLabelText("这次想解决什么问题？") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  test("无选入段落或禁用状态时不能提取，目标保持可恢复", () => {
+    const onExtractGoal = () => {
+      throw new Error("无效状态不应调用父级");
+    };
+    const { rerender } = render(
+      <PageContextCard
+        meta={createMeta({
+          attachedPage: { ...createMeta().attachedPage!, selectedSegments: [] },
+        })}
+        disabled={false}
+        onSelectionChange={() => {}}
+        onExtractGoal={onExtractGoal}
+      />
+    );
+    const input = screen.getByLabelText("这次想解决什么问题？") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "没有选段时的目标" } });
+    const button = screen.getByRole("button", { name: "提取对我有用的信息" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(input.value).toBe("没有选段时的目标");
+
+    rerender(
+      <PageContextCard
+        meta={createMeta()}
+        disabled
+        onSelectionChange={() => {}}
+        onExtractGoal={onExtractGoal}
+      />
+    );
+    const disabledInput = screen.getByLabelText("这次想解决什么问题？") as HTMLTextAreaElement;
+    fireEvent.change(disabledInput, { target: { value: "生成中目标" } });
+    expect(disabledInput.hasAttribute("disabled")).toBe(true);
+    expect((screen.getByRole("button", { name: "提取对我有用的信息" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

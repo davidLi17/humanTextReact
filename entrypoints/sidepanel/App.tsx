@@ -90,6 +90,12 @@ import {
   type ExplanationRefinementMode,
 } from "@/entrypoints/shared/explanationRefinement";
 import {
+  normalizeGroundedGoalMeta,
+  parseGroundedGoalResult,
+  prepareGroundedGoalRequest,
+  stripGroundedEvidenceBlock,
+} from "@/entrypoints/shared/groundedGoal";
+import {
   downloadSessionJsonFile,
   downloadSessionMarkdownFile,
   formatSessionAsMarkdown,
@@ -107,6 +113,7 @@ import JargonVaultPanel from "./components/JargonVaultPanel";
 import JargonSaveDialog from "./components/JargonSaveDialog";
 import PrismResultTabs from "./components/PrismResultTabs";
 import PageContextCard from "./components/PageContextCard";
+import GroundedEvidencePanel from "./components/GroundedEvidencePanel";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
 import QuoteInputCapsule from "./components/QuoteInputCapsule";
 import PromptQueueBar, {
@@ -268,6 +275,9 @@ export default function SidePanelApp() {
     useState<SelectionContext>();
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isExtractingPage, setIsExtractingPage] = useState<boolean>(false);
+  const [isGroundedGoalRequesting, setIsGroundedGoalRequesting] =
+    useState<boolean>(false);
+  const groundedGoalRequestRef = useRef(false);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
   const [copyAllSuccess, setCopyAllSuccess] = useState<boolean>(false);
@@ -969,7 +979,9 @@ export default function SidePanelApp() {
               const updatedContent = content ?? lastMsg.content;
               const suggestedQuestions =
                 done && updatedContent
-                  ? extractSuggestedQuestions(updatedContent)
+                  ? extractSuggestedQuestions(
+                      stripGroundedEvidenceBlock(updatedContent)
+                    )
                   : lastMsg.suggestedQuestions;
 
               const updatedMsg: ChatMessage = {
@@ -1926,6 +1938,65 @@ export default function SidePanelApp() {
     isManualDispatching,
   ]);
 
+  // 从网页上下文卡片发起一次基于选定原文的目标提取。
+  // 这里同步完成来源、预算和重复请求检查，失败时保留卡片中的目标草稿。
+  const handleExtractGroundedGoal = (
+    pageMessageId: string,
+    goal: string
+  ): boolean => {
+    if (
+      groundedGoalRequestRef.current ||
+      isStreaming ||
+      isExtractingPage ||
+      manualDispatchRef.current ||
+      isManualDispatching ||
+      activeRequestIdRef.current
+    ) {
+      return false;
+    }
+    const sessionId = activeSessionIdRef.current;
+    const currentSession = sessionsRef.current.find(
+      (session) => session.id === sessionId
+    );
+    if (!currentSession) return false;
+
+    groundedGoalRequestRef.current = true;
+    setIsGroundedGoalRequesting(true);
+    const release = () => {
+      groundedGoalRequestRef.current = false;
+      setIsGroundedGoalRequesting(false);
+    };
+    const prepared = prepareGroundedGoalRequest(
+      currentSession.messages,
+      pageMessageId,
+      goal
+    );
+    if (!prepared.success) {
+      setExtractError(prepared.error);
+      showToast(prepared.error);
+      release();
+      return false;
+    }
+    if (!validateRequestBudget(prepared.messages, { prismMode: false })) {
+      release();
+      return false;
+    }
+
+    const accepted = executeSendMessage(
+      `提取对我有用的信息：${prepared.meta.goal}`,
+      undefined,
+      undefined,
+      {
+        groundedGoalMeta: prepared.meta,
+        payloadOverride: prepared.messages,
+        prismMode: false,
+        bypassJargonVault: true,
+      }
+    );
+    release();
+    return accepted;
+  };
+
   // 底层实际执行消息发送与后台流式通信
   const executeSendMessage = (
     text: string,
@@ -1934,6 +2005,8 @@ export default function SidePanelApp() {
     options: {
       allowDuringManualDispatch?: boolean;
       refinementMeta?: ChatMessage["refinementMeta"];
+      groundedGoalMeta?: ChatMessage["groundedGoalMeta"];
+      payloadOverride?: ChatPayloadMessage[];
       prismMode?: boolean;
       bypassJargonVault?: boolean;
     } = {}
@@ -1952,8 +2025,11 @@ export default function SidePanelApp() {
       images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
       selectionContext: contextToSend,
       refinementMeta: options.refinementMeta,
+      groundedGoalMeta: options.groundedGoalMeta,
     };
-    const prepared = prepareRegularRequest(userMessagePreview, currentSession.id);
+    const prepared = options.payloadOverride
+      ? { session: currentSession, payload: options.payloadOverride }
+      : prepareRegularRequest(userMessagePreview, currentSession.id);
     if (
       !prepared ||
       !validateRequestBudget(prepared.payload, {
@@ -1980,6 +2056,7 @@ export default function SidePanelApp() {
       images: imagesToSend && imagesToSend.length > 0 ? imagesToSend : undefined,
       selectionContext: contextToSend,
       refinementMeta: options.refinementMeta,
+      groundedGoalMeta: options.groundedGoalMeta,
       createdAt: Date.now(),
       status: "completed",
     };
@@ -2064,7 +2141,7 @@ export default function SidePanelApp() {
     const excerpt =
       refinementSelection?.assistantMessageId === assistantMessage.id
         ? refinementSelection.text
-        : assistantMessage.content.slice(0, 1000);
+        : stripGroundedEvidenceBlock(assistantMessage.content).slice(0, 1000);
     const refinementMeta = createExplanationRefinementMeta({
       mode,
       targetAssistantMessageId: assistantMessage.id,
@@ -2632,8 +2709,34 @@ export default function SidePanelApp() {
       prevUserMsg,
       historyMessages.slice(0, -1)
     );
+    const groundedGoalMeta = normalizeGroundedGoalMeta(
+      prevUserMsg.groundedGoalMeta
+    );
+    let messagesPayload: ChatPayloadMessage[] = [];
 
-    const replayPrompt = prevUserMsg.pageMeta?.isWebPageReading
+    if (groundedGoalMeta) {
+      const preparedGrounded = prepareGroundedGoalRequest(
+        historyMessages.slice(0, -1),
+        groundedGoalMeta.sourcePageMessageId,
+        groundedGoalMeta.goal,
+        groundedGoalMeta
+      );
+      if (!preparedGrounded.success) {
+        setExtractError(preparedGrounded.error);
+        showToast(preparedGrounded.error);
+        return;
+      }
+      if (
+        !validateRequestBudget(preparedGrounded.messages, {
+          prismMode: false,
+        })
+      ) {
+        return;
+      }
+      messagesPayload = preparedGrounded.messages;
+    }
+
+    const replayPrompt = !groundedGoalMeta && prevUserMsg.pageMeta?.isWebPageReading
       ? buildReplayableWebReadingPrompt(prevUserMsg)
       : undefined;
     if (replayPrompt && !replayPrompt.success) {
@@ -2642,8 +2745,9 @@ export default function SidePanelApp() {
       return;
     }
 
-    let messagesPayload: ChatPayloadMessage[];
-    if (replayPrompt?.success) {
+    if (groundedGoalMeta) {
+      // 已在上方完成冻结来源与预算校验。
+    } else if (replayPrompt?.success) {
       const earlierHistoryPayload = buildWebReadingHistoryPayload(
         historyMessages.slice(0, -1)
       );
@@ -2663,7 +2767,7 @@ export default function SidePanelApp() {
     }
     if (
       !validateRequestBudget(messagesPayload, {
-        prismMode: refinementMeta ? false : undefined,
+        prismMode: refinementMeta || groundedGoalMeta ? false : undefined,
       })
     ) {
       return;
@@ -2726,8 +2830,12 @@ export default function SidePanelApp() {
         sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
-        prismMode: refinementMeta ? false : requestSettingsRef.current.prismMode,
-        bypassJargonVault: refinementMeta ? true : bypassJargonVault,
+        prismMode:
+          refinementMeta || groundedGoalMeta
+            ? false
+            : requestSettingsRef.current.prismMode,
+        bypassJargonVault:
+          refinementMeta || groundedGoalMeta ? true : bypassJargonVault,
       })) as WebReadingResponse;
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
@@ -3657,6 +3765,30 @@ export default function SidePanelApp() {
                 message,
                 activeSession.messages.slice(0, messageIndex)
               );
+              const precedingMessage =
+                messageIndex > 0
+                  ? activeSession.messages[messageIndex - 1]
+                  : undefined;
+              const validGroundedGoalMeta =
+                precedingMessage?.role === "user"
+                  ? normalizeGroundedGoalMeta(
+                      precedingMessage.groundedGoalMeta
+                    )
+                  : undefined;
+              const ownGroundedGoalMeta =
+                message.role === "user"
+                  ? normalizeGroundedGoalMeta(message.groundedGoalMeta)
+                  : undefined;
+              const groundedResult =
+                message.role === "assistant" &&
+                message.content &&
+                validGroundedGoalMeta
+                  ? parseGroundedGoalResult(
+                      message.content,
+                      validGroundedGoalMeta,
+                      activeSession.messages.slice(0, messageIndex - 1)
+                    )
+                  : undefined;
               return (
               <div
                 key={message.id}
@@ -3762,13 +3894,21 @@ export default function SidePanelApp() {
                             message.pageMeta?.contextOnly ? (
                             <PageContextCard
                               meta={message.pageMeta}
-                              disabled={isStreaming || isExtractingPage}
+                              disabled={
+                                isStreaming ||
+                                isExtractingPage ||
+                                isGroundedGoalRequesting ||
+                                isManualDispatching
+                              }
                               onSelectionChange={(segments) =>
                                 handlePageContextSelectionChange(
                                   activeSession.id,
                                   message.id,
                                   segments
                                 )
+                              }
+                              onExtractGoal={(goal) =>
+                                handleExtractGroundedGoal(message.id, goal)
                               }
                             />
                           ) : message.pageMeta?.isWebPageReading ? (
@@ -3830,7 +3970,9 @@ export default function SidePanelApp() {
                           )}
 
                           {/* 悬浮操作区：编辑按钮 */}
-                          {!message.overviewMeta && !validRefinementMeta && (
+                          {!message.overviewMeta &&
+                            !ownGroundedGoalMeta &&
+                            !validRefinementMeta && (
                             <div className="user-bubble-actions">
                               <button
                                 type="button"
@@ -3855,13 +3997,21 @@ export default function SidePanelApp() {
                           </div>
                         )}
                         {message.content ? (
-                          <PrismResultTabs
-                            content={message.content}
-                            isStreaming={message.status === "streaming"}
-                            onCopyCorporate={() => {
-                              showToast("已复制向上汇报版，可直接粘贴进周报！");
-                            }}
-                          />
+                          <>
+                            <PrismResultTabs
+                              content={groundedResult?.content ?? message.content}
+                              isStreaming={message.status === "streaming"}
+                              onCopyCorporate={() => {
+                                showToast("已复制向上汇报版，可直接粘贴进周报！");
+                              }}
+                            />
+                            {groundedResult && (
+                              <GroundedEvidencePanel
+                                result={groundedResult}
+                                isComplete={message.status === "completed"}
+                              />
+                            )}
+                          </>
                         ) : message.status === "streaming" ? (
                           <div className="streaming-dots">
                             <span></span>
@@ -4006,7 +4156,12 @@ export default function SidePanelApp() {
                           type="button"
                           className="action-link-btn"
                           title="复制通读报告"
-                          onClick={() => handleCopy(message.id, message.content)}
+                          onClick={() =>
+                            handleCopy(
+                              message.id,
+                              groundedResult?.content ?? message.content
+                            )
+                          }
                         >
                           {copySuccessId === message.id ? (
                             <>

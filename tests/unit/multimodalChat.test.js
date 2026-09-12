@@ -77,6 +77,24 @@ describe("Multimodal Chat & History Payload Processing", () => {
       expect(serialized.split(mockImage2.data)).toHaveLength(2);
     });
 
+    test("普通历史 payload 只带助手可读正文，不转发隐藏引用协议", () => {
+      const rawAnswer = [
+        "应优先修复支付失败率。[依据:E1]",
+        "<!-- human-text-evidence:v1",
+        '{"citations":[{"id":"E1","segmentIndex":2,"quote":"应优先修复支付失败率"}]}',
+        "-->",
+      ].join("\n");
+
+      const payload = buildHistoryPayload([
+        { role: "user", content: "后续普通追问" },
+        { role: "assistant", content: rawAnswer },
+      ]);
+
+      expect(payload[1].content).toBe("应优先修复支付失败率。[依据:E1]");
+      expect(JSON.stringify(payload)).not.toContain("human-text-evidence:v1");
+      expect(JSON.stringify(payload)).not.toContain('"citations"');
+    });
+
     test("single-turn: formats text + images into system + user multimodal array", () => {
       const payload = buildMessagesPayload({
         text: "这是啥",

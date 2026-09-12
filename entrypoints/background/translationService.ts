@@ -31,6 +31,7 @@ import {
 import { findExactJargonItem } from "@/entrypoints/shared/jargonStorage";
 import { buildPrismSystemPrompt } from "@/entrypoints/shared/prismPrompt";
 import { buildModelParams } from "@/entrypoints/shared/modelCatalog";
+import { stripGroundedEvidenceBlock } from "@/entrypoints/shared/groundedGoal";
 
 const logger = createLogger("translation-service", "🌐");
 
@@ -350,7 +351,7 @@ export class TranslationService {
     // 成功终态已经交付，历史落盘不再阻塞请求进入 finally 完成清理。
     void HistoryManager.saveTranslationHistory(
       original,
-      content,
+      stripGroundedEvidenceBlock(content),
       "",
       resultSource
     )
@@ -591,7 +592,7 @@ export class TranslationService {
         try {
           await HistoryManager.saveTranslationHistory(
             text,
-            result,
+            stripGroundedEvidenceBlock(result),
             reasoningContent
           );
         } catch (error) {

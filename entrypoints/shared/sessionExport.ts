@@ -1,5 +1,25 @@
 import { ChatSession } from "./chatTypes";
 import { formatDateTime } from "@/entrypoints/popup/utils/helpers";
+import {
+  normalizeGroundedGoalMeta,
+  stripGroundedEvidenceBlock,
+} from "./groundedGoal";
+
+function getExportAssistantContent(
+  messages: ChatSession["messages"],
+  index: number
+): string {
+  const message = messages[index];
+  const preceding = index > 0 ? messages[index - 1] : undefined;
+  if (
+    message?.role === "assistant" &&
+    preceding?.role === "user" &&
+    normalizeGroundedGoalMeta(preceding.groundedGoalMeta)
+  ) {
+    return stripGroundedEvidenceBlock(message.content || "");
+  }
+  return message?.content || "";
+}
 
 /**
  * 将单场会话格式化为 Markdown 字符串
@@ -17,7 +37,7 @@ export function formatSessionAsMarkdown(session: ChatSession): string {
     "",
   ];
 
-  session.messages.forEach((msg) => {
+  session.messages.forEach((msg, messageIndex) => {
     if (msg.role === "user") {
       lines.push(`### 👤 用户`);
       if (msg.overviewMeta?.kind === "web-reading-overview") {
@@ -43,7 +63,10 @@ export function formatSessionAsMarkdown(session: ChatSession): string {
         });
         lines.push("");
       }
-      lines.push(msg.content || "(生成中...)");
+      lines.push(
+        getExportAssistantContent(session.messages, messageIndex) ||
+          "(生成中...)"
+      );
       lines.push("");
     } else {
       lines.push(`### ⚙️ 系统`);
@@ -72,7 +95,7 @@ export function formatSessionAsPlainText(session: ChatSession): string {
     "",
   ];
 
-  session.messages.forEach((msg) => {
+  session.messages.forEach((msg, messageIndex) => {
     const roleName =
       msg.role === "user"
         ? "用户"
@@ -86,7 +109,11 @@ export function formatSessionAsPlainText(session: ChatSession): string {
       lines.push(`通读网页: 《${msg.pageMeta.title}》 (${msg.pageMeta.url})`);
     }
     if (msg.content) {
-      lines.push(msg.content);
+      lines.push(
+        msg.role === "assistant"
+          ? getExportAssistantContent(session.messages, messageIndex)
+          : msg.content
+      );
     }
     lines.push("");
   });

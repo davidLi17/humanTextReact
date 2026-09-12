@@ -1,5 +1,6 @@
 import Fuse from "fuse.js";
 import type { ChatRole, ChatSession } from "./chatTypes";
+import { stripGroundedEvidenceBlock } from "./groundedGoal";
 
 const DEFAULT_LIMIT = 30;
 const MAX_SNIPPET_LENGTH = 136;
@@ -128,7 +129,11 @@ export function createSessionSearchIndex(
       const message = rawMessage as Record<string, unknown>;
       const role = messageRole(message.role);
       const messageId = safeText(message.id);
-      const content = safeText(message.content);
+      const rawContent = safeText(message.content);
+      const content =
+        role === "assistant"
+          ? stripGroundedEvidenceBlock(rawContent)
+          : rawContent;
       if (!role || !messageId || !content) continue;
 
       const messageKey = `${sessionId}\u0000${messageId}`;

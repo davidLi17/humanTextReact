@@ -49,6 +49,41 @@ describe("生词本草稿构建", () => {
     expect(draft.explanationSource).toBe("full");
   });
 
+  test("收藏目标提取回答时只保存可读正文", () => {
+    const rawAnswer = [
+      "应优先修复支付失败率。[依据:E1]",
+      "<!-- human-text-evidence:v1",
+      '{"citations":[{"id":"E1","segmentIndex":2,"quote":"应优先修复支付失败率"}]}',
+      "-->",
+    ].join("\n");
+    const session: ChatSession = {
+      id: "grounded-session",
+      title: "目标提取",
+      createdAt: 1,
+      updatedAt: 2,
+      messages: [
+        {
+          id: "goal",
+          role: "user",
+          content: "提取对我有用的信息：找行动",
+          createdAt: 1,
+        },
+        {
+          id: "grounded-answer",
+          role: "assistant",
+          content: rawAnswer,
+          createdAt: 2,
+          status: "completed",
+        },
+      ],
+    };
+
+    const draft = createJargonDraftFromMessage(session.messages[1], session);
+
+    expect(draft.item.explanation).toBe("应优先修复支付失败率。[依据:E1]");
+    expect(draft.item.explanation).not.toContain("human-text-evidence:v1");
+  });
+
   test("从助手消息只关联此前最近用户消息，优先复用明确选区", () => {
     const session: ChatSession = {
       id: "session-1",

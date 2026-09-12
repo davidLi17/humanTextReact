@@ -1,0 +1,71 @@
+.grounded-evidence-panel {
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 6px;
+  color: var(--color-text-secondary);
+  font-size: calc(11px * var(--ht-font-scale, 1));
+
+  summary {
+    cursor: pointer;
+    color: var(--color-text-primary);
+    font-weight: 600;
+  }
+
+  & .grounded-evidence-source {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+    color: var(--color-text-secondary);
+
+    a {
+      color: var(--color-primary);
+    }
+  }
+
+  & .grounded-evidence-warning,
+  & .grounded-evidence-empty {
+    margin: 6px 0;
+    color: var(--color-text-secondary);
+  }
+
+  & .grounded-evidence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 7px;
+  }
+
+  & .grounded-evidence-item button {
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 4px 7px;
+    background: var(--color-bg-primary);
+    color: var(--color-primary);
+    cursor: pointer;
+    font: inherit;
+  }
+
+  & .grounded-evidence-quote {
+    margin-bottom: 4px;
+    color: var(--color-text-primary);
+  }
+
+  pre {
+    max-height: 180px;
+    margin: 6px 0 0;
+    overflow: auto;
+    padding: 8px;
+    border-radius: 6px;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font: inherit;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  mark {
+    border-radius: 2px;
+    background: rgba(250, 204, 21, 0.45);
+    color: inherit;
+  }
+}

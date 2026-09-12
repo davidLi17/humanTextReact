@@ -55,6 +55,33 @@ describe("session search core", () => {
     expect(hits[0]?.snippet).toContain("hydration");
   });
 
+  test("助手隐藏引用块不参与会话搜索或结果摘要", () => {
+    const rawAnswer = [
+      "可见结论：本周先修复支付失败率。",
+      "<!-- human-text-evidence:v1",
+      '{"citations":[{"id":"E1","segmentIndex":2,"quote":"协议内唯一搜索词如何处理"}]}',
+      "-->",
+    ].join("\n");
+    const index = createSessionSearchIndex([
+      session({
+        messages: [
+          {
+            id: "grounded-answer",
+            role: "assistant",
+            content: rawAnswer,
+            createdAt: 1_700_000_002_000,
+          },
+        ],
+      }),
+    ]);
+
+    const visibleHits = searchSessionMessages(index, "支付失败率");
+    expect(visibleHits[0]?.snippet).toContain("可见结论");
+    expect(visibleHits[0]?.snippet).not.toContain("human-text-evidence:v1");
+    expect(searchSessionMessages(index, "协议内唯一搜索词")).toEqual([]);
+    expect(searchSessionMessages(index, "citations")).toEqual([]);
+  });
+
   test("每个会话标题只生成一个标题命中，消息标题不会重复参与索引", () => {
     const index = createSessionSearchIndex([
       session({

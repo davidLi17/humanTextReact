@@ -89,7 +89,24 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
         body,
       });
       const serialized = JSON.stringify(body);
-      const content = serialized.includes("【续读进度】: 第 2 段")
+      const groundedSegmentIndex = Number(
+        serialized.match(/【原文第 (\d+) 段｜/)?.[1] || 1
+      );
+      const content = serialized.includes("human-text-evidence:v1")
+        ? [
+            "围绕末段的交付信号优先推进验证。[依据:E1]",
+            "",
+            "<!-- human-text-evidence:v1",
+            JSON.stringify({
+              citations: [{
+                id: "E1",
+                segmentIndex: groundedSegmentIndex,
+                quote: "末段唯一标记：只应在用户选中末段后进入真实模型请求。",
+              }],
+            }),
+            "-->",
+          ].join("\n")
+        : serialized.includes("【续读进度】: 第 2 段")
         ? "本地长文第二段结果"
         : serialized.includes("阶段三长文")
         ? "本地长文首段结果"
@@ -485,6 +502,106 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
   const finalSessions = await readSessions(restoredSidepanel);
   expect(finalSessions).toHaveLength(1);
   expect(finalSessions[0].id).toBe(session.id);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("按目标提取只用冻结选段，依据可核对且刷新后恢复", async ({ harness }, testInfo) => {
+  const article = await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/long-article`);
+  const sidepanel = await harness.context.newPage();
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  const readButton = sidepanel.getByRole("button", { name: /通读当前网页/ }).first();
+  await expect(readButton).toBeEnabled();
+
+  const readSessions = (page: import("@playwright/test").Page): Promise<ChatSession[]> =>
+    page.evaluate(async () => {
+      const stored = await (globalThis as any).chrome.storage.local.get("sidepanel_chat_sessions");
+      return stored.sidepanel_chat_sessions || [];
+    });
+  await article.bringToFront();
+  await readButton.evaluate((element) => (element as HTMLButtonElement).click());
+  await expect.poll(async () => (await readSessions(sidepanel))[0]?.messages.length).toBe(1);
+
+  const pageContextCard = sidepanel.getByLabel("网页上下文");
+  await pageContextCard.getByText("预览已保存原文", { exact: true }).click();
+  const segmentCheckboxes = pageContextCard.getByRole("checkbox", {
+    name: /第 \d+ 段参与回答/,
+  });
+  const segmentCount = await segmentCheckboxes.count();
+  expect(segmentCount).toBeGreaterThan(1);
+  await segmentCheckboxes.nth(0).uncheck();
+  await segmentCheckboxes.nth(segmentCount - 1).check();
+  await expect.poll(async () => {
+    const sessions = await readSessions(sidepanel);
+    return sessions[0]?.messages[0]?.pageMeta?.attachedPage?.selectedSegments;
+  }).toEqual([segmentCount]);
+
+  const goal = "找出本周最该推进的交付动作";
+  await pageContextCard.getByLabel("这次想解决什么问题？").fill(goal);
+  await pageContextCard.getByRole("button", { name: "提取对我有用的信息" }).click();
+  await expect(sidepanel.getByText(/原文依据/)).toBeVisible();
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+  const request = harness.server.modelRequests[0];
+  expect(request.authorization).toBe("Bearer fixture-only-key");
+  expect(request.body.messages).toHaveLength(2);
+  expect(request.body.messages[0].content).toContain("human-text-evidence:v1");
+  expect(request.body.messages[1].content).toContain("【用户目标】");
+  expect(request.body.messages[1].content).toContain(goal);
+  expect(request.body.messages[1].content).toContain("末段唯一标记");
+  expect(request.body.messages[1].content).not.toContain("第 1 段阶段三长文正文");
+
+  const stored = await readSessions(sidepanel);
+  const groundedUser = stored[0].messages.find((message: any) => message.groundedGoalMeta);
+  expect(groundedUser).toMatchObject({
+    groundedGoalMeta: expect.objectContaining({
+      version: 1,
+      goal,
+      sourcePageMessageId: stored[0].messages[0].id,
+      sourceSnapshotFingerprint: expect.any(String),
+    }),
+  });
+  if (!groundedUser?.groundedGoalMeta) {
+    throw new Error("目标提取用户消息没有持久化冻结来源");
+  }
+  expect(groundedUser.groundedGoalMeta.selectedSegments.map((segment: any) => segment.index)).toEqual([segmentCount]);
+  await expect(sidepanel.getByText(/human-text-evidence:v1/)).toHaveCount(0);
+
+  const evidenceButton = sidepanel.getByRole("button", {
+    name: `查看第 ${segmentCount} 段原文`,
+  });
+  await evidenceButton.click();
+  await expect(sidepanel.locator("mark")).toContainText("末段唯一标记");
+  // 引文可能在很长的保存段落中靠后；仅渲染 mark 还不够，必须滚进 pre 的裁剪可视区域。
+  await expect.poll(() => sidepanel.locator(".grounded-evidence-panel pre").evaluate((pre) => {
+    const mark = pre.querySelector("mark");
+    if (!mark) return false;
+    const preRect = pre.getBoundingClientRect();
+    const markRect = mark.getBoundingClientRect();
+    const visibleHeight = Math.min(markRect.bottom, preRect.bottom) -
+      Math.max(markRect.top, preRect.top);
+    return (
+      markRect.top >= preRect.top - 1 &&
+      markRect.bottom <= preRect.bottom + 1 &&
+      visibleHeight >= markRect.height - 1
+    );
+  })).toBe(true);
+  // 截图也应直接呈现高亮，而非被侧栏的固定输入区遮住。
+  await sidepanel.locator("mark").scrollIntoViewIfNeeded();
+  const screenshotPath = testInfo.outputPath("grounded-goal-evidence.png");
+  await sidepanel.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach("grounded-goal-evidence", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
+
+  await sidepanel.close();
+  const restoredSidepanel = await harness.context.newPage();
+  await restoredSidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await expect(restoredSidepanel.getByText(/原文依据/)).toBeVisible();
+  await expect(
+    restoredSidepanel.getByRole("button", { name: `查看第 ${segmentCount} 段原文` })
+  ).toBeVisible();
+  expect(await readSessions(restoredSidepanel)).toEqual(stored);
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 

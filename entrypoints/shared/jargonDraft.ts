@@ -7,6 +7,7 @@ import {
 } from "./jargonStorage";
 import { getSafeHttpUrl, type SelectionContext } from "./selectionContext";
 import { parsePrismTranslation } from "./prismParser";
+import { stripGroundedEvidenceBlock } from "./groundedGoal";
 
 export interface JargonSaveDraft {
   item: JargonInput;
@@ -48,7 +49,9 @@ export function createJargonDraft({
   sourceContext,
   sourceUrl,
 }: JargonDraftInput): JargonSaveDraft {
-  const raw = typeof rawExplanation === "string" ? rawExplanation : "";
+  const raw = stripGroundedEvidenceBlock(
+    typeof rawExplanation === "string" ? rawExplanation : ""
+  );
   const parsed = parsePrismTranslation(raw);
   const vernacular = parsed.vernacular.trim();
   const explanation = vernacular || raw.trim();
