@@ -86,7 +86,7 @@ import {
 import {
   buildExplanationRefinementMessageText,
   createExplanationRefinementMeta,
-  normalizeExplanationRefinementMeta,
+  getValidExplanationRefinementMeta,
   type ExplanationRefinementMode,
 } from "@/entrypoints/shared/explanationRefinement";
 import {
@@ -2628,8 +2628,9 @@ export default function SidePanelApp() {
 
     const prevUserMsg = historyMessages[historyMessages.length - 1];
     if (prevUserMsg.role !== "user") return;
-    const refinementMeta = normalizeExplanationRefinementMeta(
-      prevUserMsg.refinementMeta
+    const refinementMeta = getValidExplanationRefinementMeta(
+      prevUserMsg,
+      historyMessages.slice(0, -1)
     );
 
     const replayPrompt = prevUserMsg.pageMeta?.isWebPageReading
@@ -3651,7 +3652,12 @@ export default function SidePanelApp() {
             )}
 
             {/* 对话消息流 */}
-            {activeSession?.messages.map((message) => (
+            {activeSession?.messages.map((message, messageIndex) => {
+              const validRefinementMeta = getValidExplanationRefinementMeta(
+                message,
+                activeSession.messages.slice(0, messageIndex)
+              );
+              return (
               <div
                 key={message.id}
                 data-message-id={message.id}
@@ -3824,7 +3830,7 @@ export default function SidePanelApp() {
                           )}
 
                           {/* 悬浮操作区：编辑按钮 */}
-                          {!message.overviewMeta && !message.refinementMeta && (
+                          {!message.overviewMeta && !validRefinementMeta && (
                             <div className="user-bubble-actions">
                               <button
                                 type="button"
@@ -4148,7 +4154,8 @@ export default function SidePanelApp() {
                     )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </main>
 
           {/* 底部输入控制台 */}

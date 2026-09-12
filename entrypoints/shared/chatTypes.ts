@@ -100,12 +100,14 @@ export function buildHistoryPayload(
     content: string | any[];
     images?: ChatImageContent[];
     selectionContext?: SelectionContext;
+    refinementMeta?: unknown;
   }>,
   currentMessage?: {
     role: ChatRole;
     content: string | any[];
     images?: ChatImageContent[];
     selectionContext?: SelectionContext;
+    refinementMeta?: unknown;
   }
 ): ChatPayloadMessage[] {
   const payload = messages.map(formatMessageForPayload);

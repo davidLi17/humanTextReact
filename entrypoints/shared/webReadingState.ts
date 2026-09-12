@@ -1,5 +1,6 @@
 import {
   buildHistoryPayload,
+  type ChatPayloadMessage,
   type ChatMessage,
   type ChatSession,
 } from "./chatTypes";
@@ -119,11 +120,14 @@ export function buildReplayableWebReadingPrompt(
  */
 export function buildWebReadingHistoryPayload(
   messages: ChatMessage[],
-  currentMessage?: Parameters<typeof buildHistoryPayload>[1]
+  currentMessage?: ChatPayloadMessage
 ) {
   return buildHistoryPayload(
-    messages.map((message) => {
-      const materialized = materializeExplanationRefinementMessage(message);
+    messages.map((message, index) => {
+      const materialized = materializeExplanationRefinementMessage(
+        message,
+        messages.slice(0, index)
+      );
       if (
         materialized.role !== "user" ||
         !materialized.pageMeta?.isWebPageReading
@@ -136,7 +140,7 @@ export function buildWebReadingHistoryPayload(
         : materialized;
     }),
     currentMessage
-      ? materializeExplanationRefinementMessage(currentMessage)
+      ? materializeExplanationRefinementMessage(currentMessage, messages)
       : currentMessage
   );
 }

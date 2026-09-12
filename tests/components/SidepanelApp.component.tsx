@@ -1577,6 +1577,149 @@ describe("Sidepanel App 真实 React 交互", () => {
     expect(request.messages.at(-1).content).not.toContain("第一个回答片段");
   });
 
+  test("同一回答的局部选区在补讲菜单鼠标按下后仍作为定向片段发送", async () => {
+    const selectedExcerpt = "局部关键句应当被引用";
+    const omittedTail = "这一段剩余文字不应成为定向片段";
+    const session = {
+      id: "refinement-local-selection-session",
+      title: "局部补讲测试",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        {
+          id: "local-question",
+          role: "user" as const,
+          content: "原问题",
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "local-answer",
+          role: "assistant" as const,
+          content: `${selectedExcerpt}。${omittedTail}。`,
+          createdAt: 200,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText(session.messages[1].content, { exact: true });
+
+    const messageRow = document.querySelector<HTMLElement>(
+      '[data-message-id="local-answer"]'
+    );
+    const markdown = messageRow?.querySelector<HTMLElement>(".markdown-content");
+    const textNode = markdown?.querySelector("p")?.firstChild || markdown?.firstChild;
+    if (!messageRow || !textNode || textNode.nodeType !== Node.TEXT_NODE) {
+      throw new Error("未找到可划选的助手回答正文");
+    }
+    const text = textNode.textContent || "";
+    const start = text.indexOf(selectedExcerpt);
+    if (start < 0) throw new Error("未找到待验证的局部回答片段");
+    const range = document.createRange();
+    range.setStart(textNode, start);
+    range.setEnd(textNode, start + selectedExcerpt.length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".chat-content")!);
+    await screen.findByRole("toolbar", { name: "划词追问" });
+
+    const refinementButton = screen.getByRole("button", { name: "这里没看懂" });
+    fireEvent.mouseDown(refinementButton);
+    fireEvent.click(refinementButton);
+    const action = screen.getByRole("menuitem", { name: "按原文逐句讲" });
+    fireEvent.mouseDown(action);
+    fireEvent.click(action);
+
+    const request = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+    const refinementPrompt = request.messages.at(-1).content;
+    expect(refinementPrompt).toContain(selectedExcerpt);
+    expect(refinementPrompt).not.toContain(omittedTail);
+  });
+
+  test("补讲收到真实错误后重挂载，点击重试仍物化原定向指令", async () => {
+    const session = {
+      id: "refinement-refresh-retry-session",
+      title: "补讲刷新重试测试",
+      createdAt: 100,
+      updatedAt: 200,
+      messages: [
+        {
+          id: "refresh-question",
+          role: "user" as const,
+          content: "原始问题",
+          createdAt: 100,
+          status: "completed" as const,
+        },
+        {
+          id: "refresh-answer",
+          role: "assistant" as const,
+          content: "需要在刷新后保持的原回答",
+          createdAt: 200,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await screen.findByText("需要在刷新后保持的原回答");
+    fireEvent.click(screen.getByRole("button", { name: "这里没看懂" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "再白一点" }));
+    const firstRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(1);
+      return requests[0];
+    });
+
+    act(() => {
+      mock.emitRuntimeMessage({
+        action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+        requestId: firstRequest.requestId,
+        sessionId: session.id,
+        error: "本地模型故障",
+        done: true,
+      });
+    });
+    await screen.findByText("本地模型故障");
+    await waitFor(() => {
+      const stored = mock.localStore.sidepanel_chat_sessions as any[];
+      expect(stored[0].messages.at(-1)).toMatchObject({
+        role: "assistant",
+        status: "error",
+        errorMessage: "本地模型故障",
+      });
+    });
+
+    cleanup();
+    render(<SidePanelApp />);
+    await screen.findByText("本地模型故障");
+    fireEvent.click(screen.getByTitle("重试生成"));
+    const retryRequest = await waitFor(() => {
+      const requests = getTranslateMessages(mock);
+      expect(requests).toHaveLength(2);
+      return requests[1];
+    });
+    expect(retryRequest.prismMode).toBe(false);
+    expect(retryRequest.bypassJargonVault).toBe(true);
+    expect(retryRequest.messages.at(-1).content).toContain(
+      "需要在刷新后保持的原回答"
+    );
+  });
+
   test("补讲回答失败后重试仍物化同一份定向指令", async () => {
     const session = {
       id: "refinement-retry-session",
@@ -1584,6 +1727,13 @@ describe("Sidepanel App 真实 React 交互", () => {
       createdAt: 100,
       updatedAt: 200,
       messages: [
+        {
+          id: "retry-question",
+          role: "user" as const,
+          content: "原问题",
+          createdAt: 100,
+          status: "completed" as const,
+        },
         {
           id: "retry-answer",
           role: "assistant" as const,

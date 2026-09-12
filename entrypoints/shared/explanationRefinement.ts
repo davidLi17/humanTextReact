@@ -7,6 +7,8 @@ import type {
 export type { ExplanationRefinementMeta, ExplanationRefinementMode } from "./chatTypes";
 
 const REFINEMENT_EXCERPT_MAX_CHARS = 1000;
+const REFINEMENT_EXCERPT_SCAN_CHARS = 4000;
+const REFINEMENT_MESSAGE_ID_MAX_CHARS = 128;
 
 const REFINEMENT_LABELS: Record<ExplanationRefinementMode, string> = {
   simpler: "再白一点",
@@ -14,8 +16,24 @@ const REFINEMENT_LABELS: Record<ExplanationRefinementMode, string> = {
   "context-example": "换个贴合本文的例子",
 };
 
-function cleanText(value: unknown): string {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+function cleanMessageId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > REFINEMENT_MESSAGE_ID_MAX_CHARS
+  ) {
+    return "";
+  }
+  return value.trim();
+}
+
+function cleanExcerpt(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .slice(0, REFINEMENT_EXCERPT_SCAN_CHARS)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, REFINEMENT_EXCERPT_MAX_CHARS);
 }
 
 export function normalizeExplanationRefinementMeta(
@@ -32,13 +50,18 @@ export function normalizeExplanationRefinementMeta(
   ) {
     return undefined;
   }
-  const targetAssistantMessageId = cleanText(candidate.targetAssistantMessageId);
-  const targetExcerpt = cleanText(candidate.targetExcerpt).slice(
-    0,
-    REFINEMENT_EXCERPT_MAX_CHARS
+  const targetAssistantMessageId = cleanMessageId(
+    candidate.targetAssistantMessageId
   );
+  const targetExcerpt = cleanExcerpt(candidate.targetExcerpt);
   if (!targetAssistantMessageId || !targetExcerpt) return undefined;
-  const sourceUserMessageId = cleanText(candidate.sourceUserMessageId);
+  const sourceUserMessageId =
+    candidate.sourceUserMessageId === undefined
+      ? ""
+      : cleanMessageId(candidate.sourceUserMessageId);
+  if (candidate.sourceUserMessageId !== undefined && !sourceUserMessageId) {
+    return undefined;
+  }
   return {
     version: 1,
     mode,
@@ -46,6 +69,53 @@ export function normalizeExplanationRefinementMeta(
     ...(sourceUserMessageId ? { sourceUserMessageId } : {}),
     targetExcerpt,
   };
+}
+
+interface RefinementHistoryMessage {
+  id?: unknown;
+  role?: unknown;
+  content?: unknown;
+}
+
+/**
+ * 校验补讲消息与同一会话中此前消息的关系。损坏或导入的元数据会退回普通消息。
+ */
+export function getValidExplanationRefinementMeta(
+  message: {
+    role?: unknown;
+    refinementMeta?: unknown;
+  },
+  precedingMessages: readonly RefinementHistoryMessage[]
+): ExplanationRefinementMeta | undefined {
+  if (message.role !== "user") return undefined;
+  const meta = normalizeExplanationRefinementMeta(message.refinementMeta);
+  if (!meta) return undefined;
+
+  let targetIndex = -1;
+  for (let index = precedingMessages.length - 1; index >= 0; index -= 1) {
+    const candidate = precedingMessages[index];
+    if (
+      candidate.role === "assistant" &&
+      candidate.id === meta.targetAssistantMessageId
+    ) {
+      targetIndex = index;
+      break;
+    }
+  }
+  if (targetIndex < 0) return undefined;
+
+  if (meta.sourceUserMessageId) {
+    const hasMatchingSourceUser = precedingMessages
+      .slice(0, targetIndex)
+      .some(
+        (candidate) =>
+          candidate.role === "user" &&
+          candidate.id === meta.sourceUserMessageId
+      );
+    if (!hasMatchingSourceUser) return undefined;
+  }
+
+  return meta;
 }
 
 export function createExplanationRefinementMeta(input: {
@@ -85,9 +155,9 @@ export function buildExplanationRefinementPrompt(
 }
 
 export function materializeExplanationRefinementMessage<
-  T extends { content: unknown; refinementMeta?: unknown }
->(message: T): T {
-  const meta = normalizeExplanationRefinementMeta(message.refinementMeta);
+  T extends { role?: unknown; content: unknown; refinementMeta?: unknown }
+>(message: T, precedingMessages: readonly RefinementHistoryMessage[] = []): T {
+  const meta = getValidExplanationRefinementMeta(message, precedingMessages);
   if (!meta || typeof message.content !== "string") return message;
   return {
     ...message,
