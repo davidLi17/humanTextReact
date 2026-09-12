@@ -83,6 +83,11 @@ import {
   formatSessionAsMarkdown,
   formatSessionAsPlainText,
 } from "@/entrypoints/shared/sessionExport";
+import {
+  createSessionSearchIndex,
+  searchSessionMessages,
+  type SessionSearchHit,
+} from "@/entrypoints/shared/sessionSearch";
 import { ImageUtils } from "@/entrypoints/popup/utils/imageUtils";
 import CollapsibleThinkingChain from "@/entrypoints/popup/components/CollapsibleThinkingChain";
 import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector";
@@ -94,6 +99,7 @@ import QuoteInputCapsule from "./components/QuoteInputCapsule";
 import PromptQueueBar, {
   type QueuedPrompt,
 } from "./components/PromptQueueBar";
+import SessionSearchResults from "./components/SessionSearchResults";
 import {
   calculateQuotePosition,
   formatQuoteMarkdown,
@@ -130,7 +136,13 @@ import {
   Refresh,
   Down,
 } from "@icon-park/react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import "./App.less";
 import {
   BOTTOM_THRESHOLD_PX,
@@ -164,6 +176,11 @@ interface PendingSidepanelEnvelope {
   selectionContext?: SelectionContext;
   envelopeId?: string;
   timestamp?: number;
+}
+
+interface PendingSessionJump {
+  sessionId: string;
+  messageId: string;
 }
 
 function SelectionContextDetails({
@@ -244,6 +261,9 @@ export default function SidePanelApp() {
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(false);
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
   const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState("");
+  const [pendingSessionJump, setPendingSessionJump] =
+    useState<PendingSessionJump | null>(null);
 
   // 界面 Tab 切换："chat"（对话）与 "vault"（黑话生词本）
   const [activeView, setActiveView] = useState<"chat" | "vault">("chat");
@@ -316,6 +336,10 @@ export default function SidePanelApp() {
   const programmaticScrollTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const searchHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const searchHighlightedElementRef = useRef<HTMLElement | null>(null);
 
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
@@ -351,6 +375,21 @@ export default function SidePanelApp() {
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) || sessions[0];
+  const deferredSessionSearchQuery = useDeferredValue(sessionSearchQuery);
+  const sessionSearchIndex = useMemo(
+    () =>
+      showDrawer && drawerTab === "history"
+        ? createSessionSearchIndex(sessions)
+        : null,
+    [showDrawer, drawerTab, sessions]
+  );
+  const sessionSearchResults = useMemo(() => {
+    if (!sessionSearchIndex || !deferredSessionSearchQuery.trim()) return [];
+    return searchSessionMessages(
+      sessionSearchIndex,
+      deferredSessionSearchQuery
+    );
+  }, [deferredSessionSearchQuery, sessionSearchIndex]);
   const currentSessionQueue = activeSession
     ? promptQueue.filter((prompt) => prompt.sessionId === activeSession.id)
     : [];
@@ -1002,9 +1041,68 @@ export default function SidePanelApp() {
       if (programmaticScrollTimerRef.current) {
         clearTimeout(programmaticScrollTimerRef.current);
       }
+      if (searchHighlightTimerRef.current) {
+        clearTimeout(searchHighlightTimerRef.current);
+      }
+      searchHighlightedElementRef.current?.removeAttribute(
+        "data-search-highlighted"
+      );
     },
     []
   );
+
+  // 搜索命中优先于会话切换后的“回到底部”：它会接管本次滚动并锁定自动跟随。
+  useEffect(() => {
+    if (
+      !pendingSessionJump ||
+      pendingSessionJump.sessionId !== activeSessionId ||
+      activeView !== "chat"
+    ) {
+      return;
+    }
+
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current);
+      programmaticScrollTimerRef.current = null;
+    }
+    programmaticScrollRef.current = false;
+    userHasScrolledUpRef.current = true;
+    setIsAtBottom(false);
+
+    const frame = requestAnimationFrame(() => {
+      const target = Array.from(
+        chatContentRef.current?.querySelectorAll<HTMLElement>(
+          "[data-message-id]"
+        ) || []
+      ).find((element) => element.dataset.messageId === pendingSessionJump.messageId);
+
+      if (!target) {
+        setPendingSessionJump(null);
+        showToast("未找到原消息，已打开会话");
+        return;
+      }
+
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (searchHighlightTimerRef.current) {
+        clearTimeout(searchHighlightTimerRef.current);
+      }
+      searchHighlightedElementRef.current?.removeAttribute(
+        "data-search-highlighted"
+      );
+      target.dataset.searchHighlighted = "true";
+      searchHighlightedElementRef.current = target;
+      searchHighlightTimerRef.current = setTimeout(() => {
+        target.removeAttribute("data-search-highlighted");
+        if (searchHighlightedElementRef.current === target) {
+          searchHighlightedElementRef.current = null;
+        }
+        searchHighlightTimerRef.current = null;
+      }, 1800);
+      setPendingSessionJump(null);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [activeSessionId, activeView, pendingSessionJump]);
 
   // 自动滚动到消息流底部 (遵循 GPT 交互: 仅在用户未主动往上滑时紧贴底部，零动画惯性，绝不抢占用户滚轮控制权)
   useEffect(() => {
@@ -2663,6 +2761,22 @@ export default function SidePanelApp() {
     }
   };
 
+  const handleSessionSearchResultSelect = (result: SessionSearchHit) => {
+    if (result.messageId) {
+      setPendingSessionJump({
+        sessionId: result.sessionId,
+        messageId: result.messageId,
+      });
+    }
+    if (result.sessionId !== activeSessionId) {
+      activateSessionWithDraft(result.sessionId);
+    }
+    void saveActiveSessionId(result.sessionId);
+    setActiveView("chat");
+    setSessionSearchQuery("");
+    setShowDrawer(false);
+  };
+
   // 复制文本
   const handleCopy = async (id: string, text: string) => {
     try {
@@ -3193,47 +3307,87 @@ export default function SidePanelApp() {
                     <span>新建会话</span>
                   </button>
                 </div>
-                <div className="drawer-list">
-                  {sessions.map((session) => (
-                    <div
-                      key={session.id}
-                      className={`drawer-item ${
-                        session.id === activeSessionId && activeView === "chat"
-                          ? "active"
-                          : ""
-                      }`}
-                      onClick={() => {
-                        if (session.id !== activeSessionId) {
-                          activateSessionWithDraft(session.id);
-                        }
-                        void saveActiveSessionId(session.id);
-                        setActiveView("chat");
-                        setShowDrawer(false);
-                      }}
-                    >
-                      <Message
-                        theme="outline"
-                        size="16"
-                        className="item-icon"
-                      />
-                      <span className="item-title" title={session.title}>
-                        {session.title}
-                      </span>
+                <div className="session-search-box">
+                  <label className="session-search-label" htmlFor="session-search-input">
+                    搜索会话和消息
+                  </label>
+                  <div className="session-search-input-wrap">
+                    <input
+                      id="session-search-input"
+                      data-testid="session-search-input"
+                      type="search"
+                      value={sessionSearchQuery}
+                      onChange={(event) => setSessionSearchQuery(event.target.value)}
+                      placeholder="输入关键词"
+                      aria-label="搜索会话和消息"
+                    />
+                    {sessionSearchQuery && (
                       <button
                         type="button"
-                        className="delete-item-btn"
-                        title={
-                          session.id === activeSessionId
-                            ? "删除会话"
-                            : `删除会话：${session.title}`
-                        }
-                        onClick={(e) => handleDeleteSession(session.id, e)}
+                        className="session-search-clear"
+                        data-testid="session-search-clear"
+                        aria-label="清空会话搜索"
+                        onClick={() => setSessionSearchQuery("")}
                       >
-                        <Delete theme="outline" size="14" />
+                        <Clear theme="outline" size="14" />
                       </button>
-                    </div>
-                  ))}
+                    )}
+                  </div>
                 </div>
+                {sessionSearchQuery.trim() ? (
+                  sessionSearchResults.length > 0 ? (
+                    <SessionSearchResults
+                      results={sessionSearchResults}
+                      onSelect={handleSessionSearchResultSelect}
+                    />
+                  ) : (
+                    <div className="session-search-empty" role="status">
+                      没有找到相关会话或消息
+                    </div>
+                  )
+                ) : (
+                  <div className="drawer-list">
+                    {sessions.map((session) => (
+                      <div
+                        key={session.id}
+                        className={`drawer-item ${
+                          session.id === activeSessionId && activeView === "chat"
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (session.id !== activeSessionId) {
+                            activateSessionWithDraft(session.id);
+                          }
+                          void saveActiveSessionId(session.id);
+                          setActiveView("chat");
+                          setShowDrawer(false);
+                        }}
+                      >
+                        <Message
+                          theme="outline"
+                          size="16"
+                          className="item-icon"
+                        />
+                        <span className="item-title" title={session.title}>
+                          {session.title}
+                        </span>
+                        <button
+                          type="button"
+                          className="delete-item-btn"
+                          title={
+                            session.id === activeSessionId
+                              ? "删除会话"
+                              : `删除会话：${session.title}`
+                          }
+                          onClick={(e) => handleDeleteSession(session.id, e)}
+                        >
+                          <Delete theme="outline" size="14" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </>
             ) : (
               <div className="drawer-vault-shortcut">
@@ -3364,6 +3518,7 @@ export default function SidePanelApp() {
             {activeSession?.messages.map((message) => (
               <div
                 key={message.id}
+                data-message-id={message.id}
                 className={`chat-bubble-row ${
                   message.role === "user" ? "user-row" : "assistant-row"
                 }`}

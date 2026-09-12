@@ -329,6 +329,9 @@ beforeEach(() => {
     style: document.documentElement.getAttribute("style"),
   };
   document.body.innerHTML = "";
+  if (!HTMLElement.prototype.scrollIntoView) {
+    HTMLElement.prototype.scrollIntoView = () => {};
+  }
 });
 
 afterEach(() => {
@@ -1062,5 +1065,142 @@ describe("Sidepanel App 真实 React 交互", () => {
         )
       ).toBe(false);
     });
+  });
+
+  test("搜索旧回答命中后激活目标会话并高亮消息，同时保留原会话草稿", async () => {
+    const sessions = [
+      {
+        id: "search-session-a",
+        title: "A 会话标题",
+        createdAt: 100,
+        updatedAt: 300,
+        messages: [
+          {
+            id: "a-question",
+            role: "user" as const,
+            content: "A 的问题",
+            createdAt: 100,
+            status: "completed" as const,
+          },
+          {
+            id: "a-answer",
+            role: "assistant" as const,
+            content: "A 的回答",
+            createdAt: 200,
+            status: "completed" as const,
+          },
+        ],
+      },
+      {
+        id: "search-session-b",
+        title: "B 会话标题",
+        createdAt: 200,
+        updatedAt: 400,
+        messages: [
+          ...Array.from({ length: 6 }, (_, index) => ({
+            id: `b-filler-${index}`,
+            role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+            content: `B 的历史消息 ${index}`,
+            createdAt: 210 + index,
+            status: "completed" as const,
+          })),
+          {
+            id: "target-old-answer",
+            role: "assistant" as const,
+            content: "旧回答里保留了 session-search-target 这个关键词。",
+            createdAt: 300,
+            status: "completed" as const,
+          },
+        ],
+      },
+    ];
+    const mock = createBrowserMock({
+      sessions,
+      activeSessionId: "search-session-a",
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    const input = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "A 会话的未发送草稿" } });
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+
+    const searchInput = await screen.findByTestId("session-search-input");
+    fireEvent.change(searchInput, { target: { value: "session-search-target" } });
+    const result = await screen.findByTestId("session-search-result");
+    expect(result.getAttribute("data-session-id")).toBe("search-session-b");
+    expect(result.getAttribute("data-message-id")).toBe("target-old-answer");
+    fireEvent.click(result);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("session-search-input")).toBeNull();
+    });
+    await screen.findByText("旧回答里保留了 session-search-target 这个关键词。", {
+      exact: true,
+    });
+    await waitFor(() => {
+      expect(
+        document.querySelector(
+          '[data-message-id="target-old-answer"][data-search-highlighted="true"]'
+        )
+      ).toBeTruthy();
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(0);
+
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    await screen.findByTestId("session-search-input");
+    let aDrawerItem: HTMLElement | undefined;
+    await waitFor(() => {
+      aDrawerItem = screen
+        .getAllByTitle("A 会话标题")
+        .find((element) => element.closest(".drawer-item"))
+        ?.closest(".drawer-item") as HTMLElement | undefined;
+      expect(aDrawerItem).toBeDefined();
+    });
+    expect(aDrawerItem).toBeDefined();
+    fireEvent.click(aDrawerItem!);
+    expect(
+      ((await screen.findByPlaceholderText(
+        /输入追问、黑话术语或指令/
+      )) as HTMLTextAreaElement).value
+    ).toBe("A 会话的未发送草稿");
+  });
+
+  test("会话搜索无结果时显示提示，清空查询后恢复会话列表且不请求模型", async () => {
+    const session = {
+      id: "search-empty-session",
+      title: "可恢复的会话",
+      createdAt: 100,
+      updatedAt: 100,
+      messages: [
+        {
+          id: "search-empty-message",
+          role: "user" as const,
+          content: "一条历史问题",
+          createdAt: 100,
+          status: "completed" as const,
+        },
+      ],
+    };
+    const mock = createBrowserMock({
+      sessions: [session],
+      activeSessionId: session.id,
+    });
+    setTestGlobal("browser", mock.browser);
+
+    render(<SidePanelApp />);
+    fireEvent.click(screen.getByTitle("会话与生词本抽屉"));
+    const searchInput = await screen.findByTestId("session-search-input");
+    fireEvent.change(searchInput, { target: { value: "完全不存在的关键词" } });
+    expect(await screen.findByText(/没有找到|暂无.*结果/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("session-search-clear"));
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByTitle("可恢复的会话")
+          .some((element) => element.closest(".drawer-item"))
+      ).toBe(true);
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(0);
   });
 });

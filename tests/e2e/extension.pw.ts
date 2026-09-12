@@ -392,6 +392,129 @@ test("网页正文附加到当前会话，重开侧边栏后追问携带正文",
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
+test("会话搜索定位旧回答并保留原会话草稿，不触发模型请求", async ({ harness }, testInfo) => {
+  const now = Date.now();
+  const originalSession: ChatSession = {
+    id: "session-search-original",
+    title: "原会话",
+    createdAt: now,
+    updatedAt: now + 1,
+    messages: [
+      {
+        id: "original-question",
+        role: "user",
+        content: "原会话的历史问题",
+        createdAt: now,
+        status: "completed",
+      },
+    ],
+  };
+  const targetIndex = 9;
+  const targetMessageId = "session-search-target-answer";
+  const targetSession: ChatSession = {
+    id: "session-search-target",
+    title: "目标会话",
+    createdAt: now + 2,
+    updatedAt: now + 40,
+    messages: Array.from({ length: 24 }, (_, index) => ({
+      id: index === targetIndex ? targetMessageId : `target-message-${index}`,
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content:
+        index === targetIndex
+          ? "旧回答中的 session-search-e2e-target 命中词。"
+          : `目标会话的历史消息 ${index}，用于验证定位后仍有足够的后续内容。`,
+      createdAt: now + 3 + index,
+      status: "completed" as const,
+    })),
+  };
+
+  const setup = await harness.context.newPage();
+  await setup.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  await setup.evaluate(
+    async ({ sessions, activeSessionId }) => {
+      await (globalThis as any).chrome.storage.local.set({
+        sidepanel_chat_sessions: sessions,
+        sidepanel_active_session_id: activeSessionId,
+      });
+    },
+    {
+      sessions: [originalSession, targetSession],
+      activeSessionId: originalSession.id,
+    }
+  );
+  await setup.close();
+
+  const sidepanel = await harness.context.newPage();
+  await sidepanel.setViewportSize({ width: 420, height: 720 });
+  await sidepanel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  const composer = sidepanel.getByPlaceholder("输入追问、黑话术语或指令", {
+    exact: false,
+  });
+  await expect(composer).toBeVisible();
+  await composer.fill("原会话暂存草稿");
+
+  await sidepanel.getByTitle("会话与生词本抽屉").click();
+  const searchInput = sidepanel.getByTestId("session-search-input");
+  await expect(searchInput).toBeVisible();
+  await searchInput.fill("session-search-e2e-target");
+  const result = sidepanel.getByTestId("session-search-result").first();
+  await expect(result).toHaveAttribute("data-session-id", targetSession.id);
+  await expect(result).toHaveAttribute("data-message-id", targetMessageId);
+  await result.click();
+
+  const chatContent = sidepanel.locator(".chat-content");
+  const target = sidepanel.locator(
+    `[data-message-id="${targetMessageId}"]`
+  );
+  await expect(target).toBeVisible();
+  await expect(target).toHaveAttribute("data-search-highlighted", "true");
+  const readScrollMetrics = () => chatContent.evaluate((element, messageId) => {
+    const container = element as HTMLElement;
+    const targetElement = container.querySelector<HTMLElement>(
+      `[data-message-id="${messageId}"]`
+    );
+    if (!targetElement) throw new Error("目标消息没有出现在消息流中");
+    const targetRect = targetElement.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    return {
+      scrollTop: container.scrollTop,
+      maxScrollTop: Math.max(0, container.scrollHeight - container.clientHeight),
+      targetTop: targetRect.top,
+      targetBottom: targetRect.bottom,
+      containerTop: containerRect.top,
+      containerBottom: containerRect.bottom,
+    };
+  }, targetMessageId);
+  await expect
+    .poll(
+      async () => {
+        const metrics = await readScrollMetrics();
+        return (
+          metrics.targetTop > metrics.containerTop &&
+          metrics.targetBottom < metrics.containerBottom &&
+          metrics.maxScrollTop - metrics.scrollTop > 80
+        );
+      },
+      { timeout: 4000, intervals: [100, 250, 500] }
+    )
+    .toBe(true);
+  const centeredMetrics = await readScrollMetrics();
+  expect(centeredMetrics.targetTop).toBeGreaterThan(centeredMetrics.containerTop);
+  expect(centeredMetrics.targetBottom).toBeLessThan(centeredMetrics.containerBottom);
+  expect(centeredMetrics.maxScrollTop - centeredMetrics.scrollTop).toBeGreaterThan(80);
+
+  await sidepanel.screenshot({
+    path: testInfo.outputPath("session-search.png"),
+    fullPage: true,
+  });
+
+  await sidepanel.getByTitle("会话与生词本抽屉").click();
+  await sidepanel.locator(".drawer-item").filter({ hasText: "原会话" }).click();
+  await expect(composer).toHaveValue("原会话暂存草稿");
+  expect(harness.server.modelRequests).toHaveLength(0);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
 test("字体设置通过 Storage 事件同步三个扩展页面和 Content 浮层", async ({ harness }) => {
   const article = await harness.context.newPage();
   await article.goto(`${harness.server.baseUrl}/article`);
