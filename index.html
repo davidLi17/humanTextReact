@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- archify-gallery-v1 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>图集目录</title>
+<style>
+:root{color-scheme:light dark;--side:280px;--bg:#f7f9fc;--panel:#fff;--text:#15243b;--muted:#62738a;--line:#dce4ef;--accent:#008da8}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--panel:#111c2e;--text:#e3ebf7;--muted:#9daec5;--line:#2b3a51;--accent:#50d8ee}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"PingFang SC",sans-serif}
+.shell{display:grid;grid-template-columns:var(--side) 8px minmax(0,1fr);height:100vh;height:100dvh}
+aside{background:var(--panel);overflow:auto;padding:24px 16px;min-width:0}h1{font-size:20px;overflow-wrap:anywhere;margin:0 0 6px}p{color:var(--muted);margin:0 0 20px}nav{display:grid;gap:8px}
+nav a{color:var(--text);text-decoration:none;padding:12px;border:1px solid transparent;border-radius:10px;overflow-wrap:anywhere}
+nav a:hover{background:var(--bg)}nav a[aria-current=page]{border-color:var(--accent);background:var(--bg);color:var(--accent)}a:focus-visible,#splitter:focus-visible{outline:3px solid var(--accent);outline-offset:-3px}
+#splitter{cursor:col-resize;touch-action:none;background:var(--line);position:relative}#splitter:after{content:"";position:absolute;top:45%;left:3px;width:2px;height:38px;border-radius:4px;background:var(--muted)}
+main{display:flex;flex-direction:column;min-width:0;min-height:0}header{min-height:52px;display:flex;align-items:center;gap:12px;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel)}#current{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}header a{color:var(--accent);white-space:nowrap}iframe{width:100%;flex:1;min-height:0;border:0;background:var(--panel)}body.resizing{cursor:col-resize;user-select:none}body.resizing iframe{pointer-events:none}
+@media(max-width:600px){aside{padding:12px 8px}h1{font-size:16px}header{padding:8px;flex-wrap:wrap}header a{font-size:12px}}
+</style>
+</head>
+<body>
+<div class="shell">
+<aside><h1 id="title"></h1><p id="count"></p><nav aria-label="本次图集目录"></nav></aside>
+<div id="splitter" role="separator" aria-orientation="vertical" aria-label="调整目录宽度" tabindex="0"></div>
+<main><header><strong id="current"></strong><a id="standalone" target="_blank" rel="noopener">独立打开 ↗</a></header><iframe name="diagram" title="图表内容" allow="clipboard-write; fullscreen"></iframe></main>
+</div>
+<script id="gallery-data" type="application/json">{"title":"人话翻译器 · 交互图集","diagrams":[{"title":"总体架构与存储边界","id":"1","href":"./01-overall-architecture.html"},{"title":"核心翻译：本地命中与流式输出","id":"2","href":"./02-translation-request-flow.html"},{"title":"网页正文上下文链路","id":"3","href":"./03-web-reading-recovery-flow.html"}]}</script>
+<script>
+const data=JSON.parse(document.getElementById('gallery-data').textContent);
+let frame=document.querySelector('iframe');
+const nav=document.querySelector('nav'), splitter=document.getElementById('splitter');
+document.title=data.title;document.getElementById('title').textContent=data.title;document.getElementById('count').textContent=data.diagrams.length+' 张图 · 点击切换 · 拖动边栏调宽';
+const key='archify-gallery-width:'+location.pathname;
+let width=280;
+try{const saved=Number(localStorage.getItem(key));if(saved>0)width=saved;}catch{}
+function limits(){return innerWidth<600?[100,Math.max(100,innerWidth-200)]:[180,Math.min(600,innerWidth-320)];}
+function resize(value){const [min,max]=limits();width=Math.max(min,Math.min(max,value));document.documentElement.style.setProperty('--side',width+'px');splitter.setAttribute('aria-valuemin',min);splitter.setAttribute('aria-valuemax',max);splitter.setAttribute('aria-valuenow',Math.round(width));}
+function persist(){try{localStorage.setItem(key,String(width));}catch{}}
+resize(width);addEventListener('resize',()=>resize(width));
+splitter.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();splitter.setPointerCapture(e.pointerId);document.body.classList.add('resizing');});
+splitter.addEventListener('pointermove',e=>{if(splitter.hasPointerCapture(e.pointerId))resize(e.clientX);});
+function end(){document.body.classList.remove('resizing');persist();}
+splitter.addEventListener('pointerup',e=>{if(splitter.hasPointerCapture(e.pointerId))splitter.releasePointerCapture(e.pointerId);end();});splitter.addEventListener('lostpointercapture',end);splitter.addEventListener('pointercancel',end);
+splitter.addEventListener('dblclick',()=>{resize(280);persist();});
+splitter.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const [min,max]=limits();resize(e.key==='Home'?min:e.key==='End'?max:width+(e.key==='ArrowRight'?20:-20));persist();});
+const links=data.diagrams.map(item=>{const a=document.createElement('a');a.href='#'+item.id;a.textContent=item.id.padStart(2,'0')+'  '+item.title;nav.append(a);return a;});
+function select(){const item=data.diagrams.find(d=>'#'+d.id===location.hash)||data.diagrams[0];const url=new URL(item.href,location.href).href;if(frame.src!==url){const next=document.createElement('iframe');next.name='diagram';next.title=item.title;next.allow='clipboard-write; fullscreen';next.src=url;frame.replaceWith(next);frame=next;}document.getElementById('current').textContent=item.title;document.getElementById('standalone').href=url;links.forEach((a,i)=>{if(data.diagrams[i]===item)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});}
+addEventListener('hashchange',select);select();
+</script>
+</body>
+</html>
