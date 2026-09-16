@@ -261,6 +261,8 @@ export class SelectionActionBar {
   private currentSelectionContext: SelectionContext | undefined;
   private contextualSelectionEnabled: boolean =
     DEFAULT_SETTINGS.contextualSelectionEnabled;
+  private showSelectionToolbar: boolean =
+    DEFAULT_SETTINGS.showSelectionToolbar;
   private isVisible = false;
   private themeMode: ThemeMode = THEME_MODES.SYSTEM;
   private settingsCleanup: (() => void) | null = null;
@@ -283,8 +285,13 @@ export class SelectionActionBar {
 
   constructor(
     private popupManager?: PopupManager,
-    private customCallbacks?: SelectionActionBarCallbacks
-  ) {}
+    private customCallbacks?: SelectionActionBarCallbacks,
+    options?: { showSelectionToolbar?: boolean }
+  ) {
+    if (options?.showSelectionToolbar !== undefined) {
+      this.showSelectionToolbar = options.showSelectionToolbar;
+    }
+  }
 
   public init(
     targetDocument: Document = document,
@@ -310,6 +317,17 @@ export class SelectionActionBar {
     return this.container;
   }
 
+  public getShowSelectionToolbar(): boolean {
+    return this.showSelectionToolbar;
+  }
+
+  public setShowSelectionToolbar(enabled: boolean): void {
+    this.showSelectionToolbar = enabled;
+    if (!enabled && this.isVisible) {
+      this.hide();
+    }
+  }
+
   /**
    * 显示操作条
    */
@@ -320,6 +338,7 @@ export class SelectionActionBar {
     targetDocument?: Document
   ): void {
     if (this.destroyed) return;
+    if (!this.showSelectionToolbar) return;
     if (!isValidSelectionText(text)) {
       this.hide();
       return;
@@ -773,6 +792,10 @@ export class SelectionActionBar {
           return;
         }
 
+        if (!this.showSelectionToolbar) {
+          return;
+        }
+
         this.show(text, rect, win, doc);
       }, 10);
     };
@@ -842,6 +865,9 @@ export class SelectionActionBar {
       this.fontScaleController.hydrate(settings.fontScalePercent);
       this.contextualSelectionEnabled =
         settings.contextualSelectionEnabled === true;
+      this.setShowSelectionToolbar(
+        settings.showSelectionToolbar ?? DEFAULT_SETTINGS.showSelectionToolbar
+      );
     });
 
     this.settingsCleanup = SettingsUtils.onSettingsChanged((settings) => {
@@ -850,6 +876,9 @@ export class SelectionActionBar {
       this.fontScaleController.syncExternal(settings.fontScalePercent);
       this.contextualSelectionEnabled =
         settings.contextualSelectionEnabled === true;
+      this.setShowSelectionToolbar(
+        settings.showSelectionToolbar ?? DEFAULT_SETTINGS.showSelectionToolbar
+      );
     });
   }
 

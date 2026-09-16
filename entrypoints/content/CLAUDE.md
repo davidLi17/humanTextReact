@@ -120,7 +120,7 @@ public destroy(): void
 - **消息常量与类型**: `MESSAGE_TYPES`、`TranslationRequest`、`PopupState`、`THEME_MODES`
   (`entrypoints/shared/constants/index.ts`)
 - **日志系统**: `createLogger` / `contentLogger` / `initializeLogger` (`entrypoints/shared/logger`)
-- **设置管理**: `SettingsUtils`（读取 `theme` / `fontScalePercent` / `contextualSelectionEnabled` /
+- **设置管理**: `SettingsUtils`（读取 `theme` / `fontScalePercent` / `showSelectionToolbar` / `contextualSelectionEnabled` /
   `thinkingEnabled`，并写回 `theme`、`fontScalePercent`）
 - **Markdown 工具**: `parseMarkdown`、`initializeCodeCopy` (`shared/utils/markdown.ts`)
 - **请求协议**: `createRequestId`、`shouldAcceptRequestUpdate` (`entrypoints/shared/requestProtocol.ts`)

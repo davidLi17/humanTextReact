@@ -584,4 +584,112 @@ describe("Selection Action Bar - Lifecycle and State Transitions", () => {
     });
     bar.destroy();
   });
+
+  test("关闭划词快捷操作条时 show 不再显示操作条", () => {
+    const bar = new SelectionActionBar(undefined, undefined, {
+      showSelectionToolbar: false,
+    });
+    expect(bar.getShowSelectionToolbar()).toBe(false);
+    expect(bar.getIsVisible()).toBe(false);
+
+    const mockDoc = createMockDocument();
+    const mockWin = createMockWindow(1024, 768);
+    const mockRect = {
+      top: 300,
+      bottom: 320,
+      left: 200,
+      right: 350,
+      width: 150,
+      height: 20,
+    };
+
+    bar.show("测试关闭操作条文本", mockRect, mockWin, mockDoc);
+
+    expect(bar.getIsVisible()).toBe(false);
+    expect(bar.getContainer()).toBeNull();
+    bar.destroy();
+  });
+
+  test("在操作条处于显示状态时切换为关闭，自动隐藏操作条", () => {
+    const bar = new SelectionActionBar();
+    const mockDoc = createMockDocument();
+    const mockWin = createMockWindow(1024, 768);
+    const mockRect = {
+      top: 300,
+      bottom: 320,
+      left: 200,
+      right: 350,
+      width: 150,
+      height: 20,
+    };
+
+    bar.show("当前正在展示", mockRect, mockWin, mockDoc);
+    expect(bar.getIsVisible()).toBe(true);
+    expect(bar.getContainer()?.style.display).toBe("inline-flex");
+
+    // 动态关闭划词操作条
+    bar.setShowSelectionToolbar(false);
+    expect(bar.getShowSelectionToolbar()).toBe(false);
+    expect(bar.getIsVisible()).toBe(false);
+    expect(bar.getContainer()?.style.display).toBe("none");
+
+    // 再次调用 show 也不会唤起
+    bar.show("再次尝试展示", mockRect, mockWin, mockDoc);
+    expect(bar.getIsVisible()).toBe(false);
+    expect(bar.getContainer()?.style.display).toBe("none");
+    bar.destroy();
+  });
+
+  test("通过 SettingsUtils 初始化与监听设置变更同步 showSelectionToolbar", async () => {
+    const storageListeners = new Set();
+    setTestGlobal("browser", {
+      storage: {
+        sync: {
+          get: async (key) =>
+            key === "settings"
+              ? { settings: { showSelectionToolbar: false } }
+              : {},
+        },
+        local: { get: async () => ({}) },
+        onChanged: {
+          addListener: (l) => storageListeners.add(l),
+          removeListener: (l) => storageListeners.delete(l),
+        },
+      },
+    });
+
+    const mockDoc = createMockDocument();
+    const mockWin = createMockWindow(1024, 768);
+    const bar = new SelectionActionBar();
+    bar.init(mockDoc, mockWin);
+
+    // 等待初始化设置异步加载
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(bar.getShowSelectionToolbar()).toBe(false);
+
+    // 触发 storage 设置变更为 true
+    setTestGlobal("browser", {
+      storage: {
+        sync: {
+          get: async (key) =>
+            key === "settings"
+              ? { settings: { showSelectionToolbar: true } }
+              : {},
+        },
+        local: { get: async () => ({}) },
+        onChanged: {
+          addListener: (l) => storageListeners.add(l),
+          removeListener: (l) => storageListeners.delete(l),
+        },
+      },
+    });
+
+    for (const listener of storageListeners) {
+      listener({ settings: { newValue: { showSelectionToolbar: true } } });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(bar.getShowSelectionToolbar()).toBe(true);
+
+    bar.destroy();
+  });
 });
