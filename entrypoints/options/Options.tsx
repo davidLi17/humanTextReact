@@ -124,6 +124,22 @@ function Options() {
     text: string;
   } | null>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const pendingSettingsRef = useRef<Partial<Settings>>({});
+  const failedSettingsRef = useRef<Partial<Settings>>({});
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRevisionRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      // Flush the last text edit when leaving the settings page.
+      if (Object.keys(pendingSettingsRef.current).length) void flushAutoSave();
+    };
+  }, []);
 
   const manifestVersion =
     browser?.runtime?.getManifest?.()?.version || "1.6.0";
@@ -271,39 +287,45 @@ function Options() {
     }
   };
 
-  const handleSave = async (showStatus = true): Promise<boolean> => {
-    if (saveStatus === "saving") return false; // 防止重复提交
-
-    if (showStatus) {
-      setSaveStatus("saving");
-    }
-
-    try {
-      // 使用 SettingsUtils 统一保存
-      const settingsWithoutFontScale = { ...settings } as Partial<Settings>;
-      delete settingsWithoutFontScale.fontScalePercent;
-      await SettingsUtils.setSettings(settingsWithoutFontScale);
-
-      // 重新初始化日志系统以应用新的日志级别
-      await initializeLogger("options");
-      optionsLogger.info("设置保存成功", {
-        logLevel: settings.logLevel,
-        thinkingEnabled: settings.thinkingEnabled,
-      });
-
-      if (showStatus) {
-        setSaveStatus("saved");
-        setTimeout(() => setSaveStatus("idle"), 2000);
+  const persistSettings = (patch: Partial<Settings>): Promise<boolean> => {
+    const revision = ++saveRevisionRef.current;
+    const settingsWithoutFontScale = { ...patch };
+    delete settingsWithoutFontScale.fontScalePercent;
+    if (mountedRef.current) setSaveStatus("saving");
+    const operation = saveQueueRef.current.then(async () => {
+      const nextSettings = { ...failedSettingsRef.current, ...settingsWithoutFontScale };
+      try {
+        await SettingsUtils.setSettings(nextSettings);
+        failedSettingsRef.current = {};
+        await initializeLogger("options");
+        if (mountedRef.current && revision === saveRevisionRef.current) {
+          setSaveStatus("saved");
+        }
+        return true;
+      } catch (error) {
+        failedSettingsRef.current = nextSettings;
+        optionsLogger.error("保存设置失败:", error);
+        if (mountedRef.current && revision === saveRevisionRef.current) {
+          setSaveStatus("error");
+        }
+        return false;
       }
-      return true;
-    } catch (error) {
-      optionsLogger.error("保存设置失败:", error);
-      if (showStatus) {
-        setSaveStatus("error");
-        setTimeout(() => setSaveStatus("idle"), 2000);
-      }
-      return false;
-    }
+    });
+    saveQueueRef.current = operation;
+    return operation;
+  };
+
+  const flushAutoSave = (): Promise<boolean> => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = null;
+    const patch = pendingSettingsRef.current;
+    pendingSettingsRef.current = {};
+    return persistSettings(patch);
+  };
+
+  const handleSave = (_showStatus = true): Promise<boolean> => {
+    pendingSettingsRef.current = { ...settings, ...pendingSettingsRef.current };
+    return flushAutoSave();
   };
 
   const loadDiagnosticState = async () => {
@@ -553,6 +575,16 @@ function Options() {
     value: string | number | boolean
   ) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
+    pendingSettingsRef.current = { ...pendingSettingsRef.current, [field]: value };
+    // Invalidate completion messages from older writes while text is pending.
+    ++saveRevisionRef.current;
+    setSaveStatus("saving");
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (typeof value === "boolean") {
+      void flushAutoSave();
+    } else {
+      autoSaveTimerRef.current = setTimeout(() => void flushAutoSave(), 400);
+    }
   };
 
   const openShortcutSettings = () => {
@@ -581,8 +613,6 @@ function Options() {
         // 测试成功后自动持久化当前设置
         const saved = await handleSave(false);
         if (saved) {
-          setSaveStatus("saved");
-          setTimeout(() => setSaveStatus("idle"), 2000);
           setTestMessage("✅ API连接测试成功，设置已自动保存！");
         } else {
           setTestMessage("✅ API连接测试成功！");
@@ -606,6 +636,8 @@ function Options() {
   const handleReset = () => {
     if (confirm("确定要重置所有设置为默认值吗？")) {
       setSettings(DEFAULT_SETTINGS);
+      pendingSettingsRef.current = { ...DEFAULT_SETTINGS };
+      void flushAutoSave();
       performFontScaleAction("reset");
     }
   };
@@ -638,6 +670,15 @@ function Options() {
 
   return (
     <div className="options-container">
+      {saveStatus !== "idle" && (
+        <div className={`auto-save-toast global-save-status ${saveStatus}`} role="status" aria-live="polite">
+          {saveStatus === "saving" && "正在保存…"}
+          {saveStatus === "saved" && "设置已保存"}
+          {saveStatus === "error" && (
+            <>保存失败，请重试 <button type="button" onClick={() => void handleSave()}>重试保存</button></>
+          )}
+        </div>
+      )}
       {/* 顶部 Header */}
       <header className="options-header">
         <div className="header-brand">
@@ -697,7 +738,7 @@ function Options() {
             <span className="status-dot" />
             <span className="status-text">
               {saveStatus === "saving" && "正在保存..."}
-              {saveStatus === "saved" && "设置已自动保存"}
+              {saveStatus === "saved" && "设置已保存"}
               {saveStatus === "error" && "保存失败，请检查"}
               {saveStatus === "idle" && "设置就绪"}
             </span>

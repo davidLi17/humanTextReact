@@ -146,6 +146,61 @@ afterEach(() => {
 });
 
 describe("Options 设置页面组件级交互与逻辑增强", () => {
+  test("关闭划词操作条立即保存，重开设置保持关闭，密钥不会同步", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("chrome", mock.browser);
+    const view = render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+    const toggle = screen.getByLabelText("划词快捷操作条") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("设置已保存"));
+    expect((mock.localStore.settings as any).showSelectionToolbar).toBe(false);
+    expect((mock.syncStore.settings as any).showSelectionToolbar).toBe(false);
+    expect((mock.syncStore.settings as any).apiKey).toBeUndefined();
+    view.unmount();
+    render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+    expect((screen.getByLabelText("划词快捷操作条") as HTMLInputElement).checked).toBe(false);
+  });
+
+  test("文本输入自动保存最终值，连续切换不会丢失修改", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("chrome", mock.browser);
+    render(<Options />);
+    const key = await screen.findByDisplayValue("sk-initial-key");
+    fireEvent.change(key, { target: { value: "sk-edited" } });
+    fireEvent.change(key, { target: { value: "sk-final" } });
+    await waitFor(() => expect((mock.localStore.settings as any).apiKey).toBe("sk-final"));
+    fireEvent.click(screen.getByLabelText("划词快捷操作条"));
+    fireEvent.click(screen.getByLabelText("划词快捷操作条"));
+    fireEvent.click(screen.getByLabelText("划词快捷操作条"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("设置已保存"));
+    expect((mock.localStore.settings as any).showSelectionToolbar).toBe(false);
+    expect((mock.localStore.settings as any).apiKey).toBe("sk-final");
+  });
+
+  test("保存失败显示重试提示，恢复存储后可保存", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("chrome", mock.browser);
+    render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+    const localSet = mock.browser.storage.local.set;
+    const syncSet = mock.browser.storage.sync.set;
+    mock.browser.storage.local.set = async () => { throw new Error("storage unavailable"); };
+    mock.browser.storage.sync.set = async () => { throw new Error("storage unavailable"); };
+    fireEvent.click(screen.getByLabelText("划词快捷操作条"));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("保存失败"));
+    mock.browser.storage.local.set = localSet;
+    mock.browser.storage.sync.set = syncSet;
+    fireEvent.click(screen.getByRole("button", { name: "重试保存" }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("设置已保存"));
+    expect((mock.localStore.settings as any).showSelectionToolbar).toBe(false);
+  });
+
   test("正确渲染 Header 品牌信息、Logo、标题与版本号 v1.6.0", async () => {
     const { browser } = createBrowserMock();
     setTestGlobal("browser", browser);
