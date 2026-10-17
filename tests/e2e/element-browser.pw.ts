@@ -47,8 +47,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
   const url = `http://127.0.0.1:${address.port}`;
   const browser = await chromium.launch({
     executablePath:
-      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-      "/usr/lib/chromium/chromium",
+      process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     headless: true,
   });
   const context = await browser.newContext({
