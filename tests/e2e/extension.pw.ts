@@ -1226,12 +1226,14 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   // Invoke the real toolbar action: page key events do not reliably dispatch
   // browser shortcuts in headless Chromium. This exercises activeTab without
   // adding host permissions or mocking captureVisibleTab.
-  const cdp = await harness.context.newCDPSession(article);
-  const { targetInfo } = await cdp.send('Target.getTargetInfo');
   const browserCdp = await harness.context.browser()!.newBrowserCDPSession();
-  await browserCdp.send('Extensions.triggerAction', { id: harness.extensionId, targetId: targetInfo.targetId });
+  const { targetInfos } = await browserCdp.send('Target.getTargets', {
+    filter: [{ type: 'tab', exclude: false }, { exclude: true }],
+  });
+  const tabTarget = targetInfos.find(target => target.url === article.url());
+  expect(tabTarget, 'the browser tab target for the fixture').toBeTruthy();
+  await browserCdp.send('Extensions.triggerAction', { id: harness.extensionId, targetId: tabTarget!.targetId });
   await browserCdp.detach();
-  await cdp.detach();
   await article.bringToFront();
   const clickPanel=async(name:string|RegExp)=>panel.getByRole('button',{name}).evaluate(el=>(el as HTMLButtonElement).click());
   await clickPanel('选择网页元素');
