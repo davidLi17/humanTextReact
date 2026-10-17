@@ -84,15 +84,14 @@ export function ElementMarks({
   );
   return (
     <section className="element-marks" aria-label="网页标记">
+      <header className="marks-header"><span className="marks-heading">网页标记 <span className="marks-count">{items.length}/6</span></span><span className="marks-help" tabIndex={0} aria-label="截图与模型说明">?<span role="tooltip">截图随问题发送，请使用支持图片的模型。首次截图前，点击当前页的扩展图标或右键「打开人话侧边栏」授予临时访问。</span></span></header>
       <button
+        className="marks-select"
         type="button"
         onClick={() => run(active ? "elementStop" : "elementStart")}
       >
         {active ? "退出元素选择" : "选择网页元素"}
       </button>
-      <small>
-        截图随问题发送；请配置支持图片的模型，如 DeepSeek deepseek-flash。首次截图前，在当前页点击扩展图标或使用右键菜单「打开人话侧边栏」授予临时访问。
-      </small>
       {error && <p role="alert">{error}</p>}
       {items.map((item) => (
         <article
@@ -101,13 +100,13 @@ export function ElementMarks({
           onMouseEnter={() => run("elementHover", { id: item.id })}
           onMouseLeave={() => run("elementHover", { id: "" })}
         >
-          <strong>
-            #{item.number} {item.title} {item.sent ? "· 已发送" : "· 待发送"}
-          </strong>
+          <div className="mark-heading"><span className="mark-number">{item.number}</span><strong title={item.title}>{item.title}</strong><span className="mark-status">{item.sent ? "已发送" : "待发送"}</span></div>
           {item.invalid && (
             <p role="alert">目标已失效，请删除后重新选择。快照仍是原内容。</p>
           )}
+          <label className="mark-label" htmlFor={`mark-question-${item.id}`}>给 AI 的问题</label>
           <textarea
+            id={`mark-question-${item.id}`}
             aria-label={`标记${item.number}的问题`}
             maxLength={2000}
             value={drafts[item.id] ?? item.question}
@@ -125,14 +124,15 @@ export function ElementMarks({
             <summary>
               查看实际发送快照{item.truncated ? " · 文本已截断" : ""}
             </summary>
+            <img src={item.image} alt={`标记${item.number}的实际发送截图`} />
             <pre>
               {elementSnapshotText([
                 { ...item, question: drafts[item.id] ?? item.question },
               ])}
             </pre>
-            <img src={item.image} alt={`标记${item.number}的实际发送截图`} />
           </details>
           <button
+            className="mark-delete"
             type="button"
             onClick={() => run("elementDelete", { id: item.id })}
           >
@@ -142,6 +142,7 @@ export function ElementMarks({
       ))}
       {!!pendingItems.length && (
         <button
+          className="marks-send"
           type="button"
           disabled={
             disabled ||

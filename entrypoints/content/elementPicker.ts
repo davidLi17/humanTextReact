@@ -211,7 +211,13 @@ export class ElementPicker {
     const draft = this.ui.querySelector("textarea")?.value || "";
     this.ui.replaceChildren();
     const style = document.createElement("style");
-    style.textContent = `:host{font:14px system-ui;color:#172033}*{box-sizing:border-box}.box{position:fixed;border:2px solid #6466ef;pointer-events:none;background:#6366f112}.focus{border:3px solid #f59e0b;background:#f59e0b22}.dot{position:absolute;left:0;top:0;border-radius:50%;background:#4f46e5;color:white;width:25px;height:25px;pointer-events:auto;padding:0}.menu,.bar{position:fixed;pointer-events:auto;background:white;border:1px solid #ccc;border-radius:10px;padding:10px;box-shadow:0 4px 20px #0003}.bar{right:16px;top:12px}.menu{width:310px;max-width:95vw}textarea{width:100%;min-height:72px;color:#172033;background:white}button{cursor:pointer;padding:6px;margin:3px;border:1px solid #ddd;border-radius:6px;background:#f7f7ff;color:#172033}p{margin:4px 0;font-size:12px}`;
+    style.textContent = `
+:host{all:initial;--bg:#fff;--surface:#f8fafc;--ink:#1e293b;--muted:#64748b;--line:#e2e8f0;--accent:#6366f1;font:13px/1.5 system-ui,sans-serif;color:var(--ink);color-scheme:light}
+@media(prefers-color-scheme:dark){:host{--bg:#18181b;--surface:#27272a;--ink:#f4f4f5;--muted:#a1a1aa;--line:#3f3f46;--accent:#a5b4fc;color-scheme:dark}}
+*{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:6px 9px;background:var(--bg);color:var(--ink)}button:hover{background:var(--surface)}button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.45;cursor:default}
+.box{position:fixed;border:1px solid #818cf8;border-radius:3px;pointer-events:none;background:#6366f106}.focus{border:2px solid #6366f1;background:#6366f10c;box-shadow:0 0 0 2px #6366f115}.dot{position:absolute;left:3px;top:3px;border:2px solid var(--bg);border-radius:50%;background:#6366f1!important;color:white;width:25px;height:25px;pointer-events:auto;padding:0;font-size:11px;font-weight:700;box-shadow:0 2px 6px #0002}
+.menu,.bar,.mark-tip{position:fixed;pointer-events:auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #00000018;color:var(--ink)}.bar{right:12px;top:12px;padding:7px 8px 7px 12px;font-size:12px;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px)}.bar button{padding:4px 8px}.menu{width:320px;max-width:calc(100vw - 16px);max-height:calc(100vh - 70px);overflow:auto;padding:14px}.menu-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:650}.menu textarea{display:block;resize:vertical;width:100%;min-height:88px;max-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--surface);margin-bottom:10px}.menu-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center}.menu-actions button{font-size:12px}.menu-actions .primary{background:#6366f1;color:#fff;border-color:#6366f1;grid-column:2;grid-row:2}.menu-actions .cancel{grid-column:1;grid-row:2;text-align:left;border-color:transparent;color:var(--muted)}p{margin:8px 0 0;font-size:12px;overflow-wrap:anywhere}[role=alert]{color:#e15b64}.help{position:relative;cursor:help;border:1px solid var(--line);border-radius:50%;width:18px;height:18px;text-align:center;font-size:11px;color:var(--muted)}.help span{display:none;position:absolute;right:0;top:24px;width:240px;padding:10px;background:var(--ink);color:var(--bg);border-radius:8px;font-weight:400;z-index:2}.help:hover span,.help:focus span{display:block}.mark-tip{display:none;width:280px;max-width:calc(100vw - 16px);padding:12px;font-size:12px;pointer-events:none;overflow-wrap:anywhere;white-space:pre-wrap}.mark-tip.visible{display:block}
+`;
     this.ui.append(style);
     const outline = (el: Element, focus = false) => {
       const r = this.rect(el),
@@ -231,14 +237,30 @@ export class ElementPicker {
       const box = outline(item.element, this.focused === item.snapshot.id);
       const dot = this.button(String(item.snapshot.number), () => {});
       dot.className = "dot";
-      dot.title = `${item.snapshot.title}\n${item.snapshot.text.slice(0, 160)}\n问题：${item.snapshot.question}`;
+      dot.setAttribute("aria-label", `标记${item.snapshot.number}：${item.snapshot.title}`);
+      const tip = document.createElement("div");
+      tip.className = "mark-tip";
+      tip.setAttribute("role", "tooltip");
+      tip.textContent = `${item.snapshot.title}\n${item.snapshot.text.replace(/\s+/g, " ").slice(0, 120)}\n\n问题：${item.snapshot.question.slice(0, 200)}`;
+      this.ui.append(tip);
+      const showTip = () => {
+        tip.classList.add("visible");
+        const d = dot.getBoundingClientRect();
+        const target = item.element.getBoundingClientRect();
+        tip.style.left = (target.right + 288 < innerWidth ? target.right + 8 : Math.max(8, Math.min(innerWidth - 288, d.left))) + "px";
+        tip.style.top = Math.max(8, Math.min(innerHeight - tip.offsetHeight - 8, d.bottom + 8)) + "px";
+      };
+      dot.onfocus = showTip;
+      dot.onblur = () => tip.classList.remove("visible");
       dot.onmouseenter = () => {
+        showTip();
         this.focused = item.snapshot.id;
         void browser.runtime
           .sendMessage({ action: "elementFocus", id: this.focused })
           .catch(() => {});
       };
       dot.onmouseleave = () => {
+        tip.classList.remove("visible");
         this.focused = "";
         void browser.runtime
           .sendMessage({ action: "elementFocus", id: "" })
@@ -274,8 +296,24 @@ export class ElementPicker {
       input.maxLength = 2000;
       input.value = draft;
       input.disabled = this.busy;
-      menu.append(input);
-      menu.append(
+      const heading = document.createElement("div");
+      heading.className = "menu-heading";
+      heading.textContent = "询问这个区域";
+      const help = document.createElement("span");
+      help.className = "help";
+      help.tabIndex = 0;
+      help.textContent = "?";
+      help.setAttribute("aria-label", "快照说明");
+      const hint = document.createElement("span");
+      hint.setAttribute("role", "tooltip");
+      hint.textContent = "仅截当前视口内所选区域；表单/嵌入内容遮盖。加入不会调用 AI。";
+      help.append(hint);
+      heading.append(help);
+      input.setAttribute("aria-label", "给 AI 的问题");
+      menu.append(heading, input);
+      const actions = document.createElement("div");
+      actions.className = "menu-actions";
+      actions.append(
         this.button("扩大父级", () => {
           if (
             this.locked?.parentElement &&
@@ -296,10 +334,11 @@ export class ElementPicker {
           this.render();
         }),
       );
-      const hint = document.createElement("p");
-      hint.textContent =
-        "仅截当前视口内所选区域；表单/嵌入内容遮盖。加入不会调用 AI。";
-      menu.append(hint);
+      const buttons = actions.querySelectorAll("button");
+      buttons[1].disabled = !this.ancestors.length;
+      buttons[2].className = "primary";
+      buttons[3].className = "cancel";
+      menu.append(actions);
       if (this.error) {
         const error = document.createElement("p");
         error.setAttribute("role", "alert");
@@ -307,6 +346,11 @@ export class ElementPicker {
         menu.append(error);
       }
       this.ui.append(menu);
+      const height = menu.offsetHeight;
+      const below = r.y + r.height + 10;
+      const top = below + height < innerHeight - 8 ? below : r.y - height - 10;
+      menu.style.left = Math.max(8, Math.min(innerWidth - menu.offsetWidth - 8, r.x)) + "px";
+      menu.style.top = Math.max(58, Math.min(innerHeight - height - 8, top)) + "px";
       if (editing) {
         input.focus();
         input.setSelectionRange(cursor, cursor);

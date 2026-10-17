@@ -1,43 +1,40 @@
 .element-marks {
-  padding: 8px;
-  border: 1px solid var(--border-color, #ddd);
-  border-radius: 10px;
+  box-sizing: border-box;
   margin: 8px 0;
-  max-height: 360px;
-  overflow: auto;
-  article {
-    padding: 8px;
-    margin-top: 6px;
-    border: 1px solid #aaa5;
-    border-radius: 8px;
-  }
-  article.focused {
-    border-color: #f59e0b;
-    background: #f59e0b22;
-  }
-  textarea {
-    display: block;
-    width: 100%;
-    min-height: 44px;
-    margin: 5px 0;
-    background: transparent;
-    color: inherit;
-  }
-  pre {
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-size: 12px;
-  }
-  img {
-    max-width: 100%;
-  }
-  button {
-    cursor: pointer;
-    margin: 3px;
-    padding: 5px 8px;
-    border-radius: 6px;
-  }
-  p {
-    font-size: 12px;
-  }
+  padding: 12px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 12px;
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary, #111827);
+  font: 12px/1.5 system-ui, sans-serif;
+  min-width: 0;
+  * { box-sizing: border-box; }
+  .marks-header, .mark-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .marks-header { margin-bottom: 10px; justify-content: space-between; }
+  .marks-heading { font-size: 13px; font-weight: 650; }
+  .marks-count { color: var(--color-text-secondary, #64748b); font-weight: 400; margin-left: 5px; font-size: 11px; }
+  .marks-help { position: relative; border: 1px solid var(--color-border, #e5e7eb); width: 18px; height: 18px; border-radius: 50%; text-align: center; cursor: help; }
+  [role=tooltip] { display: none; position: absolute; right: 0; top: 24px; z-index: 3; width: min(250px, 65vw); padding: 10px; border-radius: 8px; background: var(--color-text-primary, #111827); color: var(--color-bg-primary, #fff); box-shadow: 0 4px 16px #0002; text-align: left; }
+  .marks-help:hover [role=tooltip], .marks-help:focus [role=tooltip] { display: block; }
+  button { cursor: pointer; font: inherit; padding: 7px 10px; border: 1px solid var(--color-border, #e5e7eb); border-radius: 8px; background: var(--color-bg-primary, #fff); color: inherit; }
+  button:hover { background: var(--color-bg-hover, #f3f4f6); }
+  button:disabled { opacity: .45; cursor: default; }
+  :is(button, textarea, summary, .marks-help):focus-visible { outline: 2px solid var(--color-primary, #6366f1); outline-offset: 3px; }
+  .marks-select { width: 100%; color: var(--color-primary, #6366f1); background: var(--color-primary-light, #6366f110); border-color: transparent; }
+  article { padding: 12px; margin-top: 10px; border: 1px solid var(--color-border, #e5e7eb); border-radius: 10px; background: var(--color-bg-secondary, #f9fafb); }
+  article.focused { border-color: var(--color-primary, #6366f1); box-shadow: 0 0 0 2px var(--color-primary-light, #6366f110); }
+  .mark-number { flex: 0 0 22px; height: 22px; border-radius: 50%; background: #6366f1; color: white; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+  .mark-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .mark-status { margin-left: auto; flex-shrink: 0; color: var(--color-text-secondary, #64748b); font-size: 10px; }
+  .mark-label { display: block; margin: 12px 0 5px; color: var(--color-text-secondary, #64748b); font-size: 11px; }
+  textarea { display: block; width: 100%; min-height: 64px; max-height: 180px; resize: vertical; padding: 9px; border: 1px solid var(--color-border, #e5e7eb); border-radius: 7px; background: var(--color-bg-primary, #fff); color: inherit; font: inherit; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--color-text-secondary, #64748b); font-size: 11px; padding: 4px 0; }
+  img { display: block; max-width: 100%; max-height: 200px; object-fit: contain; margin: 8px auto; border: 1px solid var(--color-border, #e5e7eb); border-radius: 6px; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.65 ui-monospace, monospace; max-height: 180px; overflow: auto; margin: 8px 0; padding: 10px; background: var(--color-bg-primary, #fff); border-radius: 7px; }
+  .mark-delete { border: 0; background: transparent; color: var(--color-text-secondary, #64748b); padding: 4px 0; margin-top: 6px; font-size: 11px; }
+  .mark-delete:hover { color: var(--color-error, #ef4444); }
+  .marks-send { width: 100%; margin-top: 12px; background: #6366f1; color: #fff; border-color: transparent; font-weight: 600; }
+  .marks-send:hover { background: #4f46e5; }
+  p { font-size: 11px; overflow-wrap: anywhere; }
 }

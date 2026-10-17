@@ -143,6 +143,18 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
       path: testInfo.outputPath("snapshot-preview.png"),
     });
 
+    // UI verification: narrow panel, dark theme, long question and keyboard tooltip.
+    await panel.setViewportSize({ width: 320, height: 900 });
+    await panel.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    await panel.getByLabel("标记1的问题").fill("很长的问题内容".repeat(40));
+    expect(await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await panel.screenshot({ path: testInfo.outputPath("snapshot-preview-dark-narrow.png") });
+    await panel.getByLabel("截图与模型说明").focus();
+    await expect(panel.getByRole("tooltip")).toBeVisible();
+    await panel.getByLabel("标记1的问题").focus();
+    await panel.evaluate(() => document.documentElement.removeAttribute("data-theme"));
+    await panel.setViewportSize({ width: 460, height: 900 });
+
     await panel.getByLabel("标记1的问题").fill("比较收入");
     await panel.getByRole("button", { name: /发送给AI/ }).click();
     await expect
