@@ -1362,6 +1362,31 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
   await open(aid); await expect.poll(() => visible(aid)).toBe(true);
   await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
+  const workerCdp = await context.newCDPSession(control);
+  let versions: any[] = [];
+  workerCdp.on('ServiceWorker.workerVersionUpdated', event => { versions = event.versions; });
+  await workerCdp.send('ServiceWorker.enable');
+  await expect.poll(() => versions.find(v => v.scriptURL.startsWith(`chrome-extension://${harness.extensionId}/`) && v.runningStatus === 'running')?.versionId).toBeTruthy();
+  const versionId = versions.find(v => v.scriptURL.startsWith(`chrome-extension://${harness.extensionId}/`) && v.runningStatus === 'running').versionId;
+  await workerCdp.send('ServiceWorker.stopWorker', {versionId});
+  await control.evaluate(() => (globalThis as any).chrome.runtime.sendMessage({action:'sidepanelTabId'}));
+  await expect.poll(() => visible(aid)).toBe(true);
+  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await workerCdp.detach();
+
+  const otherWindow = await control.evaluate(async url => (globalThis as any).chrome.windows.create({url,focused:true}), `${harness.server.baseUrl}/article?tab=D`);
+  await expect.poll(() => context.pages().some(page => page.url().endsWith('/article?tab=D'))).toBe(true);
+  const d = context.pages().find(page => page.url().endsWith('/article?tab=D'))!;
+  await d.waitForLoadState(); await d.bringToFront(); await d.keyboard.press('Alt+s');
+  const did = otherWindow.tabs[0].id;
+  await expect.poll(() => visible(did)).toBe(true);
+  await inspect(did,setDraft('另一窗口的独立草稿'));
+  const aWindowId = tabs.find((tab:any) => tab.id === aid).windowId;
+  await control.evaluate(async windowId => (globalThis as any).chrome.windows.update(windowId,{focused:true}), aWindowId);
+  await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
+  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  expect(await inspect(did,draft)).toBe('另一窗口的独立草稿');
+  await d.close();
   // Closing a background configured tab must not discard the foreground panel.
   await b.close(); await expect.poll(() => visible(aid)).toBe(true);
   const nativeImage = await inspect(aid, '', true);
