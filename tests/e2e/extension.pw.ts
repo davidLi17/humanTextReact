@@ -1313,7 +1313,7 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
     await page.keyboard.press('Alt+s');
   };
   const browserCdp = await context.browser()!.newBrowserCDPSession();
-  const inspect = async (id: number, expression = '({visibility: document.visibilityState, text: document.body.innerText})') => {
+  const inspect = async (id: number, expression = '({visibility: document.body ? document.visibilityState : "loading", text: document.body?.innerText})', screenshot = false) => {
     const { targetInfos } = await browserCdp.send('Target.getTargets');
     const target = targetInfos.find(t => t.url.includes(`/sidepanel.html?tabId=${id}`));
     if (!target) return null;
@@ -1327,11 +1327,11 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
         clearTimeout(timer);
         browserCdp.off('Target.receivedMessageFromTarget', listener);
         if (message.error || message.result?.exceptionDetails) reject(new Error(JSON.stringify(message)));
-        else resolve(message.result?.result?.value);
+        else resolve(screenshot ? message.result?.data : message.result?.result?.value);
       };
       browserCdp.on('Target.receivedMessageFromTarget', listener);
     });
-    await browserCdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id:71, method:'Runtime.evaluate', params:{expression, returnByValue:true, awaitPromise:true, userGesture:true} }) });
+    await browserCdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify(screenshot ? {id:71,method:'Page.captureScreenshot',params:{format:'png'}} : { id:71, method:'Runtime.evaluate', params:{expression, returnByValue:true, awaitPromise:true, userGesture:true} }) });
     try { return await result; } finally { await browserCdp.send('Target.detachFromTarget', {sessionId}); }
   };
   const visible = async (id:number) => (await inspect(id))?.visibility === 'visible';
@@ -1362,6 +1362,11 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
   await open(aid); await expect.poll(() => visible(aid)).toBe(true);
   await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
+  // Closing a background configured tab must not discard the foreground panel.
+  await b.close(); await expect.poll(() => visible(aid)).toBe(true);
+  const nativeImage = await inspect(aid, '', true);
+  await testInfo.attach('native-tab-A.png', {body:Buffer.from(nativeImage,'base64'),contentType:'image/png'});
+  console.log('NATIVE_PANEL_SCREENSHOT_BASE64=' + nativeImage);
   console.log('Native sidepanel verified:', JSON.stringify({aid,bid,a:await inspect(aid),b:await inspect(bid)}));
   await testInfo.attach('native-tab-state.json', {body: JSON.stringify({aid,bid,a:await inspect(aid),b:await inspect(bid)},null,2),contentType:'application/json'});
   await browserCdp.detach();
