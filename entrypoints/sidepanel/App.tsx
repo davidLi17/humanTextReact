@@ -1,4 +1,4 @@
-import { getSidePanelTabId } from "../shared/sidepanelUtils";
+import { getSidePanelTabId, sidepanelPendingKey } from "../shared/sidepanelUtils";
 import { tabStateKey } from "./tabStateStorage";
 import { ElementMarks } from "./components/ElementMarks";
 import { elementSnapshotText, fitsElementStorage, type ElementSnapshot } from "../shared/elementSnapshot";
@@ -475,6 +475,8 @@ export default function SidePanelApp() {
   };
 
   const boundTabId = getSidePanelTabId();
+  const pendingTextKey = sidepanelPendingKey("pendingSidepanelText", boundTabId);
+  const pendingReadKey = sidepanelPendingKey("pendingWebPageRead", boundTabId);
   const consumeSidepanelEnvelope = (envelope: PendingSidepanelEnvelope) => {
     if (boundTabId !== undefined && envelope.tabId !== boundTabId) return false;
     if (
@@ -503,10 +505,10 @@ export default function SidePanelApp() {
   const removePendingEnvelopeIfMatches = async (envelopeId?: string) => {
     if (!envelopeId || !browser?.storage?.local) return;
     const stored = (await browser.storage.local.get(
-      "pendingSidepanelText"
-    )) as { pendingSidepanelText?: PendingSidepanelEnvelope };
-    if (stored.pendingSidepanelText?.envelopeId === envelopeId) {
-      await browser.storage.local.remove("pendingSidepanelText");
+      pendingTextKey
+    )) as Record<string, PendingSidepanelEnvelope>;
+    if (stored[pendingTextKey]?.envelopeId === envelopeId) {
+      await browser.storage.local.remove(pendingTextKey);
     }
   };
 
@@ -808,7 +810,8 @@ export default function SidePanelApp() {
           Date.now(),
           typeof snapshot.activeSessionId === "string"
             ? snapshot.activeSessionId
-            : undefined
+            : undefined,
+          boundTabId !== undefined ? String(snapshot.activeSessionId || "") : undefined
         );
         const nextActiveSessionId =
           typeof snapshot.activeSessionId === "string" &&
@@ -983,11 +986,11 @@ export default function SidePanelApp() {
       try {
         if (!browser?.storage?.local) return;
         const stored = await browser.storage.local.get([
-          "pendingSidepanelText",
-          "pendingWebPageRead",
+          pendingTextKey,
+          pendingReadKey,
         ]);
 
-        const pendingText = stored.pendingSidepanelText as
+        const pendingText = stored[pendingTextKey] as
           | PendingSidepanelEnvelope
           | undefined;
         if (
@@ -998,12 +1001,12 @@ export default function SidePanelApp() {
           if (consumeSidepanelEnvelope(pendingText)) await removePendingEnvelopeIfMatches(pendingText.envelopeId);
         }
 
-        const pendingRead = stored.pendingWebPageRead as
+        const pendingRead = stored[pendingReadKey] as
           | { timestamp: number; tabId?: number }
           | undefined;
         if (pendingRead && (boundTabId === undefined || pendingRead.tabId === boundTabId) && Date.now() - pendingRead.timestamp < 10000) {
           setActiveView("chat");
-          await browser.storage.local.remove("pendingWebPageRead");
+          await browser.storage.local.remove(pendingReadKey);
           void handleReadCurrentPage();
         }
       } catch (error) {
@@ -1032,7 +1035,7 @@ export default function SidePanelApp() {
         // 与 storage 通道保持一致：消费掉待办，避免 10 秒新鲜度窗口内重载侧边栏
         // 时被 storage 通道重复触发一次通读
         if (browser?.storage?.local) {
-          void browser.storage.local.remove("pendingWebPageRead");
+          void browser.storage.local.remove(pendingReadKey);
         }
         void handleReadCurrentPage();
         return;

@@ -1,4 +1,4 @@
-import { openSidePanel } from "@/entrypoints/shared/sidepanelUtils";
+import { openSidePanel, sidepanelPendingKey } from "@/entrypoints/shared/sidepanelUtils";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 import { createLogger } from "@/entrypoints/shared/logger";
 import { MessageUtils } from "./messageUtils";
@@ -66,7 +66,7 @@ export class ContextMenuHandler {
       try {
         await openSidePanel({ windowId: tab.windowId, tabId: tab.id });
         await browser.storage.local.set({
-          pendingWebPageRead: {
+          [sidepanelPendingKey("pendingWebPageRead", tab.id)]: {
             timestamp: Date.now(),
             tabId: tab.id,
           },
@@ -100,7 +100,7 @@ export class ContextMenuHandler {
         await openPromise;
         if (info.selectionText) {
           await browser.storage.local.set({
-            pendingSidepanelText: {
+            [sidepanelPendingKey("pendingSidepanelText", tab.id)]: {
               tabId: tab.id,
               text: info.selectionText,
               selectionContext,

@@ -1,3 +1,4 @@
+import { sidepanelPendingKey } from "../shared/sidepanelUtils";
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
@@ -660,10 +661,11 @@ export class SelectionActionBar {
         ? selectionContext
         : undefined;
       const envelopeId = createRequestId();
+      const ownerTabId = (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId;
       if (typeof browser !== "undefined" && browser?.storage?.local) {
         await browser.storage.local.set({
-          pendingSidepanelText: {
-            tabId: (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId,
+          [sidepanelPendingKey("pendingSidepanelText", ownerTabId)]: {
+            tabId: ownerTabId,
             text,
             selectionContext: contextToSend,
             envelopeId,

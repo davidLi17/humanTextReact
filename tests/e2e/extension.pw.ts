@@ -1296,6 +1296,8 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
 test('native tab-specific sidepanel hides, restores and isolates composer state', async ({ harness }, testInfo) => {
   test.setTimeout(120_000);
   const { context } = harness;
+  context.on('console', message => { if (message.type() === 'error') console.log('Native panel browser error:', message.text()); });
+  console.log('Native panel Chromium:', context.browser()!.version());
   const control = await context.newPage();
   await control.goto(`chrome-extension://${harness.extensionId}/options.html`);
   const a = await context.newPage(); await a.goto(`${harness.server.baseUrl}/article?tab=A`);
@@ -1305,8 +1307,9 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   const aid = tabs.find((tab:any) => tab.url === a.url()).id;
   const bid = tabs.find((tab:any) => tab.url === b.url()).id;
   const open = async (id: number) => {
-    const response = await control.evaluate(async tabId => (globalThis as any).chrome.runtime.sendMessage({ action: 'openSidepanel', tabId }), id);
-    expect(response.success).toBe(true);
+    const page = id === aid ? a : b;
+    await page.bringToFront();
+    await page.keyboard.press('Alt+s');
   };
   const browserCdp = await context.browser()!.newBrowserCDPSession();
   const inspect = async (id: number, expression = '({visibility: document.visibilityState, text: document.body.innerText})') => {

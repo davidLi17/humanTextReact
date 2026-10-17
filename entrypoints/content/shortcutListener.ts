@@ -1,3 +1,4 @@
+import { sidepanelPendingKey } from "../shared/sidepanelUtils";
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
@@ -168,8 +169,10 @@ export function initContentShortcuts(popupManager: PopupManager): () => void {
         if (selectedText && browserApi?.storage?.local) {
           const settings = await SettingsUtils.getSettings();
           const envelopeId = createRequestId();
+          const tabId = (await browserApi.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId;
           await browserApi.storage.local.set({
-            pendingSidepanelText: {
+            [sidepanelPendingKey("pendingSidepanelText", tabId)]: {
+              tabId,
               text: selectedText,
               selectionContext: settings.contextualSelectionEnabled
                 ? selectionContext

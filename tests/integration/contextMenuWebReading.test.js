@@ -47,7 +47,7 @@ describe("右键菜单「通读当前网页」的通知通道", () => {
     // 侧边栏被打开，且落了待办键（侧边栏冷启动时靠它补偿触发）
     expect(sidePanelOpened).toEqual({ tabId: 7 });
     expect(localWrites).toHaveLength(1);
-    expect(localWrites[0].pendingWebPageRead.tabId).toBe(7);
+    expect(localWrites[0]["pendingWebPageRead:7"].tabId).toBe(7);
 
     // 核心断言：侧边栏已打开时，唯一能触达它的就是这条 runtime 消息。
     // 历史 bug：这里曾写成字面量 "readCurrentWebPage"，而侧边栏比对的是

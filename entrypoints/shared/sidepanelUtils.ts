@@ -1,3 +1,4 @@
+export const sidepanelPendingKey = (kind: string, tabId?: number) => tabId === undefined ? kind : `${kind}:${tabId}`;
 /** The native tab-specific document carries its owner; never infer it from the active tab. */
 export function getSidePanelTabId(): number | undefined {
   if (typeof location === "undefined" || !location.pathname.endsWith("/sidepanel.html")) return;

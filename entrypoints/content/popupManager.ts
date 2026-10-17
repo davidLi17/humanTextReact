@@ -1,3 +1,4 @@
+import { sidepanelPendingKey } from "../shared/sidepanelUtils";
 // 导入必要的类型和模块
 import {
   MESSAGE_TYPES,
@@ -717,30 +718,32 @@ export class PopupManager {
           try {
             const selectionContext = this.lastSelectionContext;
             const envelopeId = sourceRequestId || createRequestId();
+            const ownerTabId = (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId;
+            const pendingKey = sidepanelPendingKey("pendingSidepanelText", ownerTabId);
             const pendingValue = {
-              tabId: (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId,
+              tabId: ownerTabId,
               text: originalText,
               selectionContext,
               envelopeId,
               timestamp: Date.now(),
             };
             await browser.storage.local.set({
-              pendingSidepanelText: pendingValue,
+              [pendingKey]: pendingValue,
             });
             if (
               this.currentPopup !== sourcePopup ||
               this.currentRequestId !== sourceRequestId
             ) {
               const stored = (await browser.storage.local.get(
-                "pendingSidepanelText"
+                pendingKey
               )) as {
-                pendingSidepanelText?: { timestamp?: number };
+                [key: string]: { timestamp?: number };
               };
               if (
-                stored.pendingSidepanelText?.timestamp ===
+                stored[pendingKey]?.timestamp ===
                 pendingValue.timestamp
               ) {
-                await browser.storage.local.remove("pendingSidepanelText");
+                await browser.storage.local.remove(pendingKey);
               }
               return;
             }

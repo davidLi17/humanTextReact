@@ -357,10 +357,12 @@ function normalizePersistedProgress(
 
 function recoverInterruptedAssistantMessages(
   sessions: ChatSession[],
-  now: number
+  now: number,
+  ownerSessionId?: string
 ): { sessions: ChatSession[]; changed: boolean } {
   let changed = false;
   const recovered = sessions.map((session) => {
+    if (ownerSessionId !== undefined && session.id !== ownerSessionId) return session;
     let sessionChanged = false;
     const messages = session.messages.map((message, index) => {
       if (
@@ -396,9 +398,10 @@ export function hydrateWebReadingProgress(
   rawStore: unknown,
   sessions: ChatSession[],
   now = Date.now(),
-  prioritySessionId?: string
+  prioritySessionId?: string,
+  recoveryOwnerSessionId?: string
 ): HydratedWebReadingProgress {
-  const recoveredSessions = recoverInterruptedAssistantMessages(sessions, now);
+  const recoveredSessions = recoverInterruptedAssistantMessages(sessions, now, recoveryOwnerSessionId);
   if (
     !isPlainObject(rawStore) ||
     rawStore.version !== WEB_READING_PROGRESS_VERSION ||

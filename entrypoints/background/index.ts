@@ -77,6 +77,7 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId: number) => {
     backgroundLogger.info("标签页关闭，清理请求", { tabId });
     RequestManager.cleanupTab(tabId);
+    void browser.storage.local.remove([`pendingSidepanelText:${tabId}`, `pendingWebPageRead:${tabId}`]);
     void browser.storage.session.remove([`sidepanel_tab_${tabId}_active`, `sidepanel_tab_${tabId}_drafts`]);
   });
 
