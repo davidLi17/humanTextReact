@@ -1235,6 +1235,11 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await article.getByRole('button',{name:'扩大父级'}).click();
   await article.getByPlaceholder('想问 AI 什么？').fill('解释这张表和代码');
   await article.getByRole('button',{name:'加入待发送'}).click();
+  await expect.poll(async () => {
+    const error = await article.locator('#humantext-element-picker [role=alert]').allTextContents();
+    if (error.length) throw new Error(error.join("\n"));
+    return article.locator('#humantext-element-picker .dot').count();
+  }).toBe(1);
   await expect(panel.getByLabel('标记1的问题')).toHaveValue('解释这张表和代码');
   expect(harness.server.modelRequests).toHaveLength(0);
   const dot=article.locator('#humantext-element-picker .dot');await expect(dot).toHaveCount(1);
