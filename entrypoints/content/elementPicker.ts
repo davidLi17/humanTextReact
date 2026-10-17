@@ -323,7 +323,7 @@ export class ElementPicker {
     if (this.locked) {
       const r = this.rect(this.locked),
         menu = document.createElement("div");
-      menu.className = "menu";
+      menu.className = "menu" + (this.editingId ? " editing" : "");
       menu.style.left = Math.max(4, Math.min(innerWidth - 320, r.x)) + "px";
       menu.style.top =
         Math.max(45, Math.min(innerHeight - 220, r.y + r.height + 8)) + "px";
@@ -387,9 +387,11 @@ export class ElementPicker {
       save.style.gridColumn = "1 / -1"; save.style.gridRow = "2";
       actions.append(save);
       if (this.editingId) {
-        buttons[0].disabled = true; buttons[1].disabled = true;
+        buttons[0].remove(); buttons[1].remove();
+        save.style.gridRow = "1"; save.style.gridColumn = "1";
+        buttons[2].style.gridRow = "2"; buttons[3].style.gridRow = "2";
         const remove = this.button("删除标记", () => { this.marks.delete(this.editingId); this.cancelEditor(); this.render(); });
-        actions.append(remove);
+        remove.style.gridRow = "1"; remove.style.gridColumn = "2"; actions.append(remove);
       }
       if (this.busy || this.submitting) actions.querySelectorAll("button").forEach(b => b.disabled = true);
       menu.append(actions);
@@ -413,6 +415,7 @@ export class ElementPicker {
   }
   private cancelEditor() {
     this.locked = null; this.editingId = ""; this.draft = ""; this.ancestors = []; this.composing = false;
+    this.focused = ""; void browser.runtime.sendMessage({ action: "elementFocus", id: "" }).catch(() => {});
   }
   private async save(question: string): Promise<boolean> {
     if (this.busy || !this.locked) return false;
@@ -434,9 +437,18 @@ export class ElementPicker {
     try {
       const result = await opening;
       if (!result?.success) throw new Error("侧栏未打开，请重试提问");
+      const edited = this.marks.get(this.editingId);
+      if (edited) edited.snapshot.sent = false;
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       if (!await this.save(question)) { this.submitting = false; this.render(); return; }
       this.sendRequest = { id: crypto.randomUUID() };
+      const requestId = this.sendRequest.id;
+      setTimeout(() => {
+        if (!this.destroyed && this.sendRequest?.id === requestId) {
+          this.sendRequest = undefined; this.submitting = false;
+          this.error = "侧栏尚未接收问题，请点击编号后重试提问"; this.render();
+        }
+      }, 15000);
       this.error = "正在发送…";
     } catch (error) {
       this.submitting = false; this.error = error instanceof Error ? error.message : String(error);

@@ -1289,6 +1289,7 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await article.bringToFront();
   await article.locator('#page-action').click();expect(await article.evaluate(()=>(window as any).pageClicks)).toBe(1);
   await article.locator('#element-fixture').evaluate(el=>el.remove());
+  await panel.locator('.marks-list > summary').evaluate(el=>(el as HTMLElement).click());
   await expect(panel.getByText('目标已失效，请删除后重新选择。快照仍是原内容。')).toBeVisible();
   await expect(dot).toHaveCount(0);
   await clickPanel('删除标记');await expect(panel.locator('.element-marks article')).toHaveCount(0);

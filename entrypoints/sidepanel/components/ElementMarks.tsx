@@ -153,7 +153,7 @@ export function ElementMarks({
       </button>
       {error && <p role="alert">{error}</p>}
       <details className="marks-list">
-      <summary>已选{items.length}处{focused ? " · 网页正在定位" : ""}</summary>
+      <summary>已选{items.length}处{focused ? " · 定位中" : ""}</summary>
       {items.map((item) => (
         <article
           key={item.id}

@@ -99,6 +99,14 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await expect(panel.getByLabel("标记1的问题")).toHaveValue("解释表格和代码");
     await panel.locator(".marks-list > summary").click();
     expect(captures).toBe(1);
+    await content.locator('#card h2').click();
+    await content.getByPlaceholder('想问 AI 什么？').fill('第二处标记');
+    await content.getByRole('button',{name:'保存并继续选择'}).click();
+    await expect(content.locator('.dot')).toHaveCount(2);
+    await content.locator('.dot').nth(1).click();
+    await content.getByRole('button',{name:'删除标记',exact:true}).click();
+    await expect(content.locator('.dot')).toHaveCount(1);
+
     expect(await panel.evaluate(() => (window as any).sent)).toBeUndefined();
     await content.locator(".dot").hover();
     await expect(panel.locator("article")).toHaveClass("focused");
@@ -191,6 +199,16 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     expect(await panel.evaluate(() => (window as any).sendCount)).toBe(1);
     await editor.dispatchEvent('compositionend');
     await content.screenshot({path:testInfo.outputPath('compact-web-editor.png')});
+    await content.setViewportSize({width:340,height:580});
+    await content.emulateMedia({colorScheme:'dark'});
+    const menuBounds = await content.locator('.menu').boundingBox();
+    expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(340);
+    expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(580);
+    await content.screenshot({path:testInfo.outputPath('compact-web-editor-dark-narrow.png')});
+    await content.emulateMedia({colorScheme:'light'});
+    await content.setViewportSize({width:1000,height:800});
+
     await editor.evaluate(el => {
       el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
       el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
@@ -222,7 +240,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.getByPlaceholder("想问 AI 什么？").fill("解释长区域");
     await content.getByRole("button", { name: "保存并继续选择" }).click();
     await panel.locator(".marks-list > summary").click();
-    await expect(panel.getByLabel("标记2的问题")).toHaveValue("解释长区域");
+    await expect(panel.getByLabel("标记3的问题")).toHaveValue("解释长区域");
     await panel.locator("article").nth(1).getByText("查看实际发送快照", {exact:false}).click();
     await expect(panel.locator("article").nth(1).locator("pre")).toContainText(
       "部分元素（超出视口）",
