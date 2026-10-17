@@ -1221,8 +1221,14 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   });
   const panel=await harness.context.newPage();await panel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
   await article.bringToFront();
-  // Real browser command invokes the existing activeTab grant; no host permission is added.
-  await article.keyboard.press('Alt+s');
+  // Invoke the real toolbar action: page key events do not reliably dispatch
+  // browser shortcuts in headless Chromium. This exercises activeTab without
+  // adding host permissions or mocking captureVisibleTab.
+  const cdp = await harness.context.newCDPSession(article);
+  const { targetInfo } = await cdp.send('Target.getTargetInfo');
+  await cdp.send('Extensions.triggerAction', { id: harness.extensionId, targetId: targetInfo.targetId });
+  await cdp.detach();
+  await article.bringToFront();
   const clickPanel=async(name:string|RegExp)=>panel.getByRole('button',{name}).evaluate(el=>(el as HTMLButtonElement).click());
   await clickPanel('选择网页元素');
   await expect(article.getByText('选择元素 · Esc 取消',{exact:false})).toBeVisible();
