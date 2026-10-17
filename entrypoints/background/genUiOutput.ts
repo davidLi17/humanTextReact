@@ -83,18 +83,22 @@ export class GenUiOutputBuffer {
 
 export function isVerifiedGenUiSender(
   request: any,
-  sender: { id?: string; url?: string; tab?: unknown },
+  sender: { id?: string; url?: string; tab?: { id?: number; url?: string } },
   runtime: { id?: string; getURL(path: string): string }
 ): boolean {
-  if (sender.tab || !runtime.id || sender.id !== runtime.id ||
+  if (!runtime.id || sender.id !== runtime.id ||
       request.targetKind !== "sidepanel" || request.source !== "sidepanel" ||
       typeof request.sessionId !== "string" || !request.sessionId.trim() ||
       request.sessionId.length > 256 || request.tabId !== undefined) return false;
   try {
     const actual = new URL(sender.url || "");
     const expected = new URL(runtime.getURL("sidepanel.html"));
-    return actual.protocol === expected.protocol && actual.host === expected.host &&
-      actual.pathname === expected.pathname;
+    const matchesSidepanel = (url: URL) => url.protocol === expected.protocol &&
+      url.host === expected.host && url.pathname === expected.pathname;
+    // Chrome supplies sender.tab when our own sidepanel page is opened in a tab.
+    // Authenticate browser-provided origins, never the request's claimed source.
+    return matchesSidepanel(actual) && (!sender.tab ||
+      matchesSidepanel(new URL(sender.tab.url || "")));
   } catch {
     return false;
   }

@@ -116,6 +116,9 @@ test('GenUI trusted sender requires own sidepanel URL, id, session and rejects t
   const sender={id:'own-id',url:runtime.getURL('sidepanel.html')};
   const request={source:'sidepanel',targetKind:'sidepanel',sessionId:'session'};
   expect(isVerifiedGenUiSender(request,sender,runtime)).toBe(true);
+  expect(isVerifiedGenUiSender(request,{...sender,tab:{url:runtime.getURL('sidepanel.html')}},runtime)).toBe(true);
+  expect(isVerifiedGenUiSender(request,{...sender,tab:{url:'https://evil.test/sidepanel.html'}},runtime)).toBe(false);
+  expect(isVerifiedGenUiSender(request,{...sender,url:'https://evil.test/sidepanel.html',tab:{url:runtime.getURL('sidepanel.html')}},runtime)).toBe(false);
   for(const badSender of [{...sender,tab:{id:1}}, {...sender,id:'other'}, {...sender,url:'https://evil.test/sidepanel.html'}, {...sender,url:runtime.getURL('popup.html')}]) expect(isVerifiedGenUiSender(request,badSender,runtime)).toBe(false);
   expect(isVerifiedGenUiSender({...request,sessionId:''},sender,runtime)).toBe(false);
   expect(isVerifiedGenUiSender({...request,tabId:1},sender,runtime)).toBe(false);
