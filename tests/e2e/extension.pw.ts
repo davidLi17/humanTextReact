@@ -1258,7 +1258,7 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await dot.hover();await expect(panel.locator('.element-marks article')).toHaveClass('focused');
   await article.mouse.move(700,500);
   await panel.locator('.element-marks article').dispatchEvent('mouseover');
-  await expect(article.locator('#humantext-element-picker .box.focus')).toHaveCount(1);
+  await expect(article.locator('#humantext-element-picker .box.focus').filter({ has: article.locator('.dot') })).toHaveCount(1);
   await panel.getByText('查看实际发送快照',{exact:false}).click();
   const preview=panel.locator('.element-marks img');await expect(preview).toBeVisible();
   const image=await preview.getAttribute('src');expect(image).toMatch(/^data:image\/png;base64,/);
