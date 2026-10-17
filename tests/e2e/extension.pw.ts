@@ -3,6 +3,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { GENUI_SYSTEM_PROMPT } from "../../entrypoints/shared/genui/prompt";
 import type { ChatSession } from "../../entrypoints/shared/chatTypes";
 
 interface RecordedModelRequest {
@@ -13,6 +14,7 @@ interface RecordedModelRequest {
 interface LocalFixtureServer {
   baseUrl: string;
   modelRequests: RecordedModelRequest[];
+  genUiControl: { delayMs: number; finish: "normal" | "truncated" | "interrupted" };
   close(): Promise<void>;
 }
 
@@ -25,6 +27,26 @@ interface ExtensionHarness {
 
 const SELECTED_TEXT = "对齐颗粒度并形成增长飞轮";
 const CONTEXTUAL_PARAGRAPH = `项目讨论时，${SELECTED_TEXT}，这样可以避免协作双方对目标理解不一致。`;
+const GENUI_FALLBACK = "项目由 src 目录组织，按钮组件位于 src/components/Button.tsx。此示例帮助理解目录与文件的父子关系。";
+const GENUI_FIXTURE = {
+  version: 1,
+  fallbackText: GENUI_FALLBACK,
+  spec: {
+    root: "card",
+    elements: {
+      card: { type: "Card", props: { title: "目录结构讲解" }, children: ["tree", "steps"] },
+      tree: { type: "TreeInspector", props: { nodes: [
+        { id: "src", label: "src", parentId: null, description: "项目源代码目录。" },
+        { id: "components", label: "src/components", parentId: "src", description: "存放可复用组件。" },
+        { id: "button", label: "src/components/Button.tsx", parentId: "components", description: "按钮组件，属于 components 目录。" },
+      ] }, children: [] },
+      steps: { type: "StepViewer", props: { steps: [
+        { id: "one", title: "先看目录", description: "查看 src 下的组织方式。" },
+        { id: "two", title: "再看组件", description: "点击按钮组件查看父子关系。" },
+      ] }, children: [] },
+    },
+  },
+};
 const VERNACULAR_EXPLANATION = "把合作细节统一好，再让增长持续循环起来。";
 
 function longArticleHtml() {
@@ -42,6 +64,7 @@ function longArticleHtml() {
 
 async function startFixtureServer(): Promise<LocalFixtureServer> {
   const modelRequests: RecordedModelRequest[] = [];
+  const genUiControl: LocalFixtureServer["genUiControl"] = { delayMs: 0, finish: "normal" };
   const server = createServer(async (request, response) => {
     const url = new URL(request.url || "/", "http://127.0.0.1");
     if (request.method === "OPTIONS") {
@@ -88,6 +111,22 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
         authorization: request.headers.authorization,
         body,
       });
+      if (body.messages?.[0]?.content === GENUI_SYSTEM_PROMPT) {
+        const raw = JSON.stringify(GENUI_FIXTURE);
+        const mode = { ...genUiControl };
+        response.writeHead(200, {
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "no-cache",
+          "Content-Type": "text/event-stream; charset=utf-8",
+        });
+        const delta = (content: string, finish_reason: string | null = null) =>
+          `data: ${JSON.stringify({ choices: [{ delta: { content, reasoning_content: "GENUI_PRIVATE_REASONING" }, finish_reason }] })}\n\n`;
+        response.write(delta(raw.slice(0, 64)));
+        if (mode.delayMs) await new Promise(resolveDelay => setTimeout(resolveDelay, mode.delayMs));
+        response.write(delta(raw.slice(64), mode.finish === "normal" ? "stop" : mode.finish === "truncated" ? "length" : null));
+        response.end(mode.finish === "interrupted" ? "" : "data: [DONE]\n\n");
+        return;
+      }
       const serialized = JSON.stringify(body);
       const groundedSegmentIndex = Number(
         serialized.match(/【原文第 (\d+) 段｜/)?.[1] || 1
@@ -161,6 +200,7 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
   return {
     baseUrl: `http://127.0.0.1:${address.port}`,
     modelRequests,
+    genUiControl,
     close: () =>
       new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
@@ -239,6 +279,7 @@ const test = base.extend<{ harness: ExtensionHarness }>({
     try {
       context = await chromium.launchPersistentContext(userDataDir, {
         channel: "chromium",
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}),
         headless: true,
         args: [
           `--disable-extensions-except=${extensionPath}`,
@@ -330,6 +371,33 @@ async function createVisibleRangeSelection(page: import("@playwright/test").Page
   });
   await expect(page.locator(".translator-action-bar")).toBeVisible();
 }
+
+test("设置段落说明可悬停、键盘阅读，窄屏和暗色主题保持可见", async ({ harness }) => {
+  const page = await harness.context.newPage();
+  await page.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const help = page.getByRole("button", { name: "查看段落解释发送的信息和示例" });
+  await help.hover();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("2. 具体例子");
+  await tooltip.hover();
+  await expect(tooltip).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(tooltip).toHaveCount(0);
+  await help.focus();
+  await expect(tooltip).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tooltip).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await help.blur();
+  await help.focus();
+  await expect(tooltip).toBeVisible();
+  const bounds = await tooltip.boundingBox();
+  expect(bounds).toBeTruthy();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+});
 
 test("默认开启的段落解释在划词工具条点击后直接发送一次带上下文的请求", async ({ harness }, testInfo) => {
   const article = await harness.context.newPage();
@@ -1043,5 +1111,98 @@ test("字体设置通过 Storage 事件同步三个扩展页面和 Content 浮�
       )
     )
     .toBe("1");
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+async function openGenUiSource(harness: ExtensionHarness) {
+  const page = await harness.context.newPage();
+  await page.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const now = Date.now();
+  const session: ChatSession = {
+    id: "genui-browser-session", title: "目录结构解释", createdAt: now, updatedAt: now,
+    messages: [
+      {id:"genui-source-user",role:"user",content:"解释 src/components/Button.tsx 与目录的关系。",createdAt:now,status:"completed"},
+      {id:"genui-source-answer",role:"assistant",content:"src 是源代码目录，components 放可复用组件，Button.tsx 是其中的按钮组件。",createdAt:now+1,status:"completed"},
+    ],
+  };
+  await page.evaluate(async session => {
+    await (globalThis as any).chrome.storage.local.set({sidepanel_chat_sessions:[session],sidepanel_active_session_id:session.id});
+  }, session);
+  await page.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await page.setViewportSize({width:380,height:800});
+  await expect(page.locator('[data-message-id="genui-source-answer"]')).toBeVisible();
+  return page;
+}
+
+const readGenUiSessions = (page: import("@playwright/test").Page): Promise<ChatSession[]> => page.evaluate(async()=>{
+  const stored=await (globalThis as any).chrome.storage.local.get("sidepanel_chat_sessions");
+  return stored.sidepanel_chat_sessions || [];
+});
+
+test("GenUI uses real extension request flow, hides raw stream, persists local selection and falls back when disabled",async({harness},testInfo)=>{
+  harness.server.genUiControl.delayMs=1200;
+  const page=await openGenUiSource(harness);
+  await page.locator('[data-message-id="genui-source-answer"]').getByRole('button',{name:'交互讲解',exact:true}).click();
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(1);
+  await expect(page.getByLabel('交互讲解卡片')).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText('"fallbackText"');
+  await expect(page.locator('body')).not.toContainText('GENUI_PRIVATE_REASONING');
+  const card=page.getByLabel('交互讲解卡片');
+  await expect(card).toBeVisible();
+  const request=harness.server.modelRequests[0];
+  expect(request.authorization).toBe('Bearer fixture-only-key');
+  expect(request.body.messages[0].content).toBe(GENUI_SYSTEM_PROMPT);
+  await card.getByRole('group',{name:'选择节点'}).getByRole('button',{name:'src/components/Button.tsx',exact:true}).click();
+  await expect(card.getByText('按钮组件，属于 components 目录。',{exact:true})).toBeVisible();
+  await expect(card.getByText('父节点：',{exact:false})).toContainText('src/components');
+  await card.getByRole('button',{name:'下一步',exact:true}).click();
+  await expect(card.getByRole('heading',{name:'再看组件'})).toBeVisible();
+  expect(harness.server.modelRequests).toHaveLength(1);
+  await expect.poll(async()=>{
+    const sessions=await readGenUiSessions(page);
+    return sessions[0]?.messages.find(message=>message.genUi)?.genUi?.viewState;
+  }).toMatchObject({tree:{selectedNodeId:'button'},steps:{step:1}});
+  const stored=await readGenUiSessions(page);
+  const assistant=stored[0].messages.find(message=>message.genUi)!;
+  expect(assistant.content).toBe(GENUI_FALLBACK);
+  expect(assistant.genUi).toMatchObject({protocolVersion:1,catalogVersion:'explanation-v1',revision:1,sourceMessageIds:expect.arrayContaining(['genui-source-answer'])});
+  expect(JSON.stringify(stored)).not.toContain('GENUI_PRIVATE_REASONING');
+  await page.reload();
+  const restored=page.getByLabel('交互讲解卡片');
+  await expect(restored.getByRole('group',{name:'选择节点'}).getByRole('button',{name:'src/components/Button.tsx',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(restored.getByRole('heading',{name:'再看组件'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('genui-tree-restored.png'),fullPage:true});
+  await restored.getByRole('button',{name:'文字版本',exact:true}).click();
+  await expect(restored).toContainText(GENUI_FALLBACK);
+  await page.getByLabel('交互讲解开关').uncheck();
+  await expect(page.getByLabel('交互讲解卡片')).toHaveCount(0);
+  await expect(page.locator('main')).toContainText(GENUI_FALLBACK);
+  expect(harness.server.modelRequests).toHaveLength(1);
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("GenUI cancellation and retry retain source intent, and truncated valid JSON never renders",async({harness})=>{
+  harness.server.genUiControl.delayMs=1600;
+  const page=await openGenUiSource(harness);
+  await page.locator('[data-message-id="genui-source-answer"]').getByRole('button',{name:'交互讲解',exact:true}).click();
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(1);
+  await page.getByRole('button',{name:'停止生成',exact:false}).click();
+  await expect(page.getByLabel('交互讲解卡片')).toHaveCount(0);
+  await expect(page.locator('body')).not.toContainText('"fallbackText"');
+  harness.server.genUiControl.delayMs=0;
+  harness.server.genUiControl.finish='truncated';
+  await page.getByTitle('重试生成').last().click();
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
+  await expect(page.locator('main')).toContainText(/交互解释生成失败|交互讲解未通过校验/);
+  await expect(page.getByLabel('交互讲解卡片')).toHaveCount(0);
+  const failed=await readGenUiSessions(page);
+  expect(failed[0].messages.some(message=>message.genUi)).toBe(false);
+  expect(JSON.stringify(failed)).not.toContain('"fallbackText"');
+  harness.server.genUiControl.finish='normal';
+  await page.getByTitle('重试生成').last().click();
+  await expect(page.getByLabel('交互讲解卡片')).toBeVisible();
+  expect(harness.server.modelRequests).toHaveLength(3);
+  expect(harness.server.modelRequests.every(request=>request.body.messages[0].content === GENUI_SYSTEM_PROMPT)).toBe(true);
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });

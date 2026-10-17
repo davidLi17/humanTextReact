@@ -1,3 +1,4 @@
+import { normalizeGenUiSessions } from "./genui/profile";
 import { ChatSession } from "./chatTypes";
 import { formatDateTime } from "@/entrypoints/popup/utils/helpers";
 import {
@@ -140,11 +141,16 @@ export function downloadSessionMarkdownFile(session: ChatSession): void {
   URL.revokeObjectURL(url);
 }
 
+/** Export a shareable session with only validated, bounded UI attachments. */
+export function formatSessionAsJson(session: ChatSession): string {
+  return JSON.stringify(normalizeGenUiSessions([session])[0], null, 2);
+}
+
 /**
  * 触发会话的 JSON 文件下载
  */
 export function downloadSessionJsonFile(session: ChatSession): void {
-  const json = JSON.stringify(session, null, 2);
+  const json = formatSessionAsJson(session);
   const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

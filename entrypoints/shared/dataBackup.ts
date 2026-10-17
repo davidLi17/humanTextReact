@@ -1,3 +1,4 @@
+import { normalizeGenUiSessions } from "./genui/profile";
 /**
  * 全量数据备份与恢复（v1 备份格式）
  *
@@ -182,7 +183,7 @@ export function createBackupEnvelope(
       sessions: {
         sessions:
           sessions && Array.isArray(sessions.sessions)
-            ? sessions.sessions.map((session) => ({ ...session }))
+            ? normalizeGenUiSessions(sessions.sessions)
             : [],
         activeSessionId:
           sessions && typeof sessions.activeSessionId === "string"
@@ -410,7 +411,7 @@ export function validateBackup(json: unknown): BackupValidationResult {
         history: historyList,
         jargon: jargonList,
         sessions: {
-          sessions: sessionsData.sessions as unknown as ChatSession[],
+          sessions: normalizeGenUiSessions(sessionsData.sessions as unknown as ChatSession[]),
           activeSessionId,
         },
         settings: settingsData,

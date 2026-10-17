@@ -33,6 +33,10 @@ import { buildPrismSystemPrompt } from "@/entrypoints/shared/prismPrompt";
 import { buildModelParams } from "@/entrypoints/shared/modelCatalog";
 import { stripGroundedEvidenceBlock } from "@/entrypoints/shared/groundedGoal";
 
+import { GENUI_SYSTEM_PROMPT } from "@/entrypoints/shared/genui/prompt";
+import type { GenUiAttachment } from "@/entrypoints/shared/genui/types";
+import { GenUiOutputBuffer, GENUI_FAILURE_TEXT, validateGenUiRequest, type GenUiRequest } from "./genUiOutput";
+
 const logger = createLogger("translation-service", "🌐");
 
 export const LOCAL_RESULT_DELIVERY_TIMEOUT_MS = 5_000;
@@ -97,6 +101,8 @@ export interface TranslationParams {
   selectionContext?: SelectionContext;
   bypassJargonVault?: boolean;
   prismMode?: boolean;
+  responseMode?: "text" | "genui-v1";
+  genUiRequest?: GenUiRequest;
 }
 
 interface StreamChunk {
@@ -105,6 +111,7 @@ interface StreamChunk {
   done: boolean;
   /** 末帧携带的 finish_reason（stop/length/…）；整个流未出现时为 null */
   finishReason: string | null;
+  meaningfulOutput: boolean;
 }
 
 /**
@@ -122,15 +129,16 @@ function isStreamTerminationError(
 
 function releaseStreamReader(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  cancel: boolean
+  cancel: boolean,
+  silent = false
 ): void {
   if (cancel) {
     try {
       void Promise.resolve(reader.cancel()).catch((error) =>
-        logger.warn("取消响应流失败:", error)
+        silent ? undefined : logger.warn("取消响应流失败:", error)
       );
     } catch (error) {
-      logger.warn("取消响应流失败:", error);
+      silent ? undefined : logger.warn("取消响应流失败:", error);
     }
   }
   try {
@@ -365,6 +373,9 @@ export class TranslationService {
     params: TranslationParams,
     requestContext: RequestContext
   ): Promise<string | void> {
+    const genUiMode = params.responseMode === "genui-v1";
+    const genUiOutput = genUiMode ? new GenUiOutputBuffer() : undefined;
+    let genUiRequest: GenUiRequest | undefined;
     const {
       text = "",
       messages: chatMessages,
@@ -392,7 +403,14 @@ export class TranslationService {
     });
 
     try {
-      const jargonTerm = getJargonReuseTerm(params);
+      if (params.responseMode !== undefined && params.responseMode !== "text" && !genUiMode) {
+        throw new Error("不支持的响应模式");
+      }
+      if (genUiMode) {
+        if (target.kind !== "sidepanel" || !target.sessionId) throw new Error(GENUI_FAILURE_TEXT);
+        genUiRequest = validateGenUiRequest(params.genUiRequest);
+      }
+      const jargonTerm = genUiMode ? undefined : getJargonReuseTerm(params);
       if (jargonTerm) {
         let savedItem;
         try {
@@ -428,15 +446,17 @@ export class TranslationService {
         config.promptTemplate ||
         DEFAULT_SETTINGS.promptTemplate;
 
-      const prismMode = params.prismMode ?? config.prismModeEnabled ?? false;
+      const prismMode = genUiMode ? false : params.prismMode ?? config.prismModeEnabled ?? false;
       const messagesPayload = buildMessagesPayload({
         text,
-        messages: chatMessages,
+        messages: genUiMode ? chatMessages?.filter((message) => message.role !== "system") : chatMessages,
         images,
-        promptTemplate,
+        promptTemplate: genUiMode ? GENUI_SYSTEM_PROMPT : promptTemplate,
         selectionContext: params.selectionContext,
         prismMode,
       });
+
+      if (genUiMode) messagesPayload[0] = { role: "system", content: GENUI_SYSTEM_PROMPT };
 
       // 模型/提供商相关字段统一由 modelCatalog 决策（temperature 也在其中，
       // Kimi 等不认 temperature 的提供商会自行省略，不要在这里再写一遍）。
@@ -474,6 +494,10 @@ export class TranslationService {
       }
 
       if (!response.ok) {
+        if (genUiMode) {
+          void response.body?.cancel().catch(() => {});
+          throw new Error(GENUI_FAILURE_TEXT);
+        }
         // 走到这里时响应体尚未被流式读取消费，可安全读取；
         // 用服务商返回的具体原因（如"余额不足""模型无权限"）构造带错误码的错误
         const errorBodyText = await timeoutGuard
@@ -511,29 +535,35 @@ export class TranslationService {
           buffer += decoder.decode();
         }
 
+        if (genUiMode && new TextEncoder().encode(buffer).byteLength > 262_144) {
+          throw new Error(GENUI_FAILURE_TEXT);
+        }
         const lines = buffer.split(/\r?\n/);
         buffer = done ? "" : lines.pop() || "";
-        const currentChunk = this.parseStreamLines(lines);
+        const currentChunk = this.parseStreamLines(lines, genUiMode);
 
         if (currentChunk.done) {
           sawDoneMarker = true;
         }
         if (currentChunk.finishReason) {
           lastFinishReason = currentChunk.finishReason;
+          if (genUiMode && lastFinishReason !== "stop") throw new Error(GENUI_FAILURE_TEXT);
         }
 
-        if (currentChunk.content || currentChunk.reasoningContent) {
-          result += currentChunk.content;
-          reasoningContent += currentChunk.reasoningContent;
+        if (currentChunk.content || currentChunk.reasoningContent || currentChunk.meaningfulOutput) {
+          if (genUiOutput) genUiOutput.append(currentChunk.content);
+          else {
+            result += currentChunk.content;
+            reasoningContent += currentChunk.reasoningContent;
+          }
 
           if (
-            currentChunk.content.trim() ||
-            currentChunk.reasoningContent.trim()
+            currentChunk.meaningfulOutput
           ) {
             timeoutGuard.markMeaningfulOutput();
           }
 
-          const delivered = await timeoutGuard.run(
+          const delivered = genUiMode ? RequestManager.isActiveRequest(requestId) : await timeoutGuard.run(
             this.sendTranslationUpdate(
               requestContext,
               result,
@@ -550,14 +580,14 @@ export class TranslationService {
 
         streamFinished = done || currentChunk.done;
         if (currentChunk.done && !done) {
-          releaseStreamReader(streamReader, true);
+          releaseStreamReader(streamReader, true, genUiMode);
           reader = undefined;
         }
       }
 
       timeoutGuard.completeStream();
 
-      if (!result.trim()) {
+      if (!genUiMode && !result.trim()) {
         throw new Error("模型未返回可显示内容，请检查模型或接口兼容性");
       }
 
@@ -577,11 +607,17 @@ export class TranslationService {
         );
       }
 
+      // Never parse an incomplete/cancelled stream, even if its prefix is valid JSON.
+      if (!RequestManager.isActiveRequest(requestId) || controller.signal.aborted) return;
+      const generated = genUiOutput && genUiRequest ? genUiOutput.finish(genUiRequest) : undefined;
+      if (generated) result = generated.fallbackText;
       const finalDelivered = await this.sendTranslationUpdate(
         requestContext,
         result,
         reasoningContent,
-        true
+        true,
+        undefined,
+        generated ? { genUi: generated.attachment, assistantMessageId: genUiRequest!.assistantMessageId } : undefined
       );
       if (!finalDelivered) {
         RequestManager.cleanupRequest(requestId);
@@ -602,6 +638,12 @@ export class TranslationService {
 
       return result;
     } catch (error: any) {
+      if (genUiMode) {
+        if (error?.name === "AbortError" || !RequestManager.isActiveRequest(requestId)) return;
+        await this.sendTranslationError(requestContext, GENUI_FAILURE_TEXT, "", "", genUiRequest?.assistantMessageId);
+        // Provider/parser errors can quote raw model data: never log or propagate them.
+        throw new Error(GENUI_FAILURE_TEXT);
+      }
       if (isRequestTimeoutError(error)) {
         const message = this.normalizeErrorMessage(error);
         logger.error("🚀lhg[TranslationService][请求超时]", {
@@ -656,19 +698,21 @@ export class TranslationService {
       throw new Error(message);
     } finally {
       if (reader) {
-        releaseStreamReader(reader, !streamFinished);
+        releaseStreamReader(reader, !streamFinished, genUiMode);
       }
+      genUiOutput?.clear();
       timeoutGuard.dispose();
       RequestManager.completeRequest(requestId);
     }
   }
 
-  private static parseStreamLines(lines: string[]): StreamChunk {
+  private static parseStreamLines(lines: string[], genUiMode = false): StreamChunk {
     const chunk: StreamChunk = {
       content: "",
       reasoningContent: "",
       done: false,
       finishReason: null,
+      meaningfulOutput: false,
     };
 
     for (const line of lines) {
@@ -679,6 +723,7 @@ export class TranslationService {
       if (!data) continue;
       if (data === "[DONE]") {
         chunk.done = true;
+        if (genUiMode) break;
         continue;
       }
 
@@ -688,6 +733,7 @@ export class TranslationService {
         // finish_reason 只出现在末帧，而该帧的 delta 通常是空对象，
         // 因此必须在下面的 delta 判空之前捕获。
         if (typeof choice?.finish_reason === "string" && choice.finish_reason) {
+          if (genUiMode && choice.finish_reason !== "stop") throw new Error(GENUI_FAILURE_TEXT);
           chunk.finishReason = choice.finish_reason;
         }
         const delta = choice?.delta;
@@ -696,10 +742,15 @@ export class TranslationService {
         if (typeof delta.content === "string") {
           chunk.content += delta.content;
         }
-        if (typeof delta.reasoning_content === "string") {
+        chunk.meaningfulOutput ||= Boolean(
+          (typeof delta.content === "string" && delta.content.trim()) ||
+          (typeof delta.reasoning_content === "string" && delta.reasoning_content.trim())
+        );
+        if (!genUiMode && typeof delta.reasoning_content === "string") {
           chunk.reasoningContent += delta.reasoning_content;
         }
       } catch (error) {
+        if (genUiMode) throw new Error(GENUI_FAILURE_TEXT);
         logger.error("解析流式响应失败:", error, {
           rawDataLength: line.length,
         });
@@ -722,7 +773,8 @@ export class TranslationService {
     requestContext: RequestContext,
     error: string,
     content = "",
-    reasoningContent = ""
+    reasoningContent = "",
+    assistantMessageId?: string
   ): Promise<boolean> {
     const { requestId, target } = requestContext;
     let action: string;
@@ -739,6 +791,7 @@ export class TranslationService {
       requestId,
       sessionId: target.kind === "sidepanel" ? target.sessionId : undefined,
       error,
+      ...(assistantMessageId ? { assistantMessageId } : {}),
       content: content || undefined,
       reasoningContent: reasoningContent || undefined,
       hasReasoning: reasoningContent.length > 0,
@@ -755,7 +808,8 @@ export class TranslationService {
     content: string,
     reasoningContent: string,
     done: boolean,
-    resultSource?: TranslationResultSource
+    resultSource?: TranslationResultSource,
+    generated?: { genUi: GenUiAttachment; assistantMessageId: string }
   ): Promise<boolean> {
     const { requestId, target } = requestContext;
     if (!RequestManager.isActiveRequest(requestId)) {
@@ -780,6 +834,7 @@ export class TranslationService {
       reasoningContent,
       done,
       ...(resultSource ? { resultSource } : {}),
+      ...generated,
     };
 
     logger.log("📤 [TranslationService] 发送翻译更新", {

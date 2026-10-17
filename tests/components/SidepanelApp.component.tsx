@@ -2183,3 +2183,67 @@ describe("Sidepanel App 真实 React 交互", () => {
     expect(retryRequest.messages).toEqual(firstRequest.messages);
   });
 });
+
+describe("Sidepanel GenUI request lifecycle", () => {
+  function terminal(request: any) {
+    return {
+      action: MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,
+      requestId: request.requestId, sessionId: request.sessionId,
+      assistantMessageId: request.genUiRequest.assistantMessageId,
+      done: true, content: "可以点击树节点查看关系。",
+      genUi: { id: "local-card", protocolVersion: 1, catalogVersion: "explanation-v1", revision: 1,
+        sourceMessageIds: request.genUiRequest.sourceMessageIds,
+        contextFingerprint: request.genUiRequest.contextFingerprint,
+        spec: { root: "tree", elements: { tree: { type: "TreeInspector", props: { nodes: [
+          { id: "src", label: "src", parentId: null },
+          { id: "child", label: "Button.tsx", parentId: "src", description: "本地选中按钮" },
+        ] }, children: [] } } },
+      },
+    };
+  }
+  test("normal completion keeps source, ignores raw partials and persists local state through existing queue", async () => {
+    const pending = createDeferred<any>();
+    const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });
+    setTestGlobal("browser", mock.browser);
+    const view = render(<SidePanelApp />);
+    const button = await screen.findByRole("button", { name: "交互讲解" });
+    fireEvent.click(button); fireEvent.click(button);
+    const request = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(1); return getTranslateMessages(mock)[0]; });
+    expect(request.prismMode).toBe(false); expect(request.bypassJargonVault).toBe(true);
+    act(() => mock.emitRuntimeMessage({ ...terminal(request), done: false, content: '{"version":1,"raw-secret-marker":true}' }));
+    expect(screen.queryByText(/raw-secret-marker/)).toBeNull();
+    act(() => mock.emitRuntimeMessage(terminal(request)));
+    await act(async () => { pending.resolve({ success: true }); });
+    expect(await screen.findByLabelText("交互讲解卡片")).toBeTruthy();
+    expect(screen.getByText("之前的回答")).toBeTruthy();
+    fireEvent.click(screen.getAllByRole("button", { name: "Button.tsx" })[0]);
+    await waitFor(() => {
+      const stored = mock.localStore.sidepanel_chat_sessions as any[];
+      expect(stored[0].messages.at(-1).genUi.viewState.tree.selectedNodeId).toBe("child");
+      expect(JSON.stringify(stored)).not.toContain("raw-secret-marker");
+    });
+    expect(getTranslateMessages(mock)).toHaveLength(1);
+    view.unmount(); render(<SidePanelApp />);
+    expect(await screen.findByText("本地选中按钮")).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "交互讲解开关" }));
+    expect(await screen.findByText("可以点击树节点查看关系。")).toBeTruthy();
+    expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
+  });
+  test("wrong session and late response after stop never attach to a message; explicit retry starts new genui request", async () => {
+    const pending = createDeferred<any>();
+    const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    fireEvent.click(await screen.findByRole("button", { name: "交互讲解" }));
+    const request = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(1); return getTranslateMessages(mock)[0]; });
+    act(() => mock.emitRuntimeMessage({ ...terminal(request), sessionId: "another-session" }));
+    expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "停止生成" }));
+    act(() => mock.emitRuntimeMessage(terminal(request)));
+    expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "重试" }));
+    await waitFor(() => expect(getTranslateMessages(mock)).toHaveLength(2));
+    expect(getTranslateMessages(mock)[1].responseMode).toBe("genui-v1");
+    expect(getTranslateMessages(mock)[1].requestId).not.toBe(request.requestId);
+  });
+});

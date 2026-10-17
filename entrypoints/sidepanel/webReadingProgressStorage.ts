@@ -1,3 +1,4 @@
+import { normalizeGenUiSessions } from "@/entrypoints/shared/genui/profile";
 import {
   serializeWebReadingProgressMap,
   WEB_READING_PROGRESS_STORAGE_KEY,
@@ -129,8 +130,9 @@ export class WebReadingProgressStorage {
       params.progressMap,
       params.prioritySessionId
     );
+    // Every write path (including web-reading-only checkpoints) shares the UI budget.
     const sessionsSnapshot = params.sessions
-      ? structuredClone(params.sessions)
+      ? structuredClone(normalizeGenUiSessions(params.sessions))
       : undefined;
     const operation = this.writeQueue.then(async () => {
       if (!this.storage) throw new Error("当前环境没有可用的本地存储");

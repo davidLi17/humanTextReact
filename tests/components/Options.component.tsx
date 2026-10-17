@@ -146,6 +146,37 @@ afterEach(() => {
 });
 
 describe("Options 设置页面组件级交互与逻辑增强", () => {
+  test("段落说明支持悬停、键盘聚焦和 Escape，并展示发送内容与具体示例", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("chrome", mock.browser);
+    render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+    expect(screen.getByText("开启后，将选中文字和所在段落一起发给 AI，帮助它结合原文解释。")).toBeTruthy();
+    const help = screen.getByRole("button", { name: "查看段落解释发送的信息和示例" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseEnter(help);
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("1. 会带什么信息");
+    expect(tooltip.textContent).toContain("2000 个字符");
+    expect(tooltip.textContent).toContain("页面标题和 URL 仅用于本地来源预览");
+    expect(tooltip.textContent).toContain("2. 具体例子");
+    expect(tooltip.textContent).toContain("这个方案要先跑通最小闭环，验证用户愿不愿意付费。");
+    expect(tooltip.textContent).toContain("实际回答由模型生成");
+    expect(help.getAttribute("aria-describedby")).toBe(tooltip.id);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.mouseLeave(help);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.focus(help);
+    expect(screen.getByRole("tooltip")).toBeTruthy();
+    fireEvent.keyDown(help, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.blur(help);
+    fireEvent.focus(help);
+    fireEvent.blur(help);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   test("关闭划词操作条立即保存，重开设置保持关闭，密钥不会同步", async () => {
     const mock = createBrowserMock();
     setTestGlobal("browser", mock.browser);

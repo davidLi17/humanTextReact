@@ -25,6 +25,7 @@ import {
   createSidepanelTarget,
   type TranslationTarget,
 } from "@/entrypoints/shared/requestProtocol";
+import { isVerifiedGenUiSender, validateGenUiRequest } from "./genUiOutput";
 import { isNil } from "lodash-es";
 import { normalizeSelectionContext } from "@/entrypoints/shared/selectionContext";
 
@@ -70,6 +71,15 @@ export class MessageHandler {
     },
     // 翻译
     [MESSAGE_TYPES.TRANSLATE]: async (request, sender) => {
+      const responseMode: "text" | "genui-v1" = request.responseMode === undefined ? "text" : request.responseMode;
+      if (responseMode !== "text" && responseMode !== "genui-v1") {
+        throw new Error("不支持的响应模式");
+      }
+      const genUiRequest = responseMode === "genui-v1"
+        ? validateGenUiRequest(request.genUiRequest) : undefined;
+      if (responseMode === "genui-v1" && !isVerifiedGenUiSender(request, sender, browser.runtime)) {
+        throw new Error("交互解释仅支持来自侧边栏的请求");
+      }
       const target = getRequestTarget(request, sender);
       let requestId =
         typeof request.requestId === "string" && request.requestId
@@ -114,8 +124,10 @@ export class MessageHandler {
           promptTemplate: request.promptTemplate,
           apiKey: request.apiKey,
           selectionContext,
-          bypassJargonVault: request.bypassJargonVault === true,
-          prismMode: request.prismMode,
+          bypassJargonVault: responseMode === "genui-v1" || request.bypassJargonVault === true,
+          prismMode: responseMode === "genui-v1" ? false : request.prismMode,
+          responseMode,
+          genUiRequest,
         };
 
         const result = await TranslationService.translateText(

@@ -52,6 +52,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { API_HINTS, API_PLATFORM_HINTS, MODEL_HINTS } from "./config";
 import "./Options.less";
+import SelectionContextHelp from "./SelectionContextHelp";
 
 interface Settings {
   apiKey: string;
@@ -1074,9 +1075,8 @@ function Options() {
                   ></label>
                 </div>
                 <div className="setting-hint">
-                  默认开启。开启后，划词翻译会直接携带选区所在的有限段落（最多约
-                  2000 字）发送；关闭后只翻译选中文字。页面标题和 URL
-                  仅用于本地来源预览。
+                  开启后，将选中文字和所在段落一起发给 AI，帮助它结合原文解释。
+                  <SelectionContextHelp />
                 </div>
               </div>
 

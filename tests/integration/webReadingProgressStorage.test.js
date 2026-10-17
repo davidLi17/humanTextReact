@@ -1,3 +1,4 @@
+import { MAX_GENUI_STORAGE_BYTES, jsonByteLength, normalizeGenUiSessions } from "../../entrypoints/shared/genui/profile.ts";
 import { describe, expect, test } from "bun:test";
 import {
   SIDEPANEL_ACTIVE_SESSION_STORAGE_KEY,
@@ -45,6 +46,55 @@ function createProgress(overrides = {}) {
 }
 
 describe("网页阅读断点存储协调器", () => {
+  test("every checkpoint enforces the UI budget, so uncapped progress refs cannot revive pruned cards", async () => {
+    const writes = [];
+    const storage = {
+      get: async () => ({}),
+      set: async payload => { writes.push(structuredClone(payload)); },
+    };
+    const coordinator = new WebReadingProgressStorage(storage);
+    const messages = Array.from({ length: 160 }, (_, index) => ({
+      id: `assistant-${index}`,
+      role: "assistant",
+      content: `Readable fallback ${index}`,
+      createdAt: index,
+      genUi: {
+        id: `ui-${index}`,
+        protocolVersion: 1,
+        catalogVersion: "explanation-v1",
+        revision: 1,
+        sourceMessageIds: ["source-1"],
+        contextFingerprint: "fingerprint-1",
+        spec: { root: "text", elements: { text: { type: "Text", props: { text: "x".repeat(8000) }, children: [] } } },
+      },
+    }));
+    const uncappedSessions = [{ id: "session-1", title: "Explanation", messages, createdAt: 1, updatedAt: 2 }];
+    expect(messages.reduce((bytes, message) => bytes + jsonByteLength(message.genUi), 0)).toBeGreaterThan(MAX_GENUI_STORAGE_BYTES);
+
+    // The ordinary App save already sends capped data.
+    await coordinator.enqueueCheckpoint({ progressMap: new Map(), sessions: normalizeGenUiSessions(uncappedSessions) });
+    const first = writes[0][SIDEPANEL_SESSIONS_STORAGE_KEY][0].messages;
+    const retainedIds = first.filter(message => message.genUi).map(message => message.id);
+    expect(retainedIds.length).toBeLessThan(messages.length);
+    expect(first[0].genUi).toBeUndefined();
+    expect(first.at(-1).genUi).toBeDefined();
+
+    // A subsequent web-reading checkpoint receives the still-uncapped sessions ref.
+    const progress = new Map([["session-1", createProgress({ updatedAt: 3 })]]);
+    const laterWrite = coordinator.enqueueCheckpoint({ progressMap: progress, sessions: uncappedSessions });
+    // Enqueue must retain its own immutable snapshot.
+    uncappedSessions[0].messages.at(-1).content = "Changed after enqueue";
+    await laterWrite;
+    const later = writes[1][SIDEPANEL_SESSIONS_STORAGE_KEY][0].messages;
+    expect(later.filter(message => message.genUi).map(message => message.id)).toEqual(retainedIds);
+    expect(later.reduce((bytes, message) => bytes + (message.genUi ? jsonByteLength(message.genUi) : 0), 0)).toBeLessThanOrEqual(MAX_GENUI_STORAGE_BYTES);
+    expect(later).toHaveLength(messages.length);
+    expect(later[0].content).toBe("Readable fallback 0");
+    expect(later.at(-1).content).toBe("Readable fallback 159");
+    expect(writes[1][WEB_READING_PROGRESS_STORAGE_KEY].records["session-1"].updatedAt).toBe(3);
+    expect(uncappedSessions[0].messages.every(message => message.genUi)).toBe(true);
+  });
+
   test("联合 hydrate 读取完成前不会写入或用空状态覆盖存储", async () => {
     const read = deferred();
     let setCalls = 0;

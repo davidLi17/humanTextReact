@@ -116,6 +116,10 @@ import ThemeModeSelector from "@/entrypoints/popup/components/ThemeModeSelector"
 import JargonVaultPanel from "./components/JargonVaultPanel";
 import JargonSaveDialog from "./components/JargonSaveDialog";
 import PrismResultTabs from "./components/PrismResultTabs";
+import GenUiMessageCard from "./genui/GenUiMessageCard";
+import { useGenUiRequest, useGenUiFeature, acceptGenUiCompletion } from "./genui/useGenUiRequest";
+import { normalizeGenUiAttachment, normalizeGenUiSessions } from "@/entrypoints/shared/genui/profile";
+import type { GenUiAttachment, GenUiRequestMeta } from "@/entrypoints/shared/genui/types";
 import PageContextCard from "./components/PageContextCard";
 import GroundedEvidencePanel from "./components/GroundedEvidencePanel";
 import SidepanelQuoteActionBar from "./components/SidepanelQuoteActionBar";
@@ -385,6 +389,7 @@ export default function SidePanelApp() {
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<string | undefined>(undefined);
+  const genUiRequestRef = useRef<{ requestId: string; meta: GenUiRequestMeta } | undefined>(undefined);
   const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
     undefined
   );
@@ -600,6 +605,7 @@ export default function SidePanelApp() {
     if (!transition.invalidated) return false;
     activeRequestIdRef.current = transition.activeRequestId;
     activeRequestOwnerRef.current = transition.owner;
+    if (genUiRequestRef.current?.requestId === requestId) genUiRequestRef.current = undefined;
     if (overviewRequestIdRef.current === requestId) {
       overviewRequestIdRef.current = undefined;
     }
@@ -782,7 +788,7 @@ export default function SidePanelApp() {
         const snapshot = await loadWebReadingHydrationSnapshot();
         if (cancelled) return;
         const storedSessions = Array.isArray(snapshot.sessions)
-          ? (snapshot.sessions as ChatSession[])
+          ? normalizeGenUiSessions(snapshot.sessions as ChatSession[])
           : [];
         const initialSessions =
           storedSessions.length > 0 ? storedSessions : [createNewSession()];
@@ -849,7 +855,7 @@ export default function SidePanelApp() {
       webReadingProgressRef.current,
       activeSessionIdRef.current || undefined,
       {
-      sessions: updatedSessions,
+      sessions: normalizeGenUiSessions(updatedSessions),
       }
     );
   };
@@ -860,6 +866,50 @@ export default function SidePanelApp() {
     persistWebReadingProgress(webReadingProgressRef.current, id, {
       activeSessionId: id,
     });
+  };
+
+  const genUiFeature = useGenUiFeature(showToast);
+  const handleGenerateGenUi = useGenUiRequest({
+    enabled: genUiFeature.enabled,
+    canStart: () => !activeRequestIdRef.current && !isStreaming && !isExtractingPage && !isManualDispatching,
+    getSession: () => sessionsRef.current.find((session) => session.id === activeSessionIdRef.current),
+    start: (owner, meta, user, assistant) => {
+      registerActiveRequest(owner);
+      genUiRequestRef.current = { requestId: owner.requestId, meta };
+      const next = sessionsRef.current.map((session) => session.id === owner.sessionId
+        ? { ...session, messages: [...session.messages, user, assistant], updatedAt: Date.now() } : session);
+      sessionsRef.current = next;
+      setSessions(next);
+      setIsStreaming(true);
+      void saveSessionsToStorage(next);
+      scrollToBottom(true);
+    },
+    isPending: (owner) => activeRequestIdRef.current === owner.requestId,
+    fail: (owner, error) => markAssistantMessageAsError(owner.sessionId, owner.assistantMessageId, error, owner.requestId),
+    showError: showToast,
+  });
+  const updateGenUiViewState = (sessionId: string, messageId: string, artifact: GenUiAttachment, viewState: NonNullable<GenUiAttachment["viewState"]>) => {
+    const next = sessionsRef.current.map((session) => session.id !== sessionId ? session : {
+      ...session, messages: session.messages.map((message) => {
+        if (message.id !== messageId || message.genUi?.id !== artifact.id || message.genUi.revision !== artifact.revision) return message;
+        const { viewState: previousState, ...baseAttachment } = message.genUi;
+        const genUi = normalizeGenUiAttachment({ ...baseAttachment, ...(Object.keys(viewState).length ? { viewState } : {}) });
+        return genUi ? { ...message, genUi } : message;
+      }),
+    });
+    sessionsRef.current = next;
+    setSessions(next);
+    void saveSessionsToStorage(next);
+  };
+  const retryGenUiFromMessage = (messageId: string): boolean => {
+    const session = sessionsRef.current.find((entry) => entry.id === activeSessionIdRef.current);
+    const index = session?.messages.findIndex((entry) => entry.id === messageId) ?? -1;
+    const request = session?.messages[index - 1]?.genUiRequest;
+    if (!request) return false;
+    const source = [...request.sourceMessageIds].reverse().find((id) => session?.messages.some((entry) => entry.id === id && entry.role === "assistant" && entry.status === "completed"));
+    if (source) void handleGenerateGenUi(source);
+    else showToast("原回答已不存在，请选择其他已完成回答生成交互讲解。");
+    return true;
   };
 
   const validateRequestBudget = (
@@ -975,15 +1025,24 @@ export default function SidePanelApp() {
           return;
         }
 
-        const targetSessionId = sessionId || activeSessionIdRef.current;
+        const owner = getActiveSidepanelRequestOwner(requestId, activeRequestOwnerRef.current);
+        if (!owner || (sessionId && sessionId !== owner.sessionId)) return;
+        const genUiRequest = genUiRequestRef.current && genUiRequestRef.current.requestId === requestId ? genUiRequestRef.current.meta : undefined;
+        if (genUiRequest && (message.assistantMessageId !== owner.assistantMessageId || !done)) return;
+        const attachment = genUiRequest ? acceptGenUiCompletion(message, owner, genUiRequest) : undefined;
+        const rejectedGenUi = Boolean(genUiRequest && !error && !attachment);
+        const targetSessionId = owner.sessionId;
         const updatedSessions = sessionsRef.current.map((s) => {
             if (s.id !== targetSessionId) return s;
 
             const messages = [...s.messages];
-            const lastMsg = messages[messages.length - 1];
+            const messageIndex = messages.findIndex((entry) => entry.id === owner.assistantMessageId);
+            const lastMsg = messages[messageIndex];
 
             if (lastMsg && lastMsg.role === "assistant") {
-              const updatedContent = content ?? lastMsg.content;
+              const updatedContent = genUiRequest
+                ? (attachment && typeof content === "string" ? content : lastMsg.content)
+                : content ?? lastMsg.content;
               const suggestedQuestions =
                 done && updatedContent
                   ? extractSuggestedQuestions(
@@ -994,20 +1053,21 @@ export default function SidePanelApp() {
               const updatedMsg: ChatMessage = {
                 ...lastMsg,
                 content: updatedContent,
+                ...(attachment ? { genUi: attachment } : {}),
                 reasoningContent:
-                  reasoningContent ?? lastMsg.reasoningContent,
+                  genUiRequest ? undefined : reasoningContent ?? lastMsg.reasoningContent,
                 hasReasoning:
-                  Boolean(reasoningContent) || lastMsg.hasReasoning,
+                  genUiRequest ? false : Boolean(reasoningContent) || lastMsg.hasReasoning,
                 suggestedQuestions,
-                status: error
+                status: error || rejectedGenUi
                   ? "error"
                   : done
                   ? "completed"
                   : "streaming",
-                errorMessage: error || undefined,
+                errorMessage: genUiRequest && (error || rejectedGenUi) ? "交互讲解未通过校验，请重试或继续阅读原回答。" : error || undefined,
                 resultSource: resultSource ?? lastMsg.resultSource,
               };
-              messages[messages.length - 1] = updatedMsg;
+              messages[messageIndex] = updatedMsg;
             }
 
             return {
@@ -3568,6 +3628,7 @@ export default function SidePanelApp() {
           </div>
 
           <div className="quick-bar-right">
+            <label className="genui-feature-toggle"><input type="checkbox" aria-label="交互讲解开关" disabled={!genUiFeature.ready} checked={genUiFeature.enabled} onChange={(event) => genUiFeature.toggle(event.target.checked)} />交互讲解</label>
             <ThemeModeSelector
               value={themeMode}
               onChange={(mode) => setThemeMode(mode)}
@@ -4119,7 +4180,7 @@ export default function SidePanelApp() {
                           {!message.overviewMeta &&
                             !ownGroundedGoalMeta &&
                             !ownConversationRecapMeta &&
-                            !validRefinementMeta && (
+                            !validRefinementMeta && !message.genUiRequest && (
                             <div className="user-bubble-actions">
                               <button
                                 type="button"
@@ -4145,13 +4206,21 @@ export default function SidePanelApp() {
                         )}
                         {message.content ? (
                           <>
-                            <PrismResultTabs
+                            {message.genUi && genUiFeature.enabled ? (
+                              <GenUiMessageCard
+                                key={`${activeSession.id}:${message.id}:${message.genUi.id}:${message.genUi.revision}`}
+                                attachment={message.genUi} content={message.content}
+                                sourceLabels={activeSession.messages.filter((entry) => message.genUi!.sourceMessageIds.includes(entry.id) && entry.pageMeta).map((entry) => `${entry.pageMeta!.title}${entry.pageMeta!.segmentIndex ? ` · 第 ${entry.pageMeta!.segmentIndex} 段` : ""}`)}
+                                onStateChange={(state) => updateGenUiViewState(activeSession.id, message.id, message.genUi!, state)}
+                                onFollowUp={() => { setInputText(`关于这张交互讲解：${message.content.slice(0, 600)}\n我想进一步了解：`); inputRef.current?.focus(); }}
+                              />
+                            ) : <PrismResultTabs
                               content={groundedResult?.content ?? message.content}
                               isStreaming={message.status === "streaming"}
                               onCopyCorporate={() => {
                                 showToast("已复制向上汇报版，可直接粘贴进周报！");
                               }}
-                            />
+                            />}
                             {groundedResult && (
                               <GroundedEvidencePanel
                                 result={groundedResult}
@@ -4164,7 +4233,7 @@ export default function SidePanelApp() {
                             <span></span>
                             <span></span>
                             <span></span>
-                            正在提炼人话速读报告...
+                            {activeSession.messages[activeSession.messages.findIndex((entry) => entry.id === message.id) - 1]?.genUiRequest ? "正在准备交互讲解，完成校验后显示..." : "正在提炼人话速读报告..."}
                           </div>
                         ) : null}
 
@@ -4183,7 +4252,7 @@ export default function SidePanelApp() {
                               title="重试生成"
                               disabled={isStreaming}
                               onClick={() =>
-                                handleRegenerateMessage(message.id, false)
+                                retryGenUiFromMessage(message.id) || handleRegenerateMessage(message.id, false)
                               }
                             >
                               <Refresh
@@ -4205,6 +4274,7 @@ export default function SidePanelApp() {
                     {/* 卡片底部操作 */}
                     {message.content && message.role === "assistant" && (
                       <div className="bubble-footer">
+                        {genUiFeature.enabled && <button type="button" className="action-link-btn" disabled={isStreaming || isExtractingPage || message.status !== "completed"} onClick={() => void handleGenerateGenUi(message.id)}>交互讲解</button>}
                         <div className="refinement-action-group">
                           <button
                             type="button"
@@ -4258,7 +4328,7 @@ export default function SidePanelApp() {
                           title="重新生成回答"
                           disabled={isStreaming}
                           onClick={() =>
-                            handleRegenerateMessage(message.id, true)
+                            retryGenUiFromMessage(message.id) || handleRegenerateMessage(message.id, true)
                           }
                         >
                           <Refresh

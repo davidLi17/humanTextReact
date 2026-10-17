@@ -1,0 +1,22 @@
+.genui-message-card {
+  border: 1px solid var(--border-color, #8490a844); border-radius: 12px; padding: 12px; overflow: hidden;
+  color: inherit; background: var(--bg-secondary, transparent); font-size: 13px; line-height: 1.65;
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; span { opacity: .7; font-size: 11px; } }
+  h3, h4 { margin: 8px 0; font-size: 1.06em; }
+  p { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  button { font: inherit; color: inherit; background: transparent; border: 1px solid #8895aa55; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+  button:hover, button[aria-pressed="true"], button[aria-selected="true"] { background: #6381ff24; border-color: #7b8ee3; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #7b8ee3; outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .genui-toolbar, .genui-controls, [role="tablist"] { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .genui-source, .genui-disclaimer { font-size: 11px; opacity: .75; }
+  .genui-node-list { max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 4px; button { text-align: start; overflow-wrap: anywhere; } }
+  .genui-node-detail { margin-top: 10px; padding: 8px; background: #8595b010; border-radius: 8px; button { margin: 2px; } }
+  .genui-text { white-space: pre-wrap; }
+  .genui-card-layout + .genui-card-layout { margin-top: 12px; }
+  input { display: block; box-sizing: border-box; width: 100%; margin: 4px 0 8px; border: 1px solid #8895aa55; border-radius: 6px; padding: 6px; background: transparent; color: inherit; }
+  .genui-table-scroll { max-width: 100%; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border-bottom: 1px solid #8895aa44; padding: 6px; text-align: start; min-width: 70px; max-width: 220px; overflow-wrap: anywhere; white-space: pre-wrap; }
+}
+.genui-feature-toggle { color: inherit; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
