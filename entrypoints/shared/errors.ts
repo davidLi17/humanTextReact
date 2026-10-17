@@ -149,6 +149,11 @@ export function createApiError(
   const descriptor = describeApiStatus(status);
   const reason = extractApiErrorMessage(bodyText);
 
+  if (status === 400 && reason && /image|vision|multimodal|图片/i.test(reason)) {
+    const message = withProviderDetail("图片请求被拒绝，请确认所选模型支持图片输入（DeepSeek 请使用 deepseek-flash），并检查图片大小。截图未被自动移除", reason);
+    return new CodedError(message, "SERVER", message, reason);
+  }
+
   if (descriptor) {
     const detail = reason ?? undefined;
     const message = withProviderDetail(descriptor.text, detail);

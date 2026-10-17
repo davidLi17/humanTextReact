@@ -1,3 +1,5 @@
+import { ElementMarks } from "./components/ElementMarks";
+import { elementSnapshotText, fitsElementStorage, type ElementSnapshot } from "../shared/elementSnapshot";
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
@@ -557,7 +559,7 @@ export default function SidePanelApp() {
         logger.error("保存网页阅读断点失败:", error);
         if (!progressSaveFailureGateRef.current.recordFailure()) return;
         showToast(
-          "阅读进度保存失败，本次当前会话仍可继续；关闭侧边栏后可能无法恢复。"
+          "会话与阅读进度保存失败，本次当前会话仍可继续；关闭侧边栏后可能无法恢复。"
         );
       });
   };
@@ -2128,6 +2130,7 @@ export default function SidePanelApp() {
     imagesToSend?: ChatMessage["images"],
     contextToSend?: SelectionContext,
     options: {
+      elementSnapshots?: ElementSnapshot[];
       allowDuringManualDispatch?: boolean;
       refinementMeta?: ChatMessage["refinementMeta"];
       groundedGoalMeta?: ChatMessage["groundedGoalMeta"];
@@ -2144,6 +2147,14 @@ export default function SidePanelApp() {
       (session) => session.id === activeSessionIdRef.current
     );
     if (!currentSession || !text.trim()) return false;
+
+    if (options.elementSnapshots && !fitsElementStorage(sessionsRef.current, {
+      content: text, images: imagesToSend,
+      elementSnapshots: options.elementSnapshots.map(({image, ...snapshot}) => snapshot),
+    })) {
+      showToast("会话快照接近存储容量上限，请先导出并删除不需要的会话，再发送标记。待发送清单已保留。");
+      return false;
+    }
 
     const userMessagePreview: ChatPayloadMessage = {
       role: "user",
@@ -2177,6 +2188,7 @@ export default function SidePanelApp() {
     });
 
     const userMessage: ChatMessage = {
+      elementSnapshots: options.elementSnapshots?.map(({image, ...snapshot}) => snapshot),
       id: userMessageId,
       role: "user",
       content: text,
@@ -4583,6 +4595,10 @@ export default function SidePanelApp() {
               </>
             )}
 
+            <ElementMarks disabled={isStreaming || currentSessionQueue.length > 0} onSend={items => {
+              if (isStreaming || currentSessionQueue.length > 0) return false;
+              return executeSendMessage(elementSnapshotText(items), items.map(item => ({data:item.image,mimeType:"image/png"})), undefined, {elementSnapshots:items, bypassJargonVault:true, prismMode:false});
+            }} />
             {/* 划词引用胶囊预览条 */}
             {activeQuotedText && (
               <QuoteInputCapsule

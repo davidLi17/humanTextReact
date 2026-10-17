@@ -126,6 +126,7 @@ export function buildHistoryPayload(
 }
 
 export interface ChatMessage {
+  elementSnapshots?: Omit<import("./elementSnapshot").ElementSnapshot, "image">[];
   /** Optional validated local interactive explanation. Never included in ordinary model payloads. */
   genUi?: import("./genui/types").GenUiAttachment;
   genUiRequest?: import("./genui/types").GenUiRequestIntent;

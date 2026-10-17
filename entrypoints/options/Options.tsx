@@ -935,6 +935,7 @@ function Options() {
                   placeholder="请输入模型ID，如：deepseek-flash"
                 />
                 <div className="setting-hint">
+                  <p>网页元素问答会同时发送文本与截图，需要支持图片的模型。DeepSeek 请使用 deepseek-flash（V4.1 Flash），可配合思考模式。<a href="https://api-docs.deepseek.com/guides/vision/" target="_blank" rel="noreferrer">官方图片输入说明</a></p>
                   <span className="hint-label">常用模型推荐 (点击快速填入):</span>
                   <div className="model-hint-container chip-container">
                     {MODEL_HINTS.map((hint) => {

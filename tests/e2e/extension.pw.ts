@@ -279,6 +279,7 @@ const test = base.extend<{ harness: ExtensionHarness }>({
     try {
       context = await chromium.launchPersistentContext(userDataDir, {
         channel: "chromium",
+        ignoreDefaultArgs: ["--disable-extensions"],
         ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}),
         headless: true,
         args: [
@@ -1205,4 +1206,72 @@ test("GenUI cancellation and retry retain source intent, and truncated valid JSO
   expect(harness.server.modelRequests).toHaveLength(3);
   expect(harness.server.modelRequests.every(request=>request.body.messages[0].content === GENUI_SYSTEM_PROMPT)).toBe(true);
   expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test('element marks: real cropped screenshot, bidirectional hover, multimodal send and follow-up restore',async({harness},testInfo)=>{
+  const article=await harness.context.newPage();
+  await article.goto(`${harness.server.baseUrl}/article`);
+  await article.evaluate(()=>{
+    const card=document.createElement('section');card.id='element-fixture';
+    card.style.cssText='margin:20px;padding:20px;width:430px;background:#e6f6ff';
+    card.innerHTML='<h2>季度数据</h2><table><tr><th>项目</th><th>金额</th></tr><tr><td>收入</td><td>120</td></tr></table><pre>const a = 1;\nconsole.log(a);</pre><input value="PRIVATE-FORM-VALUE"><button id="page-action">页面按钮</button>';
+    document.body.prepend(card);
+    (window as any).pageClicks=0;
+    card.querySelector('button')!.addEventListener('click',()=>{(window as any).pageClicks++;});
+  });
+  const panel=await harness.context.newPage();await panel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  await article.bringToFront();
+  // Real browser command invokes the existing activeTab grant; no host permission is added.
+  await article.keyboard.press('Alt+s');
+  const clickPanel=async(name:string|RegExp)=>panel.getByRole('button',{name}).evaluate(el=>(el as HTMLButtonElement).click());
+  await clickPanel('选择网页元素');
+  await expect(article.getByText('选择元素 · Esc 取消',{exact:false})).toBeVisible();
+  await article.locator('#page-action').click();
+  expect(await article.evaluate(()=>(window as any).pageClicks)).toBe(0);
+  await article.keyboard.press('Escape');
+  await article.locator('#element-fixture h2').click();
+  await article.getByRole('button',{name:'扩大父级'}).click();
+  await article.getByRole('button',{name:'返回上一层'}).click();
+  await article.getByRole('button',{name:'扩大父级'}).click();
+  await article.getByPlaceholder('想问 AI 什么？').fill('解释这张表和代码');
+  await article.getByRole('button',{name:'加入待发送'}).click();
+  await expect(panel.getByLabel('标记1的问题')).toHaveValue('解释这张表和代码');
+  expect(harness.server.modelRequests).toHaveLength(0);
+  const dot=article.locator('#humantext-element-picker .dot');await expect(dot).toHaveCount(1);
+  await dot.hover();await expect(panel.locator('.element-marks article')).toHaveClass('focused');
+  await article.mouse.move(700,500);
+  await panel.locator('.element-marks article').dispatchEvent('mouseover');
+  await expect(article.locator('#humantext-element-picker .box.focus')).toHaveCount(1);
+  await panel.getByText('查看实际发送快照',{exact:false}).click();
+  const preview=panel.locator('.element-marks img');await expect(preview).toBeVisible();
+  const image=await preview.getAttribute('src');expect(image).toMatch(/^data:image\/png;base64,/);
+  await expect(panel.locator('.element-marks pre')).not.toContainText('PRIVATE-FORM-VALUE');
+  await expect(panel.locator('.element-marks pre')).toContainText('const a = 1;\nconsole.log(a);');
+  await article.bringToFront();
+  await article.screenshot({path:testInfo.outputPath('element-mark.png')});
+  await panel.screenshot({path:testInfo.outputPath('element-preview.png')});
+  await clickPanel(/发送给AI/);
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(1);
+  const request=harness.server.modelRequests[0].body;
+  const user=request.messages.filter((m:any)=>m.role==='user').at(-1);
+  expect(user.content).toContainEqual({type:'image_url',image_url:{url:image}});
+  expect(JSON.stringify(user.content)).toContain('解释这张表和代码');
+  expect(JSON.stringify(user.content)).not.toContain('PRIVATE-FORM-VALUE');
+  await expect.poll(() => panel.evaluate(async () => {
+    const stored = await (globalThis as any).chrome.storage.local.get('sidepanel_chat_sessions');
+    return stored.sidepanel_chat_sessions?.flatMap((s:any) => s.messages).find((m:any) => m.role === 'assistant')?.status;
+  })).toBe('completed');
+  await panel.reload();
+  const stored=await panel.evaluate(async()=>((await (globalThis as any).chrome.storage.local.get('sidepanel_chat_sessions')).sidepanel_chat_sessions));
+  expect(stored.flatMap((s:any)=>s.messages).find((m:any)=>m.elementSnapshots)?.images[0].data).toBe(image);
+  const target=panel.getByPlaceholder('输入追问、黑话术语或指令 (Enter 发送/排队，⌘+Enter 打断发送，Shift+Enter 换行)...');
+  await target.fill('继续解释');await target.press('Enter');
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
+  expect(JSON.stringify(harness.server.modelRequests[1].body.messages)).toContain(image!);
+  await article.bringToFront();
+  await article.locator('#page-action').click();expect(await article.evaluate(()=>(window as any).pageClicks)).toBe(1);
+  await article.locator('#element-fixture').evaluate(el=>el.remove());
+  await expect(panel.getByText('目标已失效，请删除后重新选择。快照仍是原内容。')).toBeVisible();
+  await expect(dot).toHaveCount(0);
+  await clickPanel('删除标记');await expect(panel.locator('.element-marks article')).toHaveCount(0);
 });

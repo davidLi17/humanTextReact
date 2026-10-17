@@ -1,3 +1,4 @@
+import { captureElement } from "./elementCapture";
 import {
   openSidePanel,
   toggleSidePanel,
@@ -59,6 +60,7 @@ export class MessageHandler {
    * 消息处理器映射表（策略模式）
    */
   private static handlers: Record<string, MessageHandlerFn> = {
+    captureElement,
     // 快捷键更改
     shortcutChanged: async () => {
       ContextMenuManager.createContextMenu();

@@ -472,21 +472,49 @@ describe("Sidepanel App 真实 React 交互", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
   });
 
+  test("网页标记先预览再统一发送，原图随会话恢复用于追问", async () => {
+    const snapshot = {version:1,id:"mark-1",number:1,title:"table",url:"https://example.com",text:"项目\t收入\nA\t120",question:"解释收入",truncated:false,capturedAt:1,image:"data:image/png;base64,aGVsbG8=",scope:"完整元素"};
+    const mock = createBrowserMock({activeTab:{id:7,url:"https://example.com"},tabExtractResponse:{success:true,active:false,revision:"one",items:[snapshot]}});
+    setTestGlobal("browser", mock.browser);
+    const view=render(<SidePanelApp />);
+    const send=await screen.findByRole("button",{name:"发送给AI（1个标记）"});
+    expect(mock.sentMessages.filter(m=>m.action===MESSAGE_TYPES.TRANSLATE)).toHaveLength(0);
+    fireEvent.click(send);
+    const request=await waitFor(()=>{
+      const req=mock.sentMessages.find(m=>m.action===MESSAGE_TYPES.TRANSLATE);expect(req).toBeDefined();return req;
+    });
+    expect(request.requestId).toBeTruthy();expect(request.bypassJargonVault).toBe(true);
+    expect(request.messages.at(-1).content).toContainEqual({type:"image_url",image_url:{url:snapshot.image}});
+    expect(JSON.stringify(request.messages)).toContain(snapshot.question);
+    act(()=>mock.emitRuntimeMessage({action:MESSAGE_TYPES.UPDATE_SIDEPANEL_TRANSLATION,requestId:request.requestId,sessionId:request.sessionId,content:"表格解释完成",done:true}));
+    await screen.findByText("表格解释完成");
+    await waitFor(()=>{
+      const stored=mock.localStore.sidepanel_chat_sessions as any[];
+      expect(stored?.flatMap(s=>s.messages).find(m=>m.elementSnapshots)?.images[0].data).toBe(snapshot.image);
+    });
+    view.unmount();render(<SidePanelApp />);
+    const input=await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input,{target:{value:"继续解释"}});fireEvent.click(screen.getByRole("button",{name:"发送"}));
+    await waitFor(()=>expect(mock.sentMessages.filter(m=>m.action===MESSAGE_TYPES.TRANSLATE)).toHaveLength(2));
+    const followup=mock.sentMessages.filter(m=>m.action===MESSAGE_TYPES.TRANSLATE)[1];
+    expect(JSON.stringify(followup.messages)).toContain(snapshot.image);
+  });
+
   test("卸载时移除当前 runtime 消息监听", async () => {
     const mock = createBrowserMock();
     setTestGlobal("browser", mock.browser);
 
     const view = render(<SidePanelApp />);
     await screen.findByText("人话翻译与长文通读");
-    await waitFor(() => expect(mock.runtimeListeners.size).toBe(1));
+    await waitFor(() => expect(mock.runtimeListeners.size).toBe(2));
     await waitFor(() => expect(mock.storageListeners.size).toBeGreaterThanOrEqual(2));
-    const activeListener = [...mock.runtimeListeners][0];
+    const activeListeners = [...mock.runtimeListeners];
     const storageListenerCount = mock.storageListeners.size;
 
     view.unmount();
 
     expect(mock.runtimeListeners.size).toBe(0);
-    expect(mock.removedRuntimeListeners).toContain(activeListener);
+    for (const listener of activeListeners) expect(mock.removedRuntimeListeners).toContain(listener);
     expect(mock.removedStorageListeners.length).toBeGreaterThanOrEqual(2);
     expect(mock.storageListeners.size).toBeLessThan(storageListenerCount);
   });
@@ -550,7 +578,7 @@ describe("Sidepanel App 真实 React 交互", () => {
 
     render(<SidePanelApp />);
     await screen.findByText("之前的问题");
-    await waitFor(() => expect(mock.runtimeListeners.size).toBe(1));
+    await waitFor(() => expect(mock.runtimeListeners.size).toBe(2));
 
     // 侧边栏已打开时，storage 通道的领取门闩早已置位、effect 也不会重跑，
     // 唯一的通路就是后台右键菜单发出的这条 runtime 消息。

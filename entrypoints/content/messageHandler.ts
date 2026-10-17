@@ -54,6 +54,7 @@ export class MessageHandler {
           return true;
 
         default:
+          if ((request.action as string)?.startsWith("element")) return false;
           logger.warn("未知操作:", request.action);
           sendResponse({ success: false, error: "未知操作" });
           return true;

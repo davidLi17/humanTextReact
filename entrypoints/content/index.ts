@@ -1,3 +1,4 @@
+import { ElementPicker } from "./elementPicker";
 import { contentLogger, initializeLogger } from "@/entrypoints/shared/logger";
 import { MessageHandler } from "./messageHandler";
 import { PopupManager } from "./popupManager";
@@ -17,6 +18,7 @@ export default defineContentScript({
 
     // 初始化管理器
     const popupManager = new PopupManager();
+    const elementPicker = new ElementPicker();
     const selectionActionBar = new SelectionActionBar(popupManager);
     selectionActionBar.init();
 
@@ -30,6 +32,7 @@ export default defineContentScript({
 
     ctx.onInvalidated(() => {
       cleanupShortcuts();
+      elementPicker.destroy();
       selectionActionBar.destroy();
       popupManager.destroy();
       browser.runtime.onMessage.removeListener(messageHandler.handleMessage);
