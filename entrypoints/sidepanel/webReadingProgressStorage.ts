@@ -1,3 +1,4 @@
+import { getTabStateStorage } from "./tabStateStorage";
 import { normalizeGenUiSessions } from "@/entrypoints/shared/genui/profile";
 import {
   serializeWebReadingProgressMap,
@@ -80,11 +81,12 @@ interface StorageArea {
 
 function getLocalStorageArea(): StorageArea | null {
   const globalObject = globalThis as any;
-  return (
+  const local = (
     globalObject.browser?.storage?.local ||
     globalObject.chrome?.storage?.local ||
     null
   );
+  return local ? getTabStateStorage(local, WEB_READING_PROGRESS_STORAGE_KEY) : null;
 }
 
 /** 一次读取 sessions、activeSessionId 与独立进度键，期间绝不写存储。 */

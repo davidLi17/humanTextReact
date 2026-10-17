@@ -1,3 +1,10 @@
+/** The native tab-specific document carries its owner; never infer it from the active tab. */
+export function getSidePanelTabId(): number | undefined {
+  if (typeof location === "undefined" || !location.pathname.endsWith("/sidepanel.html")) return;
+  const value = new URLSearchParams(location.search).get("tabId");
+  if (value !== null && /^\d+$/.test(value)) return Number(value);
+}
+
 import { MESSAGE_TYPES } from "./constants";
 import type { WebPageMetadata, WebReadExtractStage } from "./webReadingPrompt";
 
@@ -22,14 +29,12 @@ export async function openSidePanel(target: SidePanelTarget): Promise<boolean> {
     const sidePanelApi = browserApi?.sidePanel || chromeApi?.sidePanel;
 
     if (typeof sidePanelApi?.open === "function") {
-      if (typeof target.windowId === "number") {
-        await sidePanelApi.open({ windowId: target.windowId });
-        return true;
-      }
-      if (typeof target.tabId === "number") {
-        await sidePanelApi.open({ tabId: target.tabId });
-        return true;
-      }
+      const tabId = target.tabId ?? (await (browserApi || chromeApi).tabs.query({ active: true, ...(typeof target.windowId === "number" ? { windowId: target.windowId } : { currentWindow: true }) }))[0]?.id;
+      if (typeof tabId !== "number") return false;
+      // Configure before opening: open(tabId) alone falls back to the global panel.
+      await sidePanelApi.setOptions({ tabId, path: `sidepanel.html?tabId=${tabId}`, enabled: true });
+      await sidePanelApi.open({ tabId });
+      return true;
     }
     return false;
   } catch (error) {
@@ -39,8 +44,8 @@ export async function openSidePanel(target: SidePanelTarget): Promise<boolean> {
 }
 
 function getSidePanelToggleKey(target: SidePanelTarget): string {
-  if (typeof target.windowId === "number") return `window:${target.windowId}`;
   if (typeof target.tabId === "number") return `tab:${target.tabId}`;
+  if (typeof target.windowId === "number") return `window:${target.windowId}`;
   return "unknown";
 }
 
@@ -55,38 +60,20 @@ async function performSidePanelToggle(
 
     if (!sidePanelApi || !runtimeApi) return false;
 
-    let isOpen = false;
-    if (typeof runtimeApi.getContexts === "function") {
-      const filter: Record<string, unknown> = {
-        contextTypes: ["SIDE_PANEL"],
-      };
-      if (typeof target.windowId === "number") {
-        filter.windowIds = [target.windowId];
-      } else if (typeof target.tabId === "number") {
-        filter.tabIds = [target.tabId];
-      }
-
-      const contexts = await runtimeApi.getContexts(filter);
-      isOpen = Array.isArray(contexts) && contexts.length > 0;
-    }
-
+    const tabId = target.tabId ?? (await (browserApi || chromeApi).tabs.query({ active: true, ...(typeof target.windowId === "number" ? { windowId: target.windowId } : { currentWindow: true }) }))[0]?.id;
+    if (typeof tabId !== "number") return false;
+    const contexts = await runtimeApi.getContexts({ contextTypes: ["SIDE_PANEL"] });
+    // SIDE_PANEL context.tabId can be -1; the configured document URL is the owner.
+    const isOpen = contexts.some((context: any) => {
+      try { return Number(new URL(context.documentUrl).searchParams.get("tabId")) === tabId; }
+      catch { return false; }
+    });
     if (isOpen) {
-      if (typeof sidePanelApi.close !== "function") {
-        console.warn("当前 Chrome 版本不支持通过快捷键关闭侧边栏");
-        return false;
-      }
-
-      if (typeof target.windowId === "number") {
-        await sidePanelApi.close({ windowId: target.windowId });
-        return true;
-      }
-      if (typeof target.tabId === "number") {
-        await sidePanelApi.close({ tabId: target.tabId });
-        return true;
-      }
-      return false;
+      if (typeof sidePanelApi.close !== "function") return false;
+      await sidePanelApi.close({ tabId });
+      return true;
     }
-
+    target = { ...target, tabId };
     return openSidePanel(target);
   } catch (error) {
     console.error("切换侧边栏失败:", error);
@@ -96,7 +83,7 @@ async function performSidePanelToggle(
 
 /**
  * 快捷键专用的侧边栏开关。
- * Content Script 与 commands API 可能同时收到一次按键，因此按窗口合并短时间内的重复请求。
+ * Content Script 与 commands API 可能同时收到一次按键，因此按标签页合并短时间内的重复请求。
  */
 export function toggleSidePanel(target: SidePanelTarget): Promise<boolean> {
   const key = getSidePanelToggleKey(target);
@@ -141,6 +128,9 @@ export async function getActiveTab(): Promise<TabInfo | null> {
   try {
     const browserApi = (globalThis as any).browser || (globalThis as any).chrome;
     if (!browserApi?.tabs?.query) return null;
+
+    const boundTabId = getSidePanelTabId();
+    if (boundTabId !== undefined) return await browserApi.tabs.get(boundTabId);
 
     const tabs = await browserApi.tabs.query({
       active: true,

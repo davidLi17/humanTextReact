@@ -61,6 +61,7 @@ export class MessageHandler {
    */
   private static handlers: Record<string, MessageHandlerFn> = {
     captureElement,
+    sidepanelTabId: (_request, sender) => ({ tabId: sender.tab?.id }),
     // 快捷键更改
     shortcutChanged: async () => {
       ContextMenuManager.createContextMenu();

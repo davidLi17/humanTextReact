@@ -34,6 +34,10 @@ export default defineBackground(() => {
     id: browser.runtime.id,
   });
 
+  // No window-global panel. Chrome owns tab switching/close state, including worker restarts.
+  void browser.sidePanel.setOptions({ enabled: false }).catch(error =>
+    backgroundLogger.error("初始化标签页侧栏失败", error));
+
   // 1. 同步注册全局快捷键命令监听器（确保在 Service Worker 唤醒时不会漏掉任何事件）
   ShortcutManager.registerCommandListeners();
 
@@ -73,6 +77,7 @@ export default defineBackground(() => {
   browser.tabs.onRemoved.addListener((tabId: number) => {
     backgroundLogger.info("标签页关闭，清理请求", { tabId });
     RequestManager.cleanupTab(tabId);
+    void browser.storage.session.remove([`sidepanel_tab_${tabId}_active`, `sidepanel_tab_${tabId}_drafts`]);
   });
 
   backgroundLogger.success("背景脚本所有监听器注册完成");

@@ -718,6 +718,7 @@ export class PopupManager {
             const selectionContext = this.lastSelectionContext;
             const envelopeId = sourceRequestId || createRequestId();
             const pendingValue = {
+              tabId: (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId,
               text: originalText,
               selectionContext,
               envelopeId,

@@ -64,7 +64,7 @@ export class ContextMenuHandler {
 
     if (info.menuItemId === "readPageInSidepanel" && tab?.windowId) {
       try {
-        await openSidePanel({ windowId: tab.windowId });
+        await openSidePanel({ windowId: tab.windowId, tabId: tab.id });
         await browser.storage.local.set({
           pendingWebPageRead: {
             timestamp: Date.now(),
@@ -90,7 +90,7 @@ export class ContextMenuHandler {
       tab?.windowId
     ) {
       try {
-        const openPromise = openSidePanel({ windowId: tab.windowId });
+        const openPromise = openSidePanel({ windowId: tab.windowId, tabId: tab.id });
         const settings = await SettingsUtils.getSettings();
         const selectionContext =
           settings.contextualSelectionEnabled && info.selectionText && tab.id
@@ -101,6 +101,7 @@ export class ContextMenuHandler {
         if (info.selectionText) {
           await browser.storage.local.set({
             pendingSidepanelText: {
+              tabId: tab.id,
               text: info.selectionText,
               selectionContext,
               envelopeId,
@@ -110,6 +111,7 @@ export class ContextMenuHandler {
           // 也尝试直接通过 runtime 消息通知可能已经处于激活状态的 sidepanel
           void MessageUtils.sendRuntimeMessage({
             action: "sendToSidepanel",
+            tabId: tab.id,
             text: info.selectionText,
             selectionContext,
             envelopeId,

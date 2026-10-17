@@ -325,6 +325,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
           getContexts: async () => [],
         },
         sidePanel: {
+          setOptions: async () => {},
           open: async (params) => {
             openedParams = params;
           },
@@ -340,7 +341,7 @@ describe("Shortcut Fix and Dual-Channel Dispatcher Tests", () => {
       });
 
       expect(success).toBe(true);
-      expect(openedParams).toEqual({ windowId: 202 });
+      expect(openedParams).toEqual({ tabId: 101 });
     });
 
     test("executeTranslation sends getSelectedText and invokes ContextMenuHandler", async () => {

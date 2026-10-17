@@ -20,6 +20,7 @@ describe("右键菜单「通读当前网页」的通知通道", () => {
 
     setTestGlobal("browser", {
       sidePanel: {
+          setOptions: async () => {},
         open: async (options) => {
           sidePanelOpened = options;
         },
@@ -44,7 +45,7 @@ describe("右键菜单「通读当前网页」的通知通道", () => {
     );
 
     // 侧边栏被打开，且落了待办键（侧边栏冷启动时靠它补偿触发）
-    expect(sidePanelOpened).toEqual({ windowId: 3 });
+    expect(sidePanelOpened).toEqual({ tabId: 7 });
     expect(localWrites).toHaveLength(1);
     expect(localWrites[0].pendingWebPageRead.tabId).toBe(7);
 

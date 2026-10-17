@@ -16,10 +16,12 @@ afterEach(() => {
 });
 
 describe("sidepanel utilities", () => {
-  test("openSidePanel opens the requested window", async () => {
+  test("openSidePanel resolves the requested window to a tab", async () => {
     let openedParams = null;
     setTestGlobal("browser",  {
+      tabs: { query: async () => [{ id: 9301 }] },
       sidePanel: {
+        setOptions: async () => {},
         open: async (params) => {
           openedParams = params;
         },
@@ -27,7 +29,7 @@ describe("sidepanel utilities", () => {
     });
 
     expect(await openSidePanel({ windowId: 9101 })).toBe(true);
-    expect(openedParams).toEqual({ windowId: 9101 });
+    expect(openedParams).toEqual({ tabId: 9301 });
   });
 
   test("toggleSidePanel opens when the side panel context is absent", async () => {
@@ -36,7 +38,9 @@ describe("sidepanel utilities", () => {
       runtime: {
         getContexts: async () => [],
       },
+      tabs: { query: async () => [{ id: 9301 }] },
       sidePanel: {
+        setOptions: async () => {},
         open: async (params) => {
           openedParams = params;
         },
@@ -44,7 +48,7 @@ describe("sidepanel utilities", () => {
     });
 
     expect(await toggleSidePanel({ windowId: 9201, tabId: 9301 })).toBe(true);
-    expect(openedParams).toEqual({ windowId: 9201 });
+    expect(openedParams).toEqual({ tabId: 9301 });
   });
 
   test("toggleSidePanel closes when the side panel context is present", async () => {
@@ -54,10 +58,12 @@ describe("sidepanel utilities", () => {
       runtime: {
         getContexts: async (filter) => {
           contextFilter = filter;
-          return [{ contextType: "SIDE_PANEL" }];
+          return [{ contextType: "SIDE_PANEL", documentUrl: "chrome-extension://test/sidepanel.html?tabId=9302" }];
         },
       },
+      tabs: { query: async () => [{ id: 9301 }] },
       sidePanel: {
+        setOptions: async () => {},
         close: async (params) => {
           closedParams = params;
         },
@@ -67,9 +73,8 @@ describe("sidepanel utilities", () => {
     expect(await toggleSidePanel({ windowId: 9202, tabId: 9302 })).toBe(true);
     expect(contextFilter).toEqual({
       contextTypes: ["SIDE_PANEL"],
-      windowIds: [9202],
     });
-    expect(closedParams).toEqual({ windowId: 9202 });
+    expect(closedParams).toEqual({ tabId: 9302 });
   });
 
   test("toggleSidePanel coalesces duplicate shortcut requests", async () => {
@@ -83,7 +88,9 @@ describe("sidepanel utilities", () => {
       runtime: {
         getContexts: async () => [],
       },
+      tabs: { query: async () => [{ id: 9301 }] },
       sidePanel: {
+        setOptions: async () => {},
         open: () => {
           openCount += 1;
           markOpenStarted();
@@ -107,9 +114,11 @@ describe("sidepanel utilities", () => {
   test("toggleSidePanel reports failure when close is unavailable", async () => {
     setTestGlobal("browser",  {
       runtime: {
-        getContexts: async () => [{ contextType: "SIDE_PANEL" }],
+        getContexts: async () => [{ contextType: "SIDE_PANEL", documentUrl: "chrome-extension://test/sidepanel.html?tabId=9301" }],
       },
-      sidePanel: {},
+      tabs: { query: async () => [{ id: 9301 }] },
+      sidePanel: {
+        setOptions: async () => {},},
     });
 
     expect(await toggleSidePanel({ windowId: 9204 })).toBe(false);

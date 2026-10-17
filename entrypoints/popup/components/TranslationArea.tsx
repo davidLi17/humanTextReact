@@ -173,7 +173,7 @@ const TranslationArea: React.FC<TranslationAreaProps> = ({
                   currentWindow: true,
                 });
                 if (tab?.windowId) {
-                  await openSidePanel({ windowId: tab.windowId });
+                  await openSidePanel({ windowId: tab.windowId, tabId: tab.id });
                   window.close(); // 打开侧边栏后关闭 popup
                 }
               } catch (e) {

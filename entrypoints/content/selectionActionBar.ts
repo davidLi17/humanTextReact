@@ -663,6 +663,7 @@ export class SelectionActionBar {
       if (typeof browser !== "undefined" && browser?.storage?.local) {
         await browser.storage.local.set({
           pendingSidepanelText: {
+            tabId: (await browser.runtime.sendMessage({ action: "sidepanelTabId" }))?.tabId,
             text,
             selectionContext: contextToSend,
             envelopeId,

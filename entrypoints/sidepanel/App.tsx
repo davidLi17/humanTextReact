@@ -1,3 +1,5 @@
+import { getSidePanelTabId } from "../shared/sidepanelUtils";
+import { tabStateKey } from "./tabStateStorage";
 import { ElementMarks } from "./components/ElementMarks";
 import { elementSnapshotText, fitsElementStorage, type ElementSnapshot } from "../shared/elementSnapshot";
 import {
@@ -202,6 +204,8 @@ import {
 const logger = createLogger("sidepanel-app", "💬");
 
 interface PendingSidepanelEnvelope {
+  tabId?: number;
+  sourceUrl?: string;
   text: string;
   selectionContext?: SelectionContext;
   envelopeId?: string;
@@ -470,7 +474,9 @@ export default function SidePanelApp() {
     setActiveQuotedText(null);
   };
 
+  const boundTabId = getSidePanelTabId();
   const consumeSidepanelEnvelope = (envelope: PendingSidepanelEnvelope) => {
+    if (boundTabId !== undefined && envelope.tabId !== boundTabId) return false;
     if (
       envelope.envelopeId &&
       consumedEnvelopeIdsRef.current.has(envelope.envelopeId)
@@ -793,7 +799,9 @@ export default function SidePanelApp() {
           ? normalizeGenUiSessions(snapshot.sessions as ChatSession[])
           : [];
         const initialSessions =
-          storedSessions.length > 0 ? storedSessions : [createNewSession()];
+          boundTabId !== undefined && !storedSessions.some(session => session.id === snapshot.activeSessionId)
+            ? [createNewSession(), ...storedSessions]
+            : storedSessions.length > 0 ? storedSessions : [createNewSession()];
         const hydration = hydrateWebReadingProgress(
           snapshot.webReadingProgress,
           initialSessions,
@@ -817,11 +825,22 @@ export default function SidePanelApp() {
         setActiveSessionId(nextActiveSessionId);
         setWebReadingProgressMap(hydration.progressMap);
         webReadingProgressHydratedRef.current = true;
+        if (boundTabId !== undefined) {
+          const draftKey = tabStateKey(boundTabId, "drafts");
+          const storedDrafts = (await browser.storage.session.get(draftKey))[draftKey];
+          if (cancelled) return;
+          composerDraftsRef.current = new Map(Array.isArray(storedDrafts) ? storedDrafts : []);
+          const draft = restoreComposerDraft(composerDraftsRef.current, nextActiveSessionId);
+          setInputText(draft.inputText);
+          setImages(draft.images || []);
+          setPendingSelectionContext(draft.selectionContext);
+          await browser.storage.session.set({ [tabStateKey(boundTabId, "active")]: nextActiveSessionId });
+        }
         setWebReadingProgressHydrated(true);
 
-        if (hydration.sessionsChanged || hydration.progressNeedsRewrite) {
+        if (hydration.sessionsChanged || hydration.progressNeedsRewrite || (boundTabId !== undefined && !snapshot.activeSessionId)) {
           persistWebReadingProgress(hydration.progressMap, undefined, {
-            sessions: hydration.sessionsChanged
+            sessions: hydration.sessionsChanged || (boundTabId !== undefined && !snapshot.activeSessionId)
               ? hydration.sessions
               : undefined,
             activeSessionId: nextActiveSessionId,
@@ -848,6 +867,15 @@ export default function SidePanelApp() {
       cancelled = true;
     };
   }, []);
+
+  // Persist composer state while alive, not in unload (which Chrome may skip).
+  useEffect(() => {
+    if (boundTabId === undefined || !webReadingProgressHydrated || !activeSessionId) return;
+    saveComposerDraft(composerDraftsRef.current, activeSessionId, { inputText, images, selectionContext: pendingSelectionContext });
+    void browser.storage.session.set({
+      [tabStateKey(boundTabId, "drafts")]: [...composerDraftsRef.current],
+    }).catch(() => showToast("草稿保存失败，关闭侧栏后可能无法恢复"));
+  }, [boundTabId, webReadingProgressHydrated, activeSessionId, inputText, images, pendingSelectionContext]);
 
   // 持久化保存会话
   const saveSessionsToStorage = async (updatedSessions: ChatSession[]) => {
@@ -967,14 +995,13 @@ export default function SidePanelApp() {
           typeof pendingText.timestamp === "number" &&
           Date.now() - pendingText.timestamp < 10000
         ) {
-          consumeSidepanelEnvelope(pendingText);
-          await browser.storage.local.remove("pendingSidepanelText");
+          if (consumeSidepanelEnvelope(pendingText)) await removePendingEnvelopeIfMatches(pendingText.envelopeId);
         }
 
         const pendingRead = stored.pendingWebPageRead as
           | { timestamp: number; tabId?: number }
           | undefined;
-        if (pendingRead && Date.now() - pendingRead.timestamp < 10000) {
+        if (pendingRead && (boundTabId === undefined || pendingRead.tabId === boundTabId) && Date.now() - pendingRead.timestamp < 10000) {
           setActiveView("chat");
           await browser.storage.local.remove("pendingWebPageRead");
           void handleReadCurrentPage();
@@ -989,16 +1016,17 @@ export default function SidePanelApp() {
 
   // 监听后台消息与流式更新
   useEffect(() => {
-    const messageListener = (message: any) => {
+    const messageListener = (message: any, sender: any) => {
       if (message.action === "sendToSidepanel" && message.text) {
         if (!webReadingProgressHydratedRef.current) return;
-        if (consumeSidepanelEnvelope(message)) {
+        if (consumeSidepanelEnvelope({ ...message, tabId: sender?.tab?.id ?? message.tabId })) {
           void removePendingEnvelopeIfMatches(message.envelopeId);
         }
         return;
       }
 
       if (message.action === MESSAGE_TYPES.READ_WEB_PAGE) {
+        if (boundTabId !== undefined && message.tabId !== boundTabId) return;
         if (!webReadingProgressHydratedRef.current) return;
         setActiveView("chat");
         // 与 storage 通道保持一致：消费掉待办，避免 10 秒新鲜度窗口内重载侧边栏

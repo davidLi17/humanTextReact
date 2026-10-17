@@ -1292,3 +1292,71 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await expect(dot).toHaveCount(0);
   await clickPanel('删除标记');await expect(panel.locator('.element-marks article')).toHaveCount(0);
 });
+
+test('native tab-specific sidepanel hides, restores and isolates composer state', async ({ harness }, testInfo) => {
+  test.setTimeout(120_000);
+  const { context } = harness;
+  const control = await context.newPage();
+  await control.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  const a = await context.newPage(); await a.goto(`${harness.server.baseUrl}/article?tab=A`);
+  const b = await context.newPage(); await b.goto(`${harness.server.baseUrl}/article?tab=B`);
+  const c = await context.newPage(); await c.goto(`${harness.server.baseUrl}/article?tab=C`);
+  const tabs = await control.evaluate(async () => (globalThis as any).chrome.tabs.query({}));
+  const aid = tabs.find((tab:any) => tab.url === a.url()).id;
+  const bid = tabs.find((tab:any) => tab.url === b.url()).id;
+  const open = async (id: number) => {
+    const response = await control.evaluate(async tabId => (globalThis as any).chrome.runtime.sendMessage({ action: 'openSidepanel', tabId }), id);
+    expect(response.success).toBe(true);
+  };
+  const browserCdp = await context.browser()!.newBrowserCDPSession();
+  const inspect = async (id: number, expression = '({visibility: document.visibilityState, text: document.body.innerText})') => {
+    const { targetInfos } = await browserCdp.send('Target.getTargets');
+    const target = targetInfos.find(t => t.url.includes(`/sidepanel.html?tabId=${id}`));
+    if (!target) return null;
+    const { sessionId } = await browserCdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+    const result = new Promise<any>((resolve, reject) => {
+      const listener = (event: any) => {
+        if (event.sessionId !== sessionId) return;
+        const message = JSON.parse(event.message);
+        if (message.id !== 71) return;
+        browserCdp.off('Target.receivedMessageFromTarget', listener);
+        if (message.error || message.result?.exceptionDetails) reject(new Error(JSON.stringify(message)));
+        else resolve(message.result?.result?.value);
+      };
+      browserCdp.on('Target.receivedMessageFromTarget', listener);
+    });
+    await browserCdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id:71, method:'Runtime.evaluate', params:{expression, returnByValue:true, awaitPromise:true, userGesture:true} }) });
+    try { return await result; } finally { await browserCdp.send('Target.detachFromTarget', {sessionId}); }
+  };
+  const visible = async (id:number) => (await inspect(id))?.visibility === 'visible';
+  await a.bringToFront(); await open(aid);
+  await expect.poll(() => visible(aid)).toBe(true);
+  await expect.poll(async () => (await inspect(aid))?.text).toContain('网页标记');
+  const setDraft = (text:string) => `(() => { const e=document.querySelector('.chat-input textarea,textarea[placeholder^="输入追问"]'); if(!e) throw Error('composer absent'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)}); e.dispatchEvent(new Event('input',{bubbles:true})); return e.value; })()`;
+  const draft = `document.querySelector('textarea[placeholder^="输入追问"]')?.value`;
+  await inspect(aid, setDraft('A 的未发送草稿'));
+  await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
+  await b.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
+  await c.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
+  await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
+  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await b.bringToFront(); await open(bid);
+  await expect.poll(() => visible(bid)).toBe(true);
+  await inspect(bid,setDraft('B 的独立草稿'));
+  await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
+  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await a.reload(); await expect.poll(() => visible(aid)).toBe(true);
+  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await a.goto(`${harness.server.baseUrl}/long-article`); await expect.poll(() => visible(aid)).toBe(true);
+  // Native close API exercises actual destruction, not mocked setOptions or flags.
+  await control.evaluate(async tabId => (globalThis as any).chrome.sidePanel.close({tabId}), aid);
+  await expect.poll(() => visible(aid)).toBe(false);
+  await b.bringToFront(); await expect.poll(() => visible(bid)).toBe(true);
+  expect(await inspect(bid,draft)).toBe('B 的独立草稿');
+  await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
+  await open(aid); await expect.poll(() => visible(aid)).toBe(true);
+  await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
+  console.log('Native sidepanel verified:', JSON.stringify({aid,bid,a:await inspect(aid),b:await inspect(bid)}));
+  await testInfo.attach('native-tab-state.json', {body: JSON.stringify({aid,bid,a:await inspect(aid),b:await inspect(bid)},null,2),contentType:'application/json'});
+  await browserCdp.detach();
+});
