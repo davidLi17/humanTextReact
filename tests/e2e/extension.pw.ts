@@ -1228,7 +1228,9 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   // adding host permissions or mocking captureVisibleTab.
   const cdp = await harness.context.newCDPSession(article);
   const { targetInfo } = await cdp.send('Target.getTargetInfo');
-  await cdp.send('Extensions.triggerAction', { id: harness.extensionId, targetId: targetInfo.targetId });
+  const browserCdp = await harness.context.browser()!.newBrowserCDPSession();
+  await browserCdp.send('Extensions.triggerAction', { id: harness.extensionId, targetId: targetInfo.targetId });
+  await browserCdp.detach();
   await cdp.detach();
   await article.bringToFront();
   const clickPanel=async(name:string|RegExp)=>panel.getByRole('button',{name}).evaluate(el=>(el as HTMLButtonElement).click());
