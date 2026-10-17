@@ -285,6 +285,8 @@ const test = base.extend<{ harness: ExtensionHarness }>({
         args: [
           `--disable-extensions-except=${extensionPath}`,
           `--load-extension=${extensionPath}`,
+          // Enables CDP toolbar action automation only in this disposable test profile.
+          "--enable-unsafe-extension-debugging",
           "--disable-background-networking",
           "--disable-component-update",
           "--no-first-run",
