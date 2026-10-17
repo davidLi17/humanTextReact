@@ -3,7 +3,7 @@ import {
   elementSnapshotText,
   type ElementSnapshot,
 } from "../../shared/elementSnapshot";
-import { getActiveTab } from "../../shared/sidepanelUtils";
+import { getActiveTab, getSidePanelTabId } from "../../shared/sidepanelUtils";
 import "./ElementMarks.less";
 
 export function ElementMarks({
@@ -21,6 +21,8 @@ export function ElementMarks({
   const tab = useRef<number | undefined>(undefined);
   const signature = useRef("");
   const sending = useRef(false);
+  const sendRef = useRef<(requestId?: string) => Promise<void>>(async () => {});
+  const handled = useRef("");
   const call = async (action: string, extra: Record<string, unknown> = {}) => {
     const current = await getActiveTab();
     if (typeof current?.id !== "number") throw new Error("请先打开普通网页");
@@ -58,7 +60,11 @@ export function ElementMarks({
   useEffect(() => {
     let disposed = false;
     const poll = () => {
-      if (!disposed) void call("elementState").catch(() => {});
+      if (!disposed) void call("elementState").then(state => {
+        if (getSidePanelTabId() !== undefined && state.sendRequest && handled.current !== state.sendRequest.id) {
+          handled.current = state.sendRequest.id; void sendRef.current(state.sendRequest.id);
+        }
+      }).catch(() => {});
     };
     poll();
     const timer = setInterval(poll, 1500);
@@ -74,6 +80,9 @@ export function ElementMarks({
       browser.runtime.onMessage.removeListener(listener);
     };
   }, []);
+  useEffect(() => {
+    if (!document.activeElement?.closest(".element-marks textarea")) setDrafts({});
+  }, [items]);
   const run = (action: string, extra: Record<string, unknown> = {}) =>
     void call(action, extra)
       .then(() => setError(""))
@@ -82,9 +91,59 @@ export function ElementMarks({
     (item) =>
       !item.sent || (drafts[item.id] ?? item.question).trim() !== item.question,
   );
+  sendRef.current = async (requestId?: string) => {
+            if (sending.current || disabled) {
+              if (requestId) await call("elementSendError", {requestId,error:"AI 正在回答，请稍后再次提问"});
+              return;
+            }
+            sending.current = true;
+            try {
+              for (const [id, question] of Object.entries(requestId ? {} : drafts))
+                await call("elementEdit", { id, question });
+              const state = await call("elementValidate");
+              const pending = state.items.filter(
+                (item: ElementSnapshot) => !item.sent,
+              );
+              if (
+                !requestId && (pending.length !== pendingItems.length ||
+                pending.some(
+                  (entry: ElementSnapshot) =>
+                    !pendingItems.some(
+                      (preview) =>
+                        preview.id === entry.id &&
+                        (drafts[entry.id] ?? preview.question).trim() ===
+                          entry.question,
+                    ),
+                )
+              )) {
+                throw new Error("标记清单已变化，请检查最新预览后重新发送");
+              }
+              if (
+                pending.some(
+                  (x: ElementSnapshot) => x.invalid || !x.question.trim(),
+                )
+              )
+                throw new Error("请重新选择失效目标并填写问题");
+              if (!pending.length) throw new Error("没有待发送的问题，请先修改问题或添加标记");
+              if (onSend(pending)) {
+                await call("elementSent", {
+                  ids: pending.map((item: ElementSnapshot) => item.id),
+                });
+                // Keep confirmed page markers after sending; user can edit/delete them explicitly.
+                await call("elementStop");
+                setError(""); setDrafts({});
+              } else throw new Error("暂时无法发送，请稍后再次提问");
+            } catch (e) {
+              const error = e instanceof Error ? e.message : String(e);
+              setError(error);
+              if (requestId) await call("elementSendError", {requestId,error});
+            } finally {
+              sending.current = false;
+            }
+  };
   return (
     <section className="element-marks" aria-label="网页标记">
-      <header className="marks-header"><span className="marks-heading">网页标记 <span className="marks-count">{items.length}/6</span></span><span className="marks-help" tabIndex={0} aria-label="截图与模型说明">?<span role="tooltip">截图随问题发送，请使用支持图片的模型。首次截图前，点击当前页的扩展图标或右键「打开人话侧边栏」授予临时访问。</span></span></header>
+      <header className="marks-header"><span className="marks-help" tabIndex={0} aria-label="截图与模型说明">?<span role="tooltip">截图随问题发送，请使用支持图片的模型。首次截图前，点击当前页的扩展图标或右键「打开人话侧边栏」授予临时访问。</span></span></header>
       <button
         className="marks-select"
         type="button"
@@ -93,6 +152,8 @@ export function ElementMarks({
         {active ? "退出元素选择" : "选择网页元素"}
       </button>
       {error && <p role="alert">{error}</p>}
+      <details className="marks-list">
+      <summary>已选{items.length}处{focused ? " · 网页正在定位" : ""}</summary>
       {items.map((item) => (
         <article
           key={item.id}
@@ -104,6 +165,8 @@ export function ElementMarks({
           {item.invalid && (
             <p role="alert">目标已失效，请删除后重新选择。快照仍是原内容。</p>
           )}
+          <button type="button" onClick={() => run("elementOpenEditor", {id:item.id})}>在网页编辑</button>
+          <details><summary>编辑问题</summary>
           <label className="mark-label" htmlFor={`mark-question-${item.id}`}>给 AI 的问题</label>
           <textarea
             id={`mark-question-${item.id}`}
@@ -120,6 +183,7 @@ export function ElementMarks({
               run("elementEdit", { id: item.id, question: e.target.value })
             }
           />
+          </details>
           <details>
             <summary>
               查看实际发送快照{item.truncated ? " · 文本已截断" : ""}
@@ -150,54 +214,12 @@ export function ElementMarks({
               (x) => x.invalid || !(drafts[x.id] ?? x.question).trim(),
             )
           }
-          onClick={async () => {
-            if (sending.current) return;
-            sending.current = true;
-            try {
-              for (const [id, question] of Object.entries(drafts))
-                await call("elementEdit", { id, question });
-              const state = await call("elementValidate");
-              const pending = state.items.filter(
-                (item: ElementSnapshot) => !item.sent,
-              );
-              if (
-                pending.length !== pendingItems.length ||
-                pending.some(
-                  (entry: ElementSnapshot) =>
-                    !pendingItems.some(
-                      (preview) =>
-                        preview.id === entry.id &&
-                        (drafts[entry.id] ?? preview.question).trim() ===
-                          entry.question,
-                    ),
-                )
-              ) {
-                throw new Error("标记清单已变化，请检查最新预览后重新发送");
-              }
-              if (
-                pending.some(
-                  (x: ElementSnapshot) => x.invalid || !x.question.trim(),
-                )
-              )
-                throw new Error("请重新选择失效目标并填写问题");
-              if (onSend(pending)) {
-                await call("elementSent", {
-                  ids: pending.map((item: ElementSnapshot) => item.id),
-                });
-                // Keep confirmed page markers after sending; user can edit/delete them explicitly.
-                await call("elementStop");
-                setError("已发送；标记保留，可修改问题后再次发送。");
-              }
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            } finally {
-              sending.current = false;
-            }
-          }}
+          onClick={() => void sendRef.current()}
         >
           发送给AI（{pendingItems.length}个标记）
         </button>
       )}
+      </details>
     </section>
   );
 }

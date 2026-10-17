@@ -38,3 +38,15 @@
   .marks-send:hover { background: #4f46e5; }
   p { font-size: 11px; overflow-wrap: anywhere; }
 }
+
+.element-marks {
+  position: relative; margin: 4px 0; padding: 6px 10px; border-radius: 9px;
+  .marks-list { margin: 0; }
+  .marks-list > summary { min-height: 28px; padding: 5px 118px 5px 0; color: var(--color-text-secondary); font-size: 12px; }
+  .marks-list[open] { max-height: 34vh; overflow: auto; }
+  .marks-select { position: absolute; right: 34px; top: 6px; width: auto; padding: 4px 7px; font-size: 11px; }
+  .marks-header { position: absolute; right: 10px; top: 11px; margin: 0; }
+  article { padding: 8px; margin-top: 6px; }
+  .mark-heading { margin-bottom: 5px; }
+  .marks-send { padding: 6px; margin-top: 8px; }
+}

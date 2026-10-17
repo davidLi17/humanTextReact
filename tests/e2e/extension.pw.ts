@@ -1246,7 +1246,7 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await article.getByRole('button',{name:'返回上一层'}).click();
   await article.getByRole('button',{name:'扩大父级'}).click();
   await article.getByPlaceholder('想问 AI 什么？').fill('解释这张表和代码');
-  await article.getByRole('button',{name:'加入待发送'}).click();
+  await article.getByRole('button',{name:'保存并继续选择'}).click();
   await expect.poll(async () => {
     const error = await article.locator('#humantext-element-picker [role=alert]').allTextContents();
     if (error.length) throw new Error(error.join("\n"));
@@ -1254,6 +1254,7 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   }).toBe(1);
   await expect(panel.getByLabel('标记1的问题')).toHaveValue('解释这张表和代码');
   expect(harness.server.modelRequests).toHaveLength(0);
+  await panel.locator('.marks-list > summary').evaluate(el=>(el as HTMLElement).click());
   const dot=article.locator('#humantext-element-picker .dot');await expect(dot).toHaveCount(1);
   await dot.hover();await expect(panel.locator('.element-marks article')).toHaveClass('focused');
   await article.mouse.move(700,500);
@@ -1344,7 +1345,7 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   const visible = async (id:number) => (await inspect(id))?.visibility === 'visible';
   await a.bringToFront(); await open(aid);
   await expect.poll(() => visible(aid)).toBe(true);
-  await expect.poll(async () => (await inspect(aid))?.text).toContain('网页标记');
+  await expect.poll(async () => (await inspect(aid))?.text).toContain('已选0处');
   const setDraft = (text:string) => `(() => { const e=document.querySelector('.chat-input textarea,textarea[placeholder^="输入追问"]'); if(!e) throw Error('composer absent'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)}); e.dispatchEvent(new Event('input',{bubbles:true})); return e.value; })()`;
   const draft = `document.querySelector('textarea[placeholder^="输入追问"]')?.value`;
   await inspect(aid, setDraft('A 的未发送草稿'));
@@ -1396,6 +1397,25 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await d.close();
   // Closing a background configured tab must not discard the foreground panel.
   await b.close(); await expect.poll(() => visible(aid)).toBe(true);
+  // Exercise the page editor's Enter and visible primary button with real native panel/model transport.
+  const allTargets = await browserCdp.send('Target.getTargets', {filter:[{type:'tab',exclude:false},{exclude:true}]});
+  const aTarget = allTargets.targetInfos.find(target => target.url === a.url())!;
+  await browserCdp.send('Extensions.triggerAction', {id:harness.extensionId,targetId:aTarget.targetId});
+  await a.bringToFront();
+  await control.evaluate(async tabId => (globalThis as any).chrome.tabs.sendMessage(tabId,{action:'elementStart'}), aid);
+  await a.locator('p').first().click();
+  await a.getByPlaceholder('想问 AI 什么？').fill('网页 Enter 发送截图问题');
+  await a.getByPlaceholder('想问 AI 什么？').press('Enter');
+  await expect.poll(() => harness.server.modelRequests.length).toBe(1);
+  expect(JSON.stringify(harness.server.modelRequests[0].body)).toContain('网页 Enter 发送截图问题');
+  expect(JSON.stringify(harness.server.modelRequests[0].body)).toContain('image_url');
+  await expect(a.locator('.menu')).toHaveCount(0);
+  await expect.poll(() => inspect(aid, 'document.querySelector(".marks-list")?.open')).toBe(false);
+  await a.locator('.dot').click();
+  await a.getByPlaceholder('想问 AI 什么？').fill('网页按钮再次提问');
+  await a.getByRole('button',{name:'提问',exact:true}).click();
+  await expect.poll(() => harness.server.modelRequests.length).toBe(2);
+  expect(JSON.stringify(harness.server.modelRequests[1].body)).toContain('网页按钮再次提问');
   const nativeImage = await inspect(aid, '', true);
   await testInfo.attach('native-tab-A.png', {body:Buffer.from(nativeImage,'base64'),contentType:'image/png'});
   console.log('NATIVE_PANEL_SCREENSHOT_BASE64=' + nativeImage);

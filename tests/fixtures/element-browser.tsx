@@ -37,13 +37,14 @@ w.browser = {
     },
   },
   tabs: {
+    get: async () => ({id:7,windowId:1,url:"http://fixture.test"}),
     query: async () => [{ id: 7, windowId: 1, url: "http://fixture.test" }],
     sendMessage: async (_id: number, request: any) =>
       w.forwardToContent(request),
     captureVisibleTab: async () => w.captureViewport(),
   },
 };
-if (location.pathname === "/panel") {
+if (location.pathname === "/sidepanel.html") {
   createRoot(document.getElementById("root")!).render(
     <ElementMarks
       disabled={false}
@@ -58,6 +59,7 @@ if (location.pathname === "/panel") {
         };
         localStorage.setItem("snapshot", JSON.stringify(stored));
         w.sent = buildHistoryPayload([stored]);
+        w.sendCount = (w.sendCount || 0) + 1;
         return true;
       }}
     />,

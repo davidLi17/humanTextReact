@@ -62,6 +62,11 @@ export class ContextMenuHandler {
       timestamp: new Date().toISOString(),
     });
 
+    if (info.menuItemId === "markPageElement" && typeof tab?.id === "number") {
+      await browser.tabs.sendMessage(tab.id, { action: "elementStart" }, { frameId: 0 });
+      return;
+    }
+
     if (info.menuItemId === "readPageInSidepanel" && tab?.windowId) {
       try {
         await openSidePanel({ windowId: tab.windowId, tabId: tab.id });

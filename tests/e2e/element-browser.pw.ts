@@ -39,7 +39,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     }
     res.setHeader("Content-Type", "text/html");
     res.end(
-      `<html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body style="font:16px sans-serif;margin:20px"><div id="root"></div>${req.url === "/panel" ? "" : `<section id="card" style="width:420px;padding:20px;background:rgb(230,246,255)"><h2>季度数据</h2><table><tr><th>项目</th><th>金额</th></tr><tr><td>收入</td><td>120</td></tr></table><pre>const a = 1;\nconsole.log(a);</pre><input id="secret" value="PRIVATE-FORM-VALUE"><button id="action" onclick="window.clicks=(window.clicks||0)+1">页面按钮</button></section><div id="tall" style="margin-top:30px;height:1100px;width:400px;background:#def">超出视口的元素</div>`}<script src="/bundle.js"></script></body></html>`,
+      `<html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body style="font:16px sans-serif;margin:20px"><div id="root"></div>${req.url?.startsWith("/sidepanel.html") ? "" : `<section id="card" style="width:420px;padding:20px;background:rgb(230,246,255)"><h2>季度数据</h2><table><tr><th>项目</th><th>金额</th></tr><tr><td>收入</td><td>120</td></tr></table><pre>const a = 1;\nconsole.log(a);</pre><input id="secret" value="PRIVATE-FORM-VALUE"><button id="action" onclick="window.clicks=(window.clicks||0)+1">页面按钮</button></section><div id="tall" style="margin-top:30px;height:1100px;width:400px;background:#def">超出视口的元素</div>`}<script src="/bundle.js"></script></body></html>`,
     );
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -79,7 +79,8 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     });
     expect(bounded.truncated).toBe(true); expect(bounded.text.length).toBeLessThanOrEqual(8000);
 
-    await panel.goto(url + "/panel");
+    await panel.goto(url + "/sidepanel.html?tabId=7");
+    expect((await panel.locator(".element-marks").boundingBox())!.height).toBeLessThan(52);
     await content.bringToFront();
     await panel.getByRole("button", { name: "选择网页元素" }).click();
 
@@ -94,8 +95,9 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.getByRole("button", { name: "扩大父级" }).click();
     await content.getByPlaceholder("想问 AI 什么？").fill("解释表格和代码");
     await content.screenshot({path:testInfo.outputPath("selection-input.png")});
-    await content.getByRole("button", { name: "加入待发送" }).click();
+    await content.getByRole("button", { name: "保存并继续选择" }).click();
     await expect(panel.getByLabel("标记1的问题")).toHaveValue("解释表格和代码");
+    await panel.locator(".marks-list > summary").click();
     expect(captures).toBe(1);
     expect(await panel.evaluate(() => (window as any).sent)).toBeUndefined();
     await content.locator(".dot").hover();
@@ -145,6 +147,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     // UI verification: narrow panel, dark theme, long question and keyboard tooltip.
     await panel.setViewportSize({ width: 320, height: 900 });
     await panel.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    await panel.getByText("编辑问题", {exact:true}).click();
     await panel.getByLabel("标记1的问题").fill("很长的问题内容".repeat(40));
     expect(await panel.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await panel.screenshot({ path: testInfo.outputPath("snapshot-preview-dark-narrow.png") });
@@ -166,6 +169,42 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     });
     expect(JSON.stringify(sent)).toContain("比较收入");
 
+    // Page editor saves/cancels without recapturing, and Enter uses the send action.
+    const dot = content.locator('.dot').first();
+    const beforeCaptures = captures;
+    await dot.click();
+    await content.getByPlaceholder('想问 AI 什么？').fill('取消的修改');
+    await content.getByRole('button',{name:'取消',exact:true}).click();
+    await dot.click();
+    await expect(content.getByPlaceholder('想问 AI 什么？')).toHaveValue('比较收入');
+    await content.getByPlaceholder('想问 AI 什么？').fill('网页保存的问题');
+    await content.getByRole('button',{name:'保存问题',exact:true}).click();
+    expect(captures).toBe(beforeCaptures);
+    await dot.click();
+    const editor = content.getByPlaceholder('想问 AI 什么？');
+    await expect(editor).toHaveValue('网页保存的问题');
+    await editor.fill('Enter 真实提问');
+    await editor.press('Shift+Enter');
+    await expect(editor).toHaveValue('Enter 真实提问\n');
+    await editor.dispatchEvent('compositionstart');
+    await editor.press('Enter');
+    expect(await panel.evaluate(() => (window as any).sendCount)).toBe(1);
+    await editor.dispatchEvent('compositionend');
+    await content.screenshot({path:testInfo.outputPath('compact-web-editor.png')});
+    await editor.evaluate(el => {
+      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
+      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
+    });
+    await expect.poll(() => panel.evaluate(() => (window as any).sendCount)).toBe(2);
+    expect(JSON.stringify(await panel.evaluate(() => (window as any).sent))).toContain('Enter 真实提问');
+    expect(captures).toBe(beforeCaptures);
+    await expect(content.locator('.menu')).toHaveCount(0);
+    await panel.locator('.marks-list > summary').click();
+    expect((await panel.locator('.element-marks').boundingBox())!.height).toBeLessThan(52);
+    await panel.screenshot({path:testInfo.outputPath('compact-panel.png')});
+    await content.mouse.move(900,700);
+    expect(await content.locator('.marked').first().evaluate(el => getComputedStyle(el).borderTopColor)).toBe('rgba(0, 0, 0, 0)');
+    await content.screenshot({path:testInfo.outputPath('compact-dots.png')});
     await panel.reload();
     const restored = await panel.evaluate(() => (window as any).followup());
     expect(JSON.stringify(restored)).toContain(image!);
@@ -181,9 +220,10 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
       .evaluate((el) => el.scrollIntoView({ block: "start" }));
     await content.mouse.click(80, 100);
     await content.getByPlaceholder("想问 AI 什么？").fill("解释长区域");
-    await content.getByRole("button", { name: "加入待发送" }).click();
-    await expect(panel.getByLabel("标记2的问题")).toBeVisible();
-    await panel.locator("article").nth(1).locator("summary").click();
+    await content.getByRole("button", { name: "保存并继续选择" }).click();
+    await panel.locator(".marks-list > summary").click();
+    await expect(panel.getByLabel("标记2的问题")).toHaveValue("解释长区域");
+    await panel.locator("article").nth(1).getByText("查看实际发送快照", {exact:false}).click();
     await expect(panel.locator("article").nth(1).locator("pre")).toContainText(
       "部分元素（超出视口）",
     );

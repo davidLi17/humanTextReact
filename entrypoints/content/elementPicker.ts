@@ -19,6 +19,11 @@ export class ElementPicker {
     string,
     { element: Element; snapshot: ElementSnapshot; fingerprint: string; pageUrl: string }
   >();
+  private editingId = "";
+  private draft = "";
+  private composing = false;
+  private submitting = false;
+  private sendRequest: { id: string } | undefined;
   private counter = 0;
   private busy = false;
   private destroyed = false;
@@ -90,13 +95,24 @@ export class ElementPicker {
     );
   }
   private refresh = () => {
-    if (!this.active && !this.marks.size) return;
+    if (this.composing || (!this.active && !this.marks.size)) return;
     for (const item of this.marks.values())
       if (!this.valid(item)) item.snapshot.invalid = true;
     this.render();
   };
   private message = (req: any, _sender: any, reply: (r: any) => void) => {
     if (!req.action?.startsWith("element")) return false;
+    if (req.action === "elementOpenEditor") {
+      const item = this.marks.get(req.id);
+      if (item && this.valid(item) && !this.busy && !this.submitting) {
+        this.editingId = req.id; this.locked = item.element;
+        this.draft = item.snapshot.question; this.render();
+        this.ui.querySelector("textarea")?.focus();
+      }
+    }
+    if (req.action === "elementSendError" && req.requestId === this.sendRequest?.id) {
+      this.submitting = false; this.sendRequest = undefined; this.error = req.error; this.render();
+    }
     if (req.action === "elementStart") {
       this.active = true;
       this.locked = null;
@@ -114,9 +130,11 @@ export class ElementPicker {
     }
     if (req.action === "elementDelete") {
       this.marks.delete(req.id);
+      if (this.editingId === req.id) this.cancelEditor();
       this.render();
     }
     if (req.action === "elementSent" && Array.isArray(req.ids)) {
+      this.submitting = false; this.sendRequest = undefined; this.error = ""; this.cancelEditor();
       for (const id of req.ids) {
         const item = this.marks.get(id);
         if (item) item.snapshot.sent = true;
@@ -147,6 +165,7 @@ export class ElementPicker {
     reply({
       success: true,
       active: this.active,
+      sendRequest: this.sendRequest,
       focused: this.focused,
       revision,
       ...(req.revision === revision
@@ -177,19 +196,18 @@ export class ElementPicker {
     const target = e.target instanceof Element ? e.target : null;
     if (!target || target.closest(PRIVATE_ELEMENTS)) return;
     this.locked = target;
+    this.editingId = ""; this.draft = "";
     this.ancestors = [];
     this.error = "";
-    void browser.runtime.sendMessage({ action: MESSAGE_TYPES.OPEN_SIDEPANEL });
     this.render();
     this.ui.querySelector("textarea")?.focus();
   };
   private key = (e: KeyboardEvent) => {
-    if (!this.active || e.key !== "Escape") return;
+    if ((!this.active && !this.locked) || e.key !== "Escape" || this.busy || this.submitting) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (this.locked) {
-      this.locked = null;
-      this.ancestors = [];
+      this.cancelEditor();
     } else {
       this.active = false;
       this.hovered = null;
@@ -208,15 +226,15 @@ export class ElementPicker {
     const cursor = editing
       ? (this.ui.activeElement as HTMLTextAreaElement).selectionStart
       : 0;
-    const draft = this.ui.querySelector("textarea")?.value || "";
+    const draft = this.draft;
     this.ui.replaceChildren();
     const style = document.createElement("style");
     style.textContent = `
 :host{all:initial;--bg:#fff;--surface:#f8fafc;--ink:#1e293b;--muted:#64748b;--line:#e2e8f0;--accent:#6366f1;font:13px/1.5 system-ui,sans-serif;color:var(--ink);color-scheme:light}
 @media(prefers-color-scheme:dark){:host{--bg:#18181b;--surface:#27272a;--ink:#f4f4f5;--muted:#a1a1aa;--line:#3f3f46;--accent:#a5b4fc;color-scheme:dark}}
 *{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:6px 9px;background:var(--bg);color:var(--ink)}button:hover{background:var(--surface)}button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.45;cursor:default}
-.box{position:fixed;border:1px solid #818cf8;border-radius:3px;pointer-events:none;background:#6366f106}.focus{border:2px solid #6366f1;background:#6366f10c;box-shadow:0 0 0 2px #6366f115}.dot{position:absolute;left:3px;top:3px;border:2px solid var(--bg);border-radius:50%;background:#6366f1!important;color:white;width:25px;height:25px;pointer-events:auto;padding:0;font-size:11px;font-weight:700;box-shadow:0 2px 6px #0002}
-.menu,.bar,.mark-tip{position:fixed;pointer-events:auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #00000018;color:var(--ink)}.bar{right:12px;top:12px;padding:7px 8px 7px 12px;font-size:12px;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px)}.bar button{padding:4px 8px}.menu{width:320px;max-width:calc(100vw - 16px);max-height:calc(100vh - 70px);overflow:auto;padding:14px}.menu-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:650}.menu textarea{display:block;resize:vertical;width:100%;min-height:88px;max-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--surface);margin-bottom:10px}.menu-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center}.menu-actions button{font-size:12px}.menu-actions .primary{background:#6366f1;color:#fff;border-color:#6366f1;grid-column:2;grid-row:2}.menu-actions .cancel{grid-column:1;grid-row:2;text-align:left;border-color:transparent;color:var(--muted)}p{margin:8px 0 0;font-size:12px;overflow-wrap:anywhere}[role=alert]{color:#e15b64}.help{position:relative;cursor:help;border:1px solid var(--line);border-radius:50%;width:18px;height:18px;text-align:center;font-size:11px;color:var(--muted)}.help span{display:none;position:absolute;right:0;top:24px;width:240px;padding:10px;background:var(--ink);color:var(--bg);border-radius:8px;font-weight:400;z-index:2}.help:hover span,.help:focus span{display:block}.mark-tip{display:none;width:280px;max-width:calc(100vw - 16px);padding:12px;font-size:12px;pointer-events:none;overflow-wrap:anywhere;white-space:pre-wrap}.mark-tip.visible{display:block}
+.box{position:fixed;border:1px solid #818cf8;border-radius:3px;pointer-events:none;background:#6366f106}.focus{border:2px solid #6366f1;background:#6366f10c;box-shadow:0 0 0 2px #6366f115}.marked{border-color:transparent;background:transparent}.marked.focus{border:1px solid #818cf8;background:transparent;box-shadow:none}.dot{position:fixed;border:2px solid var(--bg);border-radius:50%;background:#6366f1!important;color:white;width:25px;height:25px;pointer-events:auto;padding:0;font-size:11px;font-weight:700;box-shadow:0 2px 6px #0002}
+.menu,.bar,.mark-tip{position:fixed;pointer-events:auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #00000018;color:var(--ink)}.bar{right:12px;top:12px;padding:7px 8px 7px 12px;font-size:12px;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px)}.bar button{padding:4px 8px}.menu{width:320px;max-width:calc(100vw - 16px);max-height:calc(100vh - 70px);overflow:auto;padding:14px}.menu-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:650}.menu textarea{display:block;resize:vertical;width:100%;min-height:88px;max-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--surface);margin-bottom:10px}.menu-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center}.menu-actions button{font-size:12px}.menu-actions .primary{background:#6366f1;color:#fff;border-color:#6366f1;grid-column:2;grid-row:3}.menu-actions .cancel{grid-column:1;grid-row:3;text-align:left;border-color:transparent;color:var(--muted)}p{margin:8px 0 0;font-size:12px;overflow-wrap:anywhere}[role=alert]{color:#e15b64}.help{position:relative;cursor:help;border:1px solid var(--line);border-radius:50%;width:18px;height:18px;text-align:center;font-size:11px;color:var(--muted)}.help span{display:none;position:absolute;right:0;top:24px;width:240px;padding:10px;background:var(--ink);color:var(--bg);border-radius:8px;font-weight:400;z-index:2}.help:hover span,.help:focus span{display:block}.mark-tip{display:none;width:280px;max-width:calc(100vw - 16px);padding:12px;font-size:12px;pointer-events:none;overflow-wrap:anywhere;white-space:pre-wrap}.mark-tip.visible{display:block}
 `;
     this.ui.append(style);
     const outline = (el: Element, focus = false) => {
@@ -235,8 +253,20 @@ export class ElementPicker {
     for (const item of this.marks.values()) {
       if (item.snapshot.invalid) continue;
       const box = outline(item.element, this.focused === item.snapshot.id);
-      const dot = this.button(String(item.snapshot.number), () => {});
+      box.classList.add("marked");
+      const dot = this.button(String(item.snapshot.number), () => {
+        if (this.busy || this.submitting) return;
+        this.editingId = item.snapshot.id; this.locked = item.element;
+        this.draft = item.snapshot.question; this.error = ""; this.ancestors = [];
+        this.render(); this.ui.querySelector("textarea")?.focus();
+      });
       dot.className = "dot";
+      const r = this.rect(item.element);
+      if (r.y + r.height < 0 || r.y > innerHeight || r.x + r.width < 0 || r.x > innerWidth) continue;
+      const left = r.x >= 30 ? r.x - 29 : r.x + r.width + 29 <= innerWidth ? r.x + r.width + 4 : r.x;
+      const top = left === r.x ? (r.y >= 30 ? r.y - 29 : r.y + r.height + 4) : r.y;
+      dot.style.left = Math.max(2, Math.min(innerWidth - 27, left)) + "px";
+      dot.style.top = Math.max(2, Math.min(innerHeight - 27, top)) + "px";
       dot.setAttribute("aria-label", `标记${item.snapshot.number}：${item.snapshot.title}`);
       const tip = document.createElement("div");
       tip.className = "mark-tip";
@@ -244,6 +274,8 @@ export class ElementPicker {
       tip.textContent = `${item.snapshot.title}\n${item.snapshot.text.replace(/\s+/g, " ").slice(0, 120)}\n\n问题：${item.snapshot.question.slice(0, 200)}`;
       this.ui.append(tip);
       const showTip = () => {
+        if (this.locked) return;
+        box.classList.add("focus");
         tip.classList.add("visible");
         const d = dot.getBoundingClientRect();
         const target = item.element.getBoundingClientRect();
@@ -251,7 +283,7 @@ export class ElementPicker {
         tip.style.top = Math.max(8, Math.min(innerHeight - tip.offsetHeight - 8, d.bottom + 8)) + "px";
       };
       dot.onfocus = showTip;
-      dot.onblur = () => tip.classList.remove("visible");
+      dot.onblur = () => { tip.classList.remove("visible"); box.classList.remove("focus"); };
       dot.onmouseenter = () => {
         showTip();
         this.focused = item.snapshot.id;
@@ -260,7 +292,7 @@ export class ElementPicker {
           .catch(() => {});
       };
       dot.onmouseleave = () => {
-        tip.classList.remove("visible");
+        tip.classList.remove("visible"); box.classList.remove("focus");
         this.focused = "";
         void browser.runtime
           .sendMessage({ action: "elementFocus", id: "" })
@@ -271,7 +303,7 @@ export class ElementPicker {
     if (this.active) {
       const bar = document.createElement("div");
       bar.className = "bar";
-      bar.textContent = this.busy ? "正在生成快照…" : "选择元素 · Esc 取消";
+      bar.textContent = this.submitting ? "正在发送…" : this.busy ? "正在生成快照…" : "选择元素 · Esc 取消";
       bar.append(
         this.button("退出选择", () => {
           this.active = false;
@@ -280,11 +312,15 @@ export class ElementPicker {
           this.render();
         }),
       );
+      bar.querySelectorAll("button").forEach(b => b.disabled = this.busy || this.submitting);
       this.ui.append(bar);
       const target = this.locked || this.hovered;
       if (target?.isConnected) outline(target, true);
     }
-    if (this.locked && this.active) {
+    if (!this.locked && this.error) {
+      const notice = document.createElement("div"); notice.className = "bar"; notice.setAttribute("role", "status"); notice.textContent = this.error; this.ui.append(notice);
+    }
+    if (this.locked) {
       const r = this.rect(this.locked),
         menu = document.createElement("div");
       menu.className = "menu";
@@ -295,7 +331,16 @@ export class ElementPicker {
       input.placeholder = "想问 AI 什么？";
       input.maxLength = 2000;
       input.value = draft;
-      input.disabled = this.busy;
+      input.disabled = this.busy || this.submitting;
+      input.oninput = () => { this.draft = input.value; };
+      input.addEventListener("compositionstart", () => { this.composing = true; });
+      input.addEventListener("compositionend", () => { this.composing = false; });
+      const ask = () => void this.submit(input.value);
+      input.onkeydown = e => {
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !this.composing && e.keyCode !== 229) {
+          e.preventDefault(); e.stopPropagation(); ask();
+        }
+      };
       const heading = document.createElement("div");
       heading.className = "menu-heading";
       heading.textContent = "询问这个区域";
@@ -306,7 +351,7 @@ export class ElementPicker {
       help.setAttribute("aria-label", "快照说明");
       const hint = document.createElement("span");
       hint.setAttribute("role", "tooltip");
-      hint.textContent = "仅截当前视口内所选区域；表单/嵌入内容遮盖。加入不会调用 AI。";
+      hint.textContent = "提问会发送全部待发送标记；保存仅加入待发送清单。截图只包含当前可见区域，敏感表单遮盖。Enter 提问，Shift+Enter 换行。";
       help.append(hint);
       heading.append(help);
       input.setAttribute("aria-label", "给 AI 的问题");
@@ -328,9 +373,9 @@ export class ElementPicker {
           this.locked = this.ancestors.pop() || this.locked;
           this.render();
         }),
-        this.button("加入待发送", () => void this.capture(input.value)),
+        this.button("提问", ask),
         this.button("取消", () => {
-          this.locked = null;
+          this.cancelEditor();
           this.render();
         }),
       );
@@ -338,6 +383,15 @@ export class ElementPicker {
       buttons[1].disabled = !this.ancestors.length;
       buttons[2].className = "primary";
       buttons[3].className = "cancel";
+      const save = this.button(this.editingId ? "保存问题" : "保存并继续选择", () => void this.save(input.value));
+      save.style.gridColumn = "1 / -1"; save.style.gridRow = "2";
+      actions.append(save);
+      if (this.editingId) {
+        buttons[0].disabled = true; buttons[1].disabled = true;
+        const remove = this.button("删除标记", () => { this.marks.delete(this.editingId); this.cancelEditor(); this.render(); });
+        actions.append(remove);
+      }
+      if (this.busy || this.submitting) actions.querySelectorAll("button").forEach(b => b.disabled = true);
       menu.append(actions);
       if (this.error) {
         const error = document.createElement("p");
@@ -357,19 +411,51 @@ export class ElementPicker {
       }
     }
   }
+  private cancelEditor() {
+    this.locked = null; this.editingId = ""; this.draft = ""; this.ancestors = []; this.composing = false;
+  }
+  private async save(question: string): Promise<boolean> {
+    if (this.busy || !this.locked) return false;
+    if (!question.trim()) { this.fail("请填写给 AI 的问题"); return false; }
+    if (this.editingId) {
+      const item = this.marks.get(this.editingId);
+      if (!item || !this.valid(item)) { this.fail("目标已失效，请重新选择"); return false; }
+      if (item.snapshot.question !== question.trim()) { item.snapshot.question = question.trim(); item.snapshot.sent = false; }
+      this.cancelEditor(); this.render(); return true;
+    }
+    return await this.capture(question);
+  }
+  private async submit(question: string) {
+    if (this.busy || this.submitting || this.composing) return;
+    if (!question.trim()) { this.fail("请填写给 AI 的问题"); return; }
+    this.submitting = true;
+    const opening = browser.runtime.sendMessage({ action: MESSAGE_TYPES.OPEN_SIDEPANEL });
+    this.render();
+    try {
+      const result = await opening;
+      if (!result?.success) throw new Error("侧栏未打开，请重试提问");
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      if (!await this.save(question)) { this.submitting = false; this.render(); return; }
+      this.sendRequest = { id: crypto.randomUUID() };
+      this.error = "正在发送…";
+    } catch (error) {
+      this.submitting = false; this.error = error instanceof Error ? error.message : String(error);
+    }
+    this.render();
+  }
   private fail(message: string) {
     this.error = message;
     this.render();
   }
-  private async capture(question: string) {
-    if (this.busy || !this.locked) return;
+  private async capture(question: string): Promise<boolean> {
+    if (this.busy || !this.locked) return false;
     if (!question.trim()) {
       this.fail("请填写给 AI 的问题");
-      return;
+      return false;
     }
     if (this.marks.size >= MAX_ELEMENT_MARKS) {
       this.fail("每页最多6个标记，请先删除不需要的标记");
-      return;
+      return false;
     }
     const target = this.locked,
       rect = this.rect(target),
@@ -378,11 +464,11 @@ export class ElementPicker {
       offset = { x: scrollX, y: scrollY };
     if (!clip.width || !clip.height) {
       this.fail("元素不在视口内，请滚动后重选");
-      return;
+      return false;
     }
     if (window.visualViewport && window.visualViewport.scale !== 1) {
       this.fail("请退出双指缩放后重选（浏览器页面缩放可用）");
-      return;
+      return false;
     }
     const extracted = extractElementText(target),
       fingerprint = this.fingerprint(target);
@@ -447,10 +533,12 @@ export class ElementPicker {
         scope: `${partial ? "部分元素（超出视口）" : "完整元素"}；视口坐标 ${Math.round(clip.x)},${Math.round(clip.y)}，${Math.round(clip.width)}×${Math.round(clip.height)} CSS px；最长边1600像素；表单、嵌入内容及自定义元素已遮盖`,
       };
       this.marks.set(snapshot.id, { element: target, snapshot, fingerprint, pageUrl: location.href });
-      this.locked = null;
+      this.cancelEditor();
       this.hovered = null;
+      return true;
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
+      return false;
     } finally {
       for (const [el, value] of hidden) el.style.visibility = value;
       this.busy = false;
