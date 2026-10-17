@@ -77,7 +77,9 @@ async function performSidePanelToggle(
         });
         if (isOpen) {
           if (typeof sidePanelApi.close !== "function") { resolve(false); return; }
-          sidePanelApi.close({ tabId }).then(() => resolve(true), reject);
+          sidePanelApi.close({ tabId })
+            .then(() => sidePanelApi.setOptions({ tabId, enabled: false }))
+            .then(() => resolve(true), reject);
           return;
         }
         openSidePanel({ ...target, tabId }).then(resolve, reject);

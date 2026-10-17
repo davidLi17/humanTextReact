@@ -1307,10 +1307,13 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   const tabs = await control.evaluate(async () => (globalThis as any).chrome.tabs.query({}));
   const aid = tabs.find((tab:any) => tab.url === a.url()).id;
   const bid = tabs.find((tab:any) => tab.url === b.url()).id;
+  const lastToggle = new Map<number, number>();
   const open = async (id: number) => {
+    await expect.poll(() => Date.now() - (lastToggle.get(id) || 0)).toBeGreaterThan(500);
     const page = id === aid ? a : b;
     await page.bringToFront();
     await page.keyboard.press('Alt+s');
+    lastToggle.set(id, Date.now());
   };
   const browserCdp = await context.browser()!.newBrowserCDPSession();
   const inspect = async (id: number, expression = '({visibility: document.body ? document.visibilityState : "loading", text: document.body?.innerText})', screenshot = false) => {
@@ -1358,8 +1361,8 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await a.reload(); await expect.poll(() => visible(aid)).toBe(true);
   expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
   await a.goto(`${harness.server.baseUrl}/long-article`); await expect.poll(() => visible(aid)).toBe(true);
-  // Native close API exercises actual destruction, not mocked setOptions or flags.
-  await control.evaluate(async tabId => (globalThis as any).chrome.sidePanel.close({tabId}), aid);
+  // Real user shortcut closes the native panel and persists disabled state.
+  await open(aid);
   await expect.poll(() => visible(aid)).toBe(false);
   await b.bringToFront(); await expect.poll(() => visible(bid)).toBe(true);
   expect(await inspect(bid,draft)).toBe('B 的独立草稿');
