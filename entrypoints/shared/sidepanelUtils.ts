@@ -32,7 +32,8 @@ export async function openSidePanel(target: SidePanelTarget): Promise<boolean> {
     if (typeof sidePanelApi?.open === "function") {
       const tabId = target.tabId ?? (await (browserApi || chromeApi).tabs.query({ active: true, ...(typeof target.windowId === "number" ? { windowId: target.windowId } : { currentWindow: true }) }))[0]?.id;
       if (typeof tabId !== "number") return false;
-      // Configure before opening: open(tabId) alone falls back to the global panel.
+      // Enqueue configuration first, then open in the same gesture scope.
+      // Awaiting setOptions before open loses the user gesture in Chrome.
       const configured = sidePanelApi.setOptions({ tabId, path: `sidepanel.html?tabId=${tabId}`, enabled: true });
       const opened = sidePanelApi.open({ tabId });
       await Promise.all([configured, opened]);
@@ -65,23 +66,28 @@ async function performSidePanelToggle(
     const tabId = target.tabId ?? (await (browserApi || chromeApi).tabs.query({ active: true, ...(typeof target.windowId === "number" ? { windowId: target.windowId } : { currentWindow: true }) }))[0]?.id;
     if (typeof tabId !== "number") return false;
     return await new Promise<boolean>((resolve, reject) => {
-    const handleContexts = (contexts: any[]) => {
-    // SIDE_PANEL context.tabId can be -1; the configured document URL is the owner.
-    const isOpen = contexts.some((context: any) => {
-      try { return Number(new URL(context.documentUrl).searchParams.get("tabId")) === tabId; }
-      catch { return false; }
-    });
-    if (isOpen) {
-      if (typeof sidePanelApi.close !== "function") { resolve(false); return; }
-      sidePanelApi.close({ tabId }).then(() => resolve(true), reject);
-      return;
-    }
-    target = { ...target, tabId };
-    openSidePanel(target).then(resolve, reject);
-    };
-    // Native callbacks retain Chrome's gesture scope across the context query.
-    if (chromeApi?.runtime?.getContexts) chromeApi.runtime.getContexts({ contextTypes: ["SIDE_PANEL"] }, handleContexts);
-    else runtimeApi.getContexts({ contextTypes: ["SIDE_PANEL"] }).then(handleContexts, reject);
+      const handleContexts = (contexts: any[]) => {
+        const error = chromeApi?.runtime?.lastError;
+        if (error) { reject(new Error(error.message)); return; }
+        // SIDE_PANEL context.tabId can be -1; the document URL carries its owner.
+        const isOpen = contexts.some((context: any) => {
+          try {
+            return new URL(context.documentUrl).searchParams.get("tabId") === String(tabId);
+          } catch { return false; }
+        });
+        if (isOpen) {
+          if (typeof sidePanelApi.close !== "function") { resolve(false); return; }
+          sidePanelApi.close({ tabId }).then(() => resolve(true), reject);
+          return;
+        }
+        openSidePanel({ ...target, tabId }).then(resolve, reject);
+      };
+      // Invoke open within the native callback, before leaving Chrome's gesture scope.
+      if (chromeApi?.runtime?.getContexts) {
+        chromeApi.runtime.getContexts({ contextTypes: ["SIDE_PANEL"] }, handleContexts);
+      } else {
+        runtimeApi.getContexts({ contextTypes: ["SIDE_PANEL"] }).then(handleContexts, reject);
+      }
     });
   } catch (error) {
     console.error("切换侧边栏失败:", error);

@@ -679,3 +679,12 @@ describe("网页正文作为上下文附加", () => {
     expect(payload[0].content).toContain("附加的网页正文");
   });
 });
+
+test("tab hydration leaves another tab's live assistant messages unchanged", () => {
+  const sessions = ["A", "B"].map(id => ({id, messages:[{id:`${id}-reply`,role:"assistant",content:"部分回答",status:"streaming"}],updatedAt:1}));
+  const recovered = hydrateWebReadingProgress(undefined, sessions, 100, "A", "A");
+  expect(recovered.sessions[0].messages[0].status).toBe("error");
+  expect(recovered.sessions[1]).toBe(sessions[1]);
+  const newTab = hydrateWebReadingProgress(undefined, sessions, 100, undefined, "");
+  expect(newTab.sessionsChanged).toBe(false);
+});

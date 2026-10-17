@@ -1296,10 +1296,11 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
 test('native tab-specific sidepanel hides, restores and isolates composer state', async ({ harness }, testInfo) => {
   test.setTimeout(120_000);
   const { context } = harness;
-  context.on('console', message => { if (message.type() === 'error') console.log('Native panel browser error:', message.text()); });
+  context.on('console', message => { if (message.type() === 'error' || message.text().startsWith('Native close event')) console.log('Native panel browser event:', message.text()); });
   console.log('Native panel Chromium:', context.browser()!.version());
   const control = await context.newPage();
   await control.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  await control.evaluate(() => (globalThis as any).chrome.sidePanel.onClosed.addListener((info:any) => console.log('Native close event', JSON.stringify(info))));
   const a = await context.newPage(); await a.goto(`${harness.server.baseUrl}/article?tab=A`);
   const b = await context.newPage(); await b.goto(`${harness.server.baseUrl}/article?tab=B`);
   const c = await context.newPage(); await c.goto(`${harness.server.baseUrl}/article?tab=C`);
@@ -1318,10 +1319,12 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
     if (!target) return null;
     const { sessionId } = await browserCdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
     const result = new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => { browserCdp.off('Target.receivedMessageFromTarget', listener); reject(new Error(`Sidepanel CDP response timeout for ${id}`)); }, 5000);
       const listener = (event: any) => {
         if (event.sessionId !== sessionId) return;
         const message = JSON.parse(event.message);
         if (message.id !== 71) return;
+        clearTimeout(timer);
         browserCdp.off('Target.receivedMessageFromTarget', listener);
         if (message.error || message.result?.exceptionDetails) reject(new Error(JSON.stringify(message)));
         else resolve(message.result?.result?.value);

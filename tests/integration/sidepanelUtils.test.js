@@ -253,3 +253,30 @@ describe("extractActiveTabContent failure stages (任务1: 失败可定位链路
     expect(result.error).toContain("动态注入兜底");
   });
 });
+
+test("tab open invokes configuration then open before configuration settles", async () => {
+  const calls = [];
+  let complete;
+  setTestGlobal("browser", { sidePanel: {
+    setOptions: () => { calls.push("configure"); return new Promise(resolve => { complete = resolve; }); },
+    open: async () => { calls.push("open"); },
+  } });
+  const result = openSidePanel({tabId: 9400});
+  expect(calls).toEqual(["configure", "open"]);
+  complete();
+  expect(await result).toBe(true);
+});
+
+test("native toggle invokes open inside the Chrome callback gesture scope", async () => {
+  let gesture = false;
+  let opened = false;
+  setTestGlobal("browser", undefined);
+  setTestGlobal("chrome", { runtime: {
+    getContexts: (_filter, callback) => { gesture = true; callback([]); gesture = false; },
+  }, sidePanel: {
+    setOptions: async () => {},
+    open: async () => { opened = gesture; },
+  } });
+  expect(await toggleSidePanel({tabId: 9401})).toBe(true);
+  expect(opened).toBe(true);
+});

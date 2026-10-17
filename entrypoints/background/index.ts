@@ -34,9 +34,16 @@ export default defineBackground(() => {
     id: browser.runtime.id,
   });
 
-  // No window-global panel. Chrome owns tab switching/close state, including worker restarts.
+  // No window-global panel. Chrome owns visibility across tab switches.
   void browser.sidePanel.setOptions({ enabled: false }).catch(error =>
     backgroundLogger.error("初始化标签页侧栏失败", error));
+
+  browser.sidePanel.onClosed.addListener(({ tabId }) => {
+    if (typeof tabId !== "number") return;
+    // close() alone can be restored on a later tab activation; disable until explicit open.
+    void browser.sidePanel.setOptions({ tabId, enabled: false }).catch(error =>
+      backgroundLogger.error("保存侧栏关闭状态失败", error));
+  });
 
   // 1. 同步注册全局快捷键命令监听器（确保在 Service Worker 唤醒时不会漏掉任何事件）
   ShortcutManager.registerCommandListeners();
