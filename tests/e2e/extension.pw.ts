@@ -1332,7 +1332,11 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
       browserCdp.on('Target.receivedMessageFromTarget', listener);
     });
     await browserCdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify(screenshot ? {id:71,method:'Page.captureScreenshot',params:{format:'png'}} : { id:71, method:'Runtime.evaluate', params:{expression, returnByValue:true, awaitPromise:true, userGesture:true} }) });
-    try { return await result; } finally { await browserCdp.send('Target.detachFromTarget', {sessionId}); }
+    try { return await result; } catch (error) {
+      const remaining = await browserCdp.send('Target.getTargets');
+      if (!remaining.targetInfos.some(info => info.targetId === target.targetId)) return null;
+      throw error;
+    } finally { await browserCdp.send('Target.detachFromTarget', {sessionId}).catch(() => {}); }
   };
   const visible = async (id:number) => (await inspect(id))?.visibility === 'visible';
   await a.bringToFront(); await open(aid);
