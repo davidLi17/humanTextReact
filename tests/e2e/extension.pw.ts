@@ -1306,8 +1306,18 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await article.goto(`${harness.server.baseUrl}/article`);
   await article.evaluate(()=>{
     const card=document.createElement('section');card.id='element-fixture';
-    card.style.cssText='margin:20px;padding:20px;width:430px;background:#e6f6ff';
+    card.style.cssText='margin:20px;padding:20px;width:600px;background:#e6f6ff';
     card.innerHTML='<h2>季度数据</h2><table><tr><th>项目</th><th>金额</th></tr><tr><td>收入</td><td>120</td></tr></table><pre>const a = 1;\nconsole.log(a);</pre><input value="PRIVATE-FORM-VALUE"><button id="page-action">页面按钮</button>';
+    // Real high-entropy screenshot exceeds the old 512 KiB cap.
+    const canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 400;
+    const ctx = canvas.getContext('2d')!, pixels = ctx.createImageData(600, 400);
+    let seed = 123456;
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+      pixels.data[i] = seed & 255; pixels.data[i + 1] = seed >>> 8 & 255;
+      pixels.data[i + 2] = seed >>> 16 & 255; pixels.data[i + 3] = 255;
+    }
+    ctx.putImageData(pixels, 0, 0); card.append(canvas);
     document.body.prepend(card);
     (window as any).pageClicks=0;
     card.querySelector('button')!.addEventListener('click',()=>{(window as any).pageClicks++;});
@@ -1354,6 +1364,10 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   await panel.getByText('查看实际发送快照',{exact:false}).click();
   const preview=panel.locator('.element-marks img');await expect(preview).toBeVisible();
   const image=await preview.getAttribute('src');expect(image).toMatch(/^data:image\/png;base64,/);
+  const pngBytes = Buffer.from(image!.split(',')[1], 'base64').length;
+  expect(pngBytes).toBeGreaterThan(512 * 1024);
+  expect(pngBytes).toBeLessThanOrEqual(5 * 1024 * 1024);
+  await testInfo.attach('screenshot-byte-size.json', {body:JSON.stringify({pngBytes,base64Characters:image!.length}), contentType:'application/json'});
   await expect(panel.locator('.element-marks pre')).not.toContainText('PRIVATE-FORM-VALUE');
   await expect(panel.locator('.element-marks pre')).toContainText('const a = 1;\nconsole.log(a);');
   await article.bringToFront();
@@ -1513,15 +1527,21 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await d.close();
   // Closing a background configured tab must not discard the foreground panel.
   await b.close(); await expect.poll(() => visible(aid)).toBe(true);
-  // Exercise the page editor's Enter and visible primary button with real native panel/model transport.
+  // Exercise the page editor with the native panel initially CLOSED, then OPEN.
+  // Debouncing must not defer sidePanel.open beyond the click's user gesture.
   const allTargets = await browserCdp.send('Target.getTargets', {filter:[{type:'tab',exclude:false},{exclude:true}]});
   const aTarget = allTargets.targetInfos.find(target => target.url === a.url())!;
   await browserCdp.send('Extensions.triggerAction', {id:harness.extensionId,targetId:aTarget.targetId});
   await a.bringToFront();
+  if (await visible(aid)) await open(aid);
+  await expect.poll(() => visible(aid)).toBe(false);
   await control.evaluate(async tabId => (globalThis as any).chrome.tabs.sendMessage(tabId,{action:'elementStart'}), aid);
   await a.locator('p').first().click();
   await a.getByPlaceholder('想问 AI 什么？').fill('网页 Enter 发送截图问题');
   await a.getByPlaceholder('想问 AI 什么？').press('Enter');
+  await a.getByRole('button',{name:'提问',exact:true}).click();
+  await a.getByPlaceholder('想问 AI 什么？').press('Enter');
+  await expect.poll(() => visible(aid)).toBe(true);
   await expect.poll(() => harness.server.modelRequests.length).toBe(1);
   expect(JSON.stringify(harness.server.modelRequests[0].body)).toContain('网页 Enter 发送截图问题');
   expect(JSON.stringify(harness.server.modelRequests[0].body)).toContain('image_url');
@@ -1530,7 +1550,11 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await a.locator('.dot').click();
   await a.getByPlaceholder('想问 AI 什么？').fill('网页按钮再次提问');
   await a.getByRole('button',{name:'提问',exact:true}).click();
+  await a.getByPlaceholder('想问 AI 什么？').press('Enter');
+  await a.getByRole('button',{name:'提问',exact:true}).click();
   await expect.poll(() => harness.server.modelRequests.length).toBe(2);
+  await a.waitForTimeout(800);
+  expect(harness.server.modelRequests).toHaveLength(2);
   expect(JSON.stringify(harness.server.modelRequests[1].body)).toContain('网页按钮再次提问');
   const nativeImage = await inspect(aid, '', true);
   await testInfo.attach('native-tab-A.png', {body:Buffer.from(nativeImage,'base64'),contentType:'image/png'});

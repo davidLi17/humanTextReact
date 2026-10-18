@@ -16,6 +16,8 @@ export interface ElementSnapshot {
 }
 export const MAX_ELEMENT_TEXT = 8000;
 export const MAX_ELEMENT_MARKS = 6;
+/** PNG bytes before base64 encoding (5 MiB). */
+export const MAX_ELEMENT_IMAGE_BYTES = 5 * 1024 * 1024;
 export function elementSnapshotText(items: ElementSnapshot[]): string {
   return items
     .map(
@@ -39,10 +41,11 @@ export function cropRect(
   };
 }
 
-/** Conservative cap on all serialized sessions before adding a new region message.
+/** Cap on all serialized sessions, including base64, before adding a region message.
+ * A full 5 MiB PNG needs about 6.67 MiB in storage.
  * Leaves headroom for answers and other storage.local keys without deleting history.
  */
-export const ELEMENT_SESSION_STORAGE_BUDGET = 6 * 1024 * 1024;
+export const ELEMENT_SESSION_STORAGE_BUDGET = 8 * 1024 * 1024;
 export function fitsElementStorage(sessions: unknown, message: unknown, limit = ELEMENT_SESSION_STORAGE_BUDGET): boolean {
   const encoder = new TextEncoder();
   return encoder.encode(JSON.stringify(sessions)).byteLength + encoder.encode(JSON.stringify(message)).byteLength + 1024 <= limit;

@@ -210,10 +210,18 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.emulateMedia({colorScheme:'light'});
     await content.setViewportSize({width:1000,height:800});
 
-    await editor.evaluate(el => {
-      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
-      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,composed:true}));
-    });
+    // One trailing debounce shared by click + Enter. A burst longer than 400 ms
+    // still waits until 400 ms after its final event; only the last question sends.
+    await content.getByRole('button',{name:'提问',exact:true}).click();
+    await expect(content.getByRole('status')).toHaveText('等待提问…');
+    await content.waitForTimeout(250);
+    await editor.fill('第二次输入'); await editor.press('Enter');
+    await content.waitForTimeout(250);
+    await editor.fill('Enter 真实提问：最后一次');
+    await content.getByRole('button',{name:'提问',exact:true}).click();
+    await content.waitForTimeout(250);
+    expect((await content.evaluate(() => (window as any).deliver({action:'elementState'}))).sendRequest).toBeUndefined();
+    expect(await panel.evaluate(() => (window as any).sendCount)).toBe(1);
     await expect.poll(() => panel.evaluate(() => (window as any).sendCount)).toBe(2);
     expect(JSON.stringify(await panel.evaluate(() => (window as any).sent))).toContain('Enter 真实提问');
     expect(captures).toBe(beforeCaptures);
@@ -229,6 +237,32 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     expect(JSON.stringify(restored)).toContain(image!);
     expect(restored.at(-1).content).toBe("继续解释");
 
+    // Pending actions are cancelled by Esc, explicit cancel, exit and destruction.
+    for (const cancel of ['Escape', '取消', '退出选择', 'elementStop']) {
+      await content.evaluate(() => (window as any).deliver({action:'elementStart'}));
+      await content.locator('#card h2').click();
+      await editor.fill('不应发送'); await editor.press('Enter');
+      if (cancel === 'Escape') await content.keyboard.press('Escape');
+      else if (cancel === 'elementStop') await content.evaluate(() => (window as any).deliver({action:'elementStop'}));
+      else await content.getByRole('button',{name:cancel,exact:true}).click();
+      await content.waitForTimeout(450);
+      expect(captures).toBe(beforeCaptures);
+    }
+    // A screenshot failure stays visible, reenables the editor, and can be retried.
+    await content.evaluate(() => { (window as any).captureError = '截图超过5MB，请选择更小的区域'; return (window as any).deliver({action:'elementStart'}); });
+    await content.locator('#card h2').click();
+    await editor.fill('截图失败后重试'); await content.getByRole('button',{name:'提问',exact:true}).click();
+    await expect(content.getByRole('alert')).toContainText('截图超过5MB');
+    await expect(editor).toBeEnabled();
+    await expect(content.getByRole('button',{name:'提问',exact:true})).toBeEnabled();
+    await content.screenshot({path:testInfo.outputPath('capture-error-retry.png')});
+    await content.evaluate(() => { (window as any).captureError = ''; });
+    await editor.press('Enter');
+    await expect.poll(() => panel.evaluate(() => (window as any).sendCount)).toBe(1); // panel reloaded above
+    expect(captures).toBe(beforeCaptures + 1);
+    await content.locator('.dot').nth(1).click();
+    await content.getByRole('button',{name:'删除标记',exact:true}).click();
+
     await content.locator("#action").click();
     expect(await content.evaluate(() => (window as any).clicks)).toBe(1);
     // A second mark is clipped honestly; scrolling cannot change the saved snapshot.
@@ -241,7 +275,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.getByPlaceholder("想问 AI 什么？").fill("解释长区域");
     await content.getByRole("button", { name: "保存并继续选择" }).click();
     await panel.locator(".marks-list > summary").click();
-    await expect(panel.getByLabel("标记3的问题")).toHaveValue("解释长区域");
+    await expect(panel.getByLabel("标记4的问题")).toHaveValue("解释长区域");
     await panel.locator("article").nth(1).getByText("查看实际发送快照", {exact:false}).click();
     await expect(panel.locator("article").nth(1).locator("pre")).toContainText(
       "部分元素（超出视口）",
@@ -265,7 +299,14 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await expect(
       content.getByText("选择元素 · Esc 取消", { exact: false }),
     ).toHaveCount(0);
+    await content.evaluate(() => (window as any).deliver({action:'elementStart'}));
+    await content.locator('#root').evaluate(el => {el.textContent='清理测试区域';});
+    await content.locator('#root').click();
+    await editor.fill('销毁后不发送'); await editor.press('Enter');
+    const captureCountAtDestroy = captures;
     await content.evaluate(() => (window as any).destroyPicker());
+    await content.waitForTimeout(450);
+    expect(captures).toBe(captureCountAtDestroy);
     await expect(content.locator("#humantext-element-picker")).toHaveCount(0);
   } finally {
     await browser.close();

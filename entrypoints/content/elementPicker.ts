@@ -5,6 +5,7 @@ import {
   type ElementSnapshot,
 } from "../shared/elementSnapshot";
 import { extractElementText, PRIVATE_ELEMENTS } from "./elementText";
+import { contentLogger } from "../shared/logger";
 import { MESSAGE_TYPES } from "../shared/constants";
 
 // Independent selection-only implementation; no VisBug editing/clipboard handlers are imported.
@@ -23,6 +24,7 @@ export class ElementPicker {
   private draft = "";
   private composing = false;
   private submitting = false;
+  private askTimer: ReturnType<typeof setTimeout> | undefined;
   private sendRequest: { id: string } | undefined;
   private counter = 0;
   private busy = false;
@@ -105,6 +107,7 @@ export class ElementPicker {
     if (req.action === "elementOpenEditor") {
       const item = this.marks.get(req.id);
       if (item && this.valid(item) && !this.busy && !this.submitting) {
+        this.cancelPendingAsk();
         this.editingId = req.id; this.locked = item.element;
         this.draft = item.snapshot.question; this.render();
         this.ui.querySelector("textarea")?.focus();
@@ -114,11 +117,13 @@ export class ElementPicker {
       this.submitting = false; this.sendRequest = undefined; this.error = req.error; this.render();
     }
     if (req.action === "elementStart") {
+      this.cancelPendingAsk();
       this.active = true;
       this.locked = null;
       this.render();
     }
     if (req.action === "elementStop") {
+      this.cancelPendingAsk();
       this.active = false;
       this.locked = null;
       this.hovered = null;
@@ -192,7 +197,8 @@ export class ElementPicker {
     if (!this.active || this.own(e)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (this.busy) return;
+    if (this.busy || this.submitting) return;
+    this.cancelPendingAsk();
     const target = e.target instanceof Element ? e.target : null;
     if (!target || target.closest(PRIVATE_ELEMENTS)) return;
     this.locked = target;
@@ -256,6 +262,7 @@ export class ElementPicker {
       box.classList.add("marked");
       const dot = this.button(String(item.snapshot.number), () => {
         if (this.busy || this.submitting) return;
+        this.cancelPendingAsk();
         this.editingId = item.snapshot.id; this.locked = item.element;
         this.draft = item.snapshot.question; this.error = ""; this.ancestors = [];
         this.render(); this.ui.querySelector("textarea")?.focus();
@@ -303,9 +310,10 @@ export class ElementPicker {
     if (this.active) {
       const bar = document.createElement("div");
       bar.className = "bar";
-      bar.textContent = this.submitting ? "正在发送…" : this.busy ? "正在生成快照…" : "选择元素 · Esc 取消";
+      bar.textContent = this.busy ? "正在生成快照…" : this.submitting ? "正在发送…" : this.askTimer ? "等待提问…" : "选择元素 · Esc 取消";
       bar.append(
         this.button("退出选择", () => {
+          this.cancelPendingAsk();
           this.active = false;
           this.locked = null;
           this.hovered = null;
@@ -333,9 +341,9 @@ export class ElementPicker {
       input.value = draft;
       input.disabled = this.busy || this.submitting;
       input.oninput = () => { this.draft = input.value; };
-      input.addEventListener("compositionstart", () => { this.composing = true; });
+      input.addEventListener("compositionstart", () => { this.cancelPendingAsk(); this.composing = true; });
       input.addEventListener("compositionend", () => { this.composing = false; });
-      const ask = () => void this.submit(input.value);
+      const ask = () => this.scheduleAsk(input.value);
       input.onkeydown = e => {
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !this.composing && e.keyCode !== 229) {
           e.preventDefault(); e.stopPropagation(); ask();
@@ -360,6 +368,7 @@ export class ElementPicker {
       actions.className = "menu-actions";
       actions.append(
         this.button("扩大父级", () => {
+          this.cancelPendingAsk();
           if (
             this.locked?.parentElement &&
             this.locked.parentElement !== document.documentElement
@@ -370,6 +379,7 @@ export class ElementPicker {
           }
         }),
         this.button("返回上一层", () => {
+          this.cancelPendingAsk();
           this.locked = this.ancestors.pop() || this.locked;
           this.render();
         }),
@@ -395,6 +405,12 @@ export class ElementPicker {
       }
       if (this.busy || this.submitting) actions.querySelectorAll("button").forEach(b => b.disabled = true);
       menu.append(actions);
+      if (this.askTimer) {
+        const status = document.createElement("p");
+        status.setAttribute("role", "status");
+        status.textContent = "等待提问…";
+        menu.append(status);
+      }
       if (this.error) {
         const error = document.createElement("p");
         error.setAttribute("role", "alert");
@@ -414,10 +430,12 @@ export class ElementPicker {
     }
   }
   private cancelEditor() {
+    this.cancelPendingAsk();
     this.locked = null; this.editingId = ""; this.draft = ""; this.ancestors = []; this.composing = false;
     this.focused = ""; void browser.runtime.sendMessage({ action: "elementFocus", id: "" }).catch(() => {});
   }
   private async save(question: string): Promise<boolean> {
+    this.cancelPendingAsk();
     if (this.busy || !this.locked) return false;
     if (!question.trim()) { this.fail("请填写给 AI 的问题"); return false; }
     if (this.editingId) {
@@ -428,20 +446,44 @@ export class ElementPicker {
     }
     return await this.capture(question);
   }
-  private async submit(question: string) {
-    if (this.busy || this.submitting || this.composing) return;
+  private cancelPendingAsk() {
+    clearTimeout(this.askTimer);
+    this.askTimer = undefined;
+  }
+  private scheduleAsk(question: string) {
+    if (this.busy || this.submitting || this.composing || !this.locked) return;
+    this.cancelPendingAsk();
     if (!question.trim()) { this.fail("请填写给 AI 的问题"); return; }
+    this.draft = question;
+    this.error = "";
+    // Native sidePanel.open must run in the original click/Enter gesture.
+    // Only capture + submission wait for the shared 400 ms trailing debounce.
+    const opening = browser.runtime.sendMessage({ action: MESSAGE_TYPES.OPEN_SIDEPANEL })
+      .catch((error: unknown) => ({ success: false, error: error instanceof Error ? error.message : String(error) }));
+    const target = this.locked;
+    contentLogger.info("元素提问已排队", { delayMs: 400 });
+    this.askTimer = setTimeout(() => {
+      this.askTimer = undefined;
+      if (this.destroyed || this.locked !== target) return;
+      void this.submit(question, opening);
+    }, 400);
+    this.render();
+  }
+  private async submit(question: string, opening: Promise<any>) {
+    if (this.busy || this.submitting || this.composing || !this.locked || this.destroyed) return;
     this.submitting = true;
-    const opening = browser.runtime.sendMessage({ action: MESSAGE_TYPES.OPEN_SIDEPANEL });
+    contentLogger.info("元素提问开始");
     this.render();
     try {
       const result = await opening;
-      if (!result?.success) throw new Error("侧栏未打开，请重试提问");
+      if (!result?.success) throw new Error(result?.error || "侧栏未打开，请重试提问");
+      if (this.destroyed || !this.locked) { this.submitting = false; return; }
       const edited = this.marks.get(this.editingId);
       if (edited) edited.snapshot.sent = false;
       await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       if (!await this.save(question)) { this.submitting = false; this.render(); return; }
       this.sendRequest = { id: crypto.randomUUID() };
+      contentLogger.info("元素提问等待侧栏接收", { requestId: this.sendRequest.id });
       const requestId = this.sendRequest.id;
       setTimeout(() => {
         if (!this.destroyed && this.sendRequest?.id === requestId) {
@@ -452,6 +494,7 @@ export class ElementPicker {
       this.error = "正在发送…";
     } catch (error) {
       this.submitting = false; this.error = error instanceof Error ? error.message : String(error);
+      contentLogger.warn("元素提问失败", this.error);
     }
     this.render();
   }
@@ -550,6 +593,7 @@ export class ElementPicker {
       return true;
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
+      contentLogger.warn("元素截图失败", this.error);
       return false;
     } finally {
       for (const [el, value] of hidden) el.style.visibility = value;
@@ -558,6 +602,7 @@ export class ElementPicker {
     }
   }
   destroy() {
+    this.cancelPendingAsk();
     this.destroyed = true;
     this.locked = null;
     this.observer.disconnect();

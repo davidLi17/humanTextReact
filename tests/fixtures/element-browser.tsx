@@ -27,11 +27,14 @@ w.browser = {
       removeListener: (fn: any) => listeners.delete(fn),
     },
     sendMessage: async (request: any) => {
-      if (request.action === "captureElement")
+      if (request.action === "captureElement") {
+        w.captureRequests = (w.captureRequests || 0) + 1;
+        if (w.captureError) return {success: false, error: w.captureError};
         return captureElement(request, {
           tab: { id: 7, windowId: 1 },
           frameId: 0,
         } as any).catch((error) => ({ success: false, error: error.message }));
+      }
       if (request.action === "elementFocus") await w.forwardFocus(request);
       return { success: true };
     },
