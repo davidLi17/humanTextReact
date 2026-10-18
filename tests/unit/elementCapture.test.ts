@@ -12,10 +12,11 @@ test("capture denied by activeTab permission gives user-invocation guidance with
 
 for (const size of [512 * 1024 + 1, MAX_ELEMENT_IMAGE_BYTES, MAX_ELEMENT_IMAGE_BYTES + 1]) {
   test(`capture accepts PNG bytes through 5 MiB, not base64 length: ${size}`, async () => {
-    const restore = preserveGlobals("browser", "createImageBitmap", "OffscreenCanvas");
+    const restore = preserveGlobals("browser", "createImageBitmap", "OffscreenCanvas", "fetch");
     const close = mock(() => {});
     try {
       setTestGlobal("browser", {tabs: {query: async () => [{id: 7}], captureVisibleTab: async () => "data:image/png;base64,eA=="}});
+      setTestGlobal("fetch", async () => ({blob: async () => new Blob()}));
       setTestGlobal("createImageBitmap", async () => ({width: 100, height: 100, close}));
       setTestGlobal("OffscreenCanvas", class {
         width = 10; height = 10;
