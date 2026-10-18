@@ -4,7 +4,7 @@ import type { ExplanationElement, ExplanationSpec, GenUiAttachment, GenUiRequest
 export const MAX_GENUI_BYTES = 65_536;
 export const MAX_GENUI_STORAGE_BYTES = 1_048_576;
 const unsafeKeys = new Set(['__proto__', 'prototype', 'constructor']);
-function fail(): never { throw new Error('Invalid explanation UI data'); }
+function fail(reason?: string): never { throw new Error(reason ? `GenUI: ${reason}` : 'Invalid explanation UI data'); }
 export function assertSafeJson(value: unknown): void {
   const seen = new Set<object>();
   let nodes = 0;
@@ -51,10 +51,12 @@ export function validateExplanationSpec(value: unknown): ExplanationSpec {
     if (typeof element.type !== 'string' || !Object.hasOwn(componentSchemas, element.type)) fail();
     const type = element.type as keyof typeof componentSchemas;
     const props = componentSchemas[type].parse(element.props);
-    if (!Array.isArray(element.children) || element.children.length > 100) fail();
-    const children = element.children.map(id);
+    // json-render leaves may omit children; preview already treats omission as an empty list.
+    const rawChildren = element.children === undefined ? [] : element.children;
+    if (!Array.isArray(rawChildren) || rawChildren.length > 100) fail('组件 children 必须是数组且最多包含100项');
+    const children = rawChildren.map(id);
     unique(children);
-    if (type !== 'Card' && children.length) fail();
+    if (type !== 'Card' && children.length) fail('只有 Card 组件可以包含子元素');
     if (type === 'TreeInspector') {
       const nodes = (props as typeof componentSchemas.TreeInspector._output).nodes;
       unique(nodes.map(node => node.id));
@@ -82,20 +84,20 @@ export function validateExplanationSpec(value: unknown): ExplanationSpec {
     }
     if (type === 'Chart') {
       const chart = props as typeof componentSchemas.Chart._output;
-      if (chart.type === 'pie' && chart.series.length !== 1) fail();
-      if (chart.series.some(series => series.values.length !== chart.categories.length)) fail();
-      if (chart.type === 'pie' && chart.series[0].values.some(value => value < 0)) fail();
+      if (chart.type === 'pie' && chart.series.length !== 1) fail('饼图必须只有一组数值');
+      if (chart.series.some(series => series.values.length !== chart.categories.length)) fail('图表分类数量与数值数量不一致');
+      if (chart.type === 'pie' && chart.series[0].values.some(value => value < 0)) fail('饼图不能包含负数');
     }
     elements[key] = { type, props, children } as ExplanationElement;
   }
   const visited = new Set<string>();
   function walk(key: string, depth: number) {
-    if (depth > 8 || !Object.hasOwn(elements, key) || visited.has(key)) fail();
+    if (depth > 8 || !Object.hasOwn(elements, key) || visited.has(key)) fail('交互元素引用缺失、重复、成环或层级过深');
     visited.add(key);
     elements[key].children.forEach(child => walk(child, depth + 1));
   }
   walk(root, 1);
-  if (visited.size !== entries.length) fail();
+  if (visited.size !== entries.length) fail('包含未连接到根节点的交互元素');
   return { root, elements };
 }
 

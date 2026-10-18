@@ -111,7 +111,7 @@ test('automatic GenUI keeps a readable tool fallback when its card is invalid',a
   const argumentsText=JSON.stringify({...envelope,spec:{root:'missing',elements:{}}});
   mockStream(toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText}},'tool_calls'));
   expect(await TranslationService.translateText(autoParams,context())).toBe(envelope.fallbackText);
-  expect(updates.at(-1)).toMatchObject({content:envelope.fallbackText,done:true,genUiWarning:'交互讲解未通过校验，已保留文字回答。'});
+  expect(updates.at(-1)).toMatchObject({content:envelope.fallbackText,done:true,genUiWarning:expect.stringContaining('交互内容结构未通过校验')});
   expect(updates.at(-1).genUi).toBeUndefined();
 });
 
@@ -124,6 +124,49 @@ for (const [name, fallbackText] of [
   mockStream(toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText}},'tool_calls'));
   expect(await TranslationService.translateText(autoParams,context())).toBe('概念');
   expect(updates.at(-1)).toMatchObject({content:'概念',done:true,genUi:{fallbackText:'概念'}});
+});
+
+test('automatic chart tool with omitted leaf children survives final validation without fallbackText', async () => {
+  const value = {version:1,spec:{root:'root',elements:{
+    root:{type:'Card',props:{title:'季度收入'},children:['explanation','chart']},
+    explanation:{type:'Text',props:{text:'比较两个季度的收入。'}},
+    chart:{type:'Chart',props:{type:'bar',categories:['第一季度','第二季度'],series:[{name:'收入',values:[120,240]}]}},
+  }}};
+  const args=JSON.stringify(value);
+  expect(createGenUiPreview(args,meta,'preview')).toBeDefined();
+  mockStream(toolFrame({index:0,id:'chart-call',function:{name:'render_interactive_explanation',arguments:args}},'tool_calls'));
+  const result=await TranslationService.translateText(autoParams,context());
+  expect(result).toContain('比较两个季度的收入。');
+  expect(result).toContain('第二季度：收入 240');
+  expect(updates.at(-1)).toMatchObject({done:true,genUiPending:false,genUi:{spec:{elements:{chart:{children:[]}}}}});
+  expect(updates.at(-1).error).toBeUndefined();
+  expect(updates.at(-1).genUiWarning).toBeUndefined();
+});
+
+test('invalid final chart keeps readable preview text and explains the exact failure, never promotes a shortened chart', async () => {
+  const value={version:1,spec:{root:'root',elements:{
+    root:{type:'Card',props:{title:'季度比较'},children:['text','chart']},
+    text:{type:'Text',props:{text:'第一季度收入较低，第二季度收入更高。'},children:[]},
+    chart:{type:'Chart',props:{type:'bar',categories:['第一季度','第二季度'],series:[{name:'收入',values:[876543]}]},children:[]},
+  }}};
+  const args=JSON.stringify(value);
+  expect(createGenUiPreview(args,meta,'preview')).toBeDefined();
+  mockStream(toolFrame({index:0,id:'chart-call',function:{name:'render_interactive_explanation',arguments:args}},'tool_calls'));
+  const result=await TranslationService.translateText(autoParams,context());
+  expect(result).toContain('第一季度收入较低，第二季度收入更高。');
+  expect(result).not.toContain('876543');
+  expect(updates.at(-1)).toMatchObject({done:true,genUiPending:false,genUiWarning:expect.stringContaining('图表分类数量与数值数量不一致')});
+  expect(updates.at(-1).genUi).toBeUndefined();
+  expect(updates.at(-1).error).toBeUndefined();
+});
+
+test('chart-only validation failure reports a chart error instead of model compatibility and never fabricates a card', async () => {
+  const args=JSON.stringify({version:1,spec:{root:'chart',elements:{chart:{type:'Chart',props:{type:'line',categories:['一','二'],series:[{name:'数量',values:[1]}]},children:[]}}}});
+  expect(createGenUiPreview(args,meta,'preview')).toBeDefined();
+  mockStream(toolFrame({index:0,id:'chart-call',function:{name:'render_interactive_explanation',arguments:args}},'tool_calls'));
+  await expect(TranslationService.translateText(autoParams,context())).rejects.toThrow('图表分类数量与数值数量不一致');
+  expect(updates.at(-1).error).not.toContain('接口兼容性');
+  expect(updates.at(-1).genUi).toBeUndefined();
 });
 
 test('automatic GenUI stops collecting after tool arguments exceed its byte limit',async()=>{

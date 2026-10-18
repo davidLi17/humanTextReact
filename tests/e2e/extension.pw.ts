@@ -13,7 +13,7 @@ interface RecordedModelRequest {
 interface LocalFixtureServer {
   baseUrl: string;
   modelRequests: RecordedModelRequest[];
-  genUiControl: { delayMs: number; finish: "normal" | "truncated" | "interrupted" };
+  genUiControl: { delayMs: number; finish: "normal" | "truncated" | "interrupted"; omitLeafChildren?: boolean; toolOnly?: boolean; invalidChart?: boolean };
   createGenUiPreviewGate(): { reached: Promise<void>; release(): void };
   close(): Promise<void>;
 }
@@ -121,10 +121,16 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
           tool.function?.name === "render_interactive_explanation"
       ) && body.messages?.at(-1)?.content === GENUI_AUTO_QUESTION;
       if (shouldRenderGenUi) {
-        const raw = JSON.stringify(GENUI_FIXTURE);
+        const mode = { ...genUiControl };
+        const fixture: any = structuredClone(GENUI_FIXTURE);
+        if (mode.omitLeafChildren) for (const element of Object.values(fixture.spec.elements) as any[]) {
+          if (element.type !== "Card") delete element.children;
+        }
+        if (mode.toolOnly) delete fixture.fallbackText;
+        if (mode.invalidChart) fixture.spec.elements.chart.props.series[0].values.pop();
+        const raw = JSON.stringify(fixture);
         const firstStepEnd = raw.indexOf('},{"id":"two"');
         if (firstStepEnd < 0) throw new Error("GenUI fixture 缺少第二个步骤");
-        const mode = { ...genUiControl };
         response.writeHead(200, {
           "Access-Control-Allow-Origin": "*",
           "Cache-Control": "no-cache",
@@ -134,7 +140,7 @@ async function startFixtureServer(): Promise<LocalFixtureServer> {
           `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
         const toolDelta = (argumentsText: string, finish_reason: string | null = null) =>
           `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call-genui", type: "function", function: { name: "render_interactive_explanation", arguments: argumentsText } }] }, finish_reason }] })}\n\n`;
-        response.write(contentDelta(GENUI_INTRO));
+        if (!mode.toolOnly) response.write(contentDelta(GENUI_INTRO));
         response.write(toolDelta(raw.slice(0, firstStepEnd + 2)));
         const gate = previewGate;
         previewGate = undefined;
@@ -1267,6 +1273,50 @@ test("GenUI normal request keeps text visible, persists local selection, and reg
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.waitForTimeout(1200);
   await finalCard.screenshot({path:resolve("..", "..", "outputs", "genui-chart-dark-narrow.png")});
+  expect(harness.unexpectedExternalRequests).toEqual([]);
+});
+
+test("GenUI finalization renders omitted leaf children, survives reload and keeps text for a rejected chart", async ({harness},testInfo)=>{
+  harness.server.genUiControl.omitLeafChildren=true;
+  harness.server.genUiControl.toolOnly=true;
+  const page=await openGenUiSource(harness);
+  const input=page.getByPlaceholder(/输入追问、黑话术语或指令/);
+  await input.fill(GENUI_AUTO_QUESTION);
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  const card=page.getByLabel('交互讲解卡片');
+  await expect(card.locator('.genui-chart-canvas svg')).toBeVisible();
+  await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
+  await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.find(message=>message.genUi)?.status).toBe('completed');
+  const stored=await readGenUiSessions(page);
+  const completed=stored[0].messages.find(message=>message.genUi)!;
+  expect(completed.status).toBe('completed');
+  expect(completed.genUi!.spec.elements.chart.children).toEqual([]);
+  expect(completed.content).toContain('Button.tsx');
+  await page.screenshot({path:testInfo.outputPath('genui-compatible-final.png'),fullPage:true});
+  await page.reload();
+  await expect(page.getByLabel('交互讲解卡片').locator('.genui-chart-canvas svg')).toBeVisible();
+  await input.fill(GENUI_FOLLOW_UP_QUESTION);
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
+  expect(JSON.stringify(harness.server.modelRequests[1].body.messages)).toContain(completed.content);
+  await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
+
+  harness.server.genUiControl.invalidChart=true;
+  await input.fill(GENUI_AUTO_QUESTION);
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
+  await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
+  await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.at(-1)?.genUiWarning).toContain('图表分类数量与数值数量不一致');
+  const after=await readGenUiSessions(page);
+  const last=after[0].messages.at(-1)!;
+  expect(last.status).toBe('completed');
+  expect(last.genUi).toBeUndefined();
+  expect(last.genUiPreview).toBeUndefined();
+  expect(last.content).toContain('Button.tsx');
+  await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toHaveCount(0);
+  await page.screenshot({path:testInfo.outputPath('genui-invalid-chart-text.png'),fullPage:true});
+  await page.reload();
+  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 

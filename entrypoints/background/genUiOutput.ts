@@ -17,7 +17,7 @@ export interface GenUiRequest {
   assistantMessageId: string;
 }
 
-function readableSpecSummary(spec: ExplanationSpec): string {
+export function readableSpecSummary(spec: ExplanationSpec, includeChartData = true): string {
   const lines: string[] = [];
   const add = (text: string) => {
     const value = text.trim();
@@ -26,7 +26,7 @@ function readableSpecSummary(spec: ExplanationSpec): string {
   };
   for (const element of Object.values(spec.elements)) {
     switch (element.type) {
-      case "Card": add(element.props.title || "交互讲解"); break;
+      case "Card": if (element.props.title || includeChartData) add(element.props.title || "交互讲解"); break;
       case "Text": add(element.props.text); break;
       case "StepViewer": element.props.steps.forEach((step) => add(`${step.title}：${step.description}`)); break;
       case "ConceptTabs": element.props.tabs.forEach((tab) => add(`${tab.label}：${tab.content}`)); break;
@@ -38,6 +38,7 @@ function readableSpecSummary(spec: ExplanationSpec): string {
         break;
       }
       case "Chart": {
+        if (!includeChartData) break;
         add(element.props.title || "图表");
         element.props.categories.forEach((category, index) => {
           add(`${category}：${element.props.series.map((series) => `${series.name} ${series.values[index]}`).join("，")}`);
@@ -46,7 +47,20 @@ function readableSpecSummary(spec: ExplanationSpec): string {
       }
     }
   }
-  return lines.join("\n").slice(0, AUTO_GENUI_FALLBACK_MAX_CHARS).trim() || "交互讲解";
+  return lines.join("\n").slice(0, AUTO_GENUI_FALLBACK_MAX_CHARS).trim() || (includeChartData ? "交互讲解" : "");
+}
+
+/** Explain validation failure without logging model arguments or field values. */
+export function describeGenUiValidationError(error: unknown): string {
+  const detail = error instanceof Error && error.cause ? error.cause : error;
+  if (detail instanceof SyntaxError) return "工具返回的 JSON 不完整或格式不正确";
+  const issues = (detail as {issues?: {path?: unknown[]}[]})?.issues;
+  if (Array.isArray(issues) && issues.length) {
+    const path = issues[0].path?.map(String).join(".").slice(0, 120);
+    return path ? `交互组件字段 ${path} 不符合格式要求` : "交互内容的标识或字段格式不正确";
+  }
+  if (detail instanceof Error && detail.message.startsWith("GenUI: ")) return detail.message.slice(7);
+  return "交互内容结构未通过校验";
 }
 
 /** Copy only bounded, host-owned metadata. Model output can never set ownership. */
@@ -140,8 +154,8 @@ export class GenUiOutputBuffer {
       const attachment = normalizeGenUiAttachment(candidate);
       if (!attachment) throw new Error(GENUI_FAILURE_TEXT);
       return { fallbackText, attachment };
-    } catch {
-      throw new Error(GENUI_FAILURE_TEXT);
+    } catch (cause) {
+      throw new Error(GENUI_FAILURE_TEXT, { cause });
     } finally {
       this.clear();
     }
