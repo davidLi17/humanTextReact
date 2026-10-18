@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseGeneratedUiEnvelope } from '../../entrypoints/shared/genui/parse';
-import { validateExplanationSpec, normalizeGenUiAttachment, normalizeGenUiRequestIntent, normalizeGenUiSessions, MAX_GENUI_BYTES } from '../../entrypoints/shared/genui/profile';
+import { validateExplanationSpec, recoverGeneratedExplanationSpec, normalizeGenUiAttachment, normalizeGenUiRequestIntent, normalizeGenUiSessions, MAX_GENUI_BYTES } from '../../entrypoints/shared/genui/profile';
 import { GENUI_SYSTEM_PROMPT } from '../../entrypoints/shared/genui/prompt';
 import { explanationCatalog, explanationComponentJsonSchemas } from '../../entrypoints/shared/genui/catalog';
 import { buildHistoryPayload, type ChatSession } from '../../entrypoints/shared/chatTypes';
@@ -10,6 +10,41 @@ const spec = () => ({ root: 'root', elements: { root: { type: 'Card' as const, p
 const attachment = () => ({ id: 'ui-1', protocolVersion: 1, catalogVersion: 'explanation-v1', revision: 1, spec: spec(), sourceMessageIds: ['source-1'], contextFingerprint: 'fp:123' });
 const envelope = () => ({ version: 1, fallbackText: '完整文字解释', spec: spec() });
 const session = (ui: unknown = attachment()): ChatSession => ({ id: 's1', title: '示例', createdAt: 1, updatedAt: 1, messages: [{ id: 'a1', role: 'assistant', content: '完整文字解释', genUi: ui as any, createdAt: 1 }] });
+
+describe('usable final model components', () => {
+  test('defaults optional fields, projects known props and normalizes presentation IDs', () => {
+    const result = recoverGeneratedExplanationSpec({root:'根 卡片',elements:{
+      '根 卡片':{type:'Card',props:{title:null,className:'ignored'},children:['steps']},
+      steps:{type:'StepViewer',props:{steps:[{id:'s1',title:'开始',extra:true}]},children:null},
+    }});
+    expect(result.spec.root).toBe('generated-0');
+    expect(result.spec.elements['generated-0'].props).toEqual({});
+    expect(result.spec.elements.steps.props).toEqual({steps:[{id:'s1',title:'开始',description:''}]});
+    expect(normalizeGenUiAttachment({...attachment(),spec:result.spec})).toBeDefined();
+  });
+  test('isolates malformed chart and graph edges, retains independent legal components through restore', () => {
+    const result = recoverGeneratedExplanationSpec({root:'root',elements:{
+      root:{type:'Card',props:{},children:['text','chart','missing','root','text']},
+      text:{type:'Text',props:{text:'可用内容'}},
+      orphan:{type:'ConceptTabs',props:{tabs:[{id:'a',label:'概念',content:'独立内容'}]}},
+      chart:{type:'Chart',props:{type:'bar',categories:['甲','乙'],series:[{name:'数据',values:[7]}]}},
+    }});
+    expect(result.spec.elements.root.children).toEqual(['text','orphan']);
+    expect(result.spec.elements.chart).toBeUndefined();
+    expect(result.warnings.join('；')).toContain('图表分类数量与数值数量不一致');
+    expect(normalizeGenUiAttachment({...attachment(),spec:result.spec})?.spec).toEqual(result.spec);
+  });
+  test('keeps the data-only boundary and rejects unsafe JSON even when a valid sibling exists', () => {
+    const result = recoverGeneratedExplanationSpec({root:'root',elements:{
+      root:{type:'Card',props:{},children:['text','script']},
+      text:{type:'Text',props:{text:'纯文字',dangerouslySetInnerHTML:{__html:'<script>fetch()</script>'}},on:{click:'fetch'}},
+      script:{type:'iframe',props:{src:'https://example.com'}},
+    }});
+    expect(result.spec.elements.text).toEqual({type:'Text',props:{text:'纯文字'},children:[]});
+    expect(result.spec.elements.script).toBeUndefined();
+    expect(()=>recoverGeneratedExplanationSpec(JSON.parse('{"root":"text","elements":{"text":{"type":"Text","props":{"text":"ok","__proto__":{}}}}}'))).toThrow();
+  });
+});
 
 describe('strict explanation protocol', () => {
   test('real catalog and strict JSON return rebuilt safe objects', () => {

@@ -1279,11 +1279,16 @@ test("GenUI normal request keeps text visible, persists local selection, and reg
 test("GenUI finalization renders omitted leaf children, survives reload and keeps text for a rejected chart", async ({harness},testInfo)=>{
   harness.server.genUiControl.omitLeafChildren=true;
   harness.server.genUiControl.toolOnly=true;
+  const previewGate=harness.server.createGenUiPreviewGate();
   const page=await openGenUiSource(harness);
   const input=page.getByPlaceholder(/输入追问、黑话术语或指令/);
   await input.fill(GENUI_AUTO_QUESTION);
   await page.getByRole('button',{name:'发送',exact:true}).click();
   const card=page.getByLabel('交互讲解卡片');
+  await previewGate.reached;
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('status')).toHaveText('生成中');
+  previewGate.release();
   await expect(card.locator('.genui-chart-canvas svg')).toBeVisible();
   await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
   await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.find(message=>message.genUi)?.status).toBe('completed');
@@ -1298,25 +1303,32 @@ test("GenUI finalization renders omitted leaf children, survives reload and keep
   await input.fill(GENUI_FOLLOW_UP_QUESTION);
   await page.getByRole('button',{name:'发送',exact:true}).click();
   await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
-  expect(JSON.stringify(harness.server.modelRequests[1].body.messages)).toContain(completed.content);
+  expect(harness.server.modelRequests[1].body.messages.some((message:any)=>typeof message.content==='string' && message.content.includes('Button.tsx'))).toBe(true);
   await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
 
   harness.server.genUiControl.invalidChart=true;
+  const invalidGate=harness.server.createGenUiPreviewGate();
   await input.fill(GENUI_AUTO_QUESTION);
   await page.getByRole('button',{name:'发送',exact:true}).click();
+  await invalidGate.reached;
+  await expect(page.getByLabel('交互讲解卡片').last()).toBeVisible();
+  invalidGate.release();
   await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
   await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
   await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.at(-1)?.genUiWarning).toContain('图表分类数量与数值数量不一致');
   const after=await readGenUiSessions(page);
   const last=after[0].messages.at(-1)!;
   expect(last.status).toBe('completed');
-  expect(last.genUi).toBeUndefined();
+  expect(last.genUi).toBeDefined();
+  expect(last.genUi!.spec.elements.chart).toBeUndefined();
   expect(last.genUiPreview).toBeUndefined();
   expect(last.content).toContain('Button.tsx');
-  await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toHaveCount(0);
+  await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toBeVisible();
+  await expect(page.locator(`[data-message-id="${last.id}"]`).locator('.genui-chart-canvas')).toHaveCount(0);
   await page.screenshot({path:testInfo.outputPath('genui-invalid-chart-text.png'),fullPage:true});
   await page.reload();
   await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
+  await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toBeVisible();
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 

@@ -2200,6 +2200,10 @@ describe("Sidepanel App 真实 React 交互", () => {
       document.querySelector(".conversation-recap-scope")?.textContent?.replace(/\s+/g, "")
     ).toBe("本次覆盖4/4条消息");
 
+    await waitFor(() => {
+      const saved = (mock.localStore.sidepanel_chat_sessions as any[]).find(session => session.id === currentSession.id);
+      expect(saved.messages.at(-1)?.content).toBe(recapContent);
+    });
     view.unmount();
     render(<SidePanelApp />);
     await screen.findByText("今天确认验收时间并同步负责人。");

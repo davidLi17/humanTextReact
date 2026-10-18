@@ -36,6 +36,98 @@ function object(value: unknown, keys: string[]): Record<string, any> {
 function id(value: unknown): string { return idSchema.parse(value); }
 function unique(values: string[]) { if (new Set(values).size !== values.length) fail(); }
 
+/** Model formatting is not a trust boundary: project onto known data fields. */
+export function normalizeGeneratedProps(type: string, value: unknown, defaults = true): unknown {
+  const schema = componentSchemas[type as keyof typeof componentSchemas];
+  if (!schema) return value;
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const props = Object.fromEntries(Object.keys(schema.shape).filter(key => input[key] !== undefined && input[key] !== null).map(key => [key, input[key]]));
+  const project = (item: any, keys: string[]) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(keys.filter(key => item[key] !== undefined).map(key => [key, item[key]])) : item;
+  const fields: Record<string, [string, string[]]> = {
+    TreeInspector: ['nodes', ['id', 'label', 'parentId', 'description']],
+    ConceptTabs: ['tabs', ['id', 'label', 'content']],
+    StepViewer: ['steps', ['id', 'title', 'description']],
+    CompareTable: ['columns', ['id', 'label']],
+    Chart: ['series', ['name', 'values']],
+  };
+  const field = fields[type];
+  const items = field ? props[field[0]] : undefined;
+  if (field && Array.isArray(items)) props[field[0]] = items.map((item: any) => {
+    const clean = project(item, field[1]);
+    if (clean && typeof clean === 'object') {
+      if (defaults && type === 'TreeInspector' && clean.parentId === undefined) clean.parentId = null;
+      if (defaults && type === 'StepViewer' && clean.description == null) clean.description = '';
+      if (type === 'TreeInspector' && clean.description === null) delete clean.description;
+    }
+    return clean;
+  });
+  if (type === 'CompareTable' && Array.isArray(props.rows)) props.rows = props.rows.map(item => project(item, ['id', 'cells']));
+  return props;
+}
+
+/** Finalize complete model JSON component by component, never a shortened preview. */
+export function recoverGeneratedExplanationSpec(value: unknown): { spec: ExplanationSpec; warnings: string[] } {
+  assertSafeJson(value);
+  if (jsonByteLength(value) > MAX_GENUI_BYTES) fail();
+  const raw = object(value, ['root', 'elements']);
+  const source = object(raw.elements, Object.keys(raw.elements || {}));
+  const entries = Object.entries(source);
+  if (!entries.length || entries.length > 100) fail();
+  const warnings = new Set<string>();
+  const candidates: Record<string, ExplanationElement> = {};
+  const names = new Map(entries.map(([key], index) => [key, idSchema.safeParse(key).success ? key : `generated-${index}`]));
+  // Reserve generated names without colliding with a model's existing valid IDs.
+  for (const [key, name] of names) if (key !== name) {
+    let next = name;
+    while (entries.some(([existing]) => existing === next) || [...names].some(([other, mapped]) => other !== key && mapped === next)) next += '-';
+    names.set(key, next);
+  }
+  for (const [key, entry] of entries) {
+    try {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) fail();
+      const element = entry as Record<string, any>;
+      const name = names.get(key)!;
+      const standalone = validateExplanationSpec({ root: name, elements: { [name]: {
+        type: element.type, props: normalizeGeneratedProps(element.type, element.props), children: [],
+      } } });
+      const children = element.type === 'Card' && Array.isArray(element.children)
+        ? element.children.filter((child: unknown): child is string => typeof child === 'string').map((child: string) => names.get(child) || child) : [];
+      candidates[name] = { ...standalone.elements[name], children } as ExplanationElement;
+    } catch (error) {
+      warnings.add(error instanceof Error && error.message.startsWith('GenUI: ') ? error.message.slice(7) : '部分组件字段不符合格式要求');
+    }
+  }
+  const elements: Record<string, ExplanationElement> = {};
+  const visited = new Set<string>();
+  function visit(key: string, depth: number): boolean {
+    if (!Object.hasOwn(candidates, key) || visited.has(key) || depth > 8) { warnings.add('部分缺失、重复或过深的组件引用已省略'); return false; }
+    visited.add(key);
+    const element = candidates[key];
+    const children = element.children.filter(child => visit(child, depth + 1));
+    elements[key] = { ...element, children } as ExplanationElement;
+    return true;
+  }
+  let root = typeof raw.root === 'string' ? names.get(raw.root) : undefined;
+  if (!root || !candidates[root]) root = Object.keys(candidates).find(key => candidates[key].type === 'Card');
+  if (root) visit(root, 1);
+  const remaining = Object.keys(candidates).filter(key => !visited.has(key));
+  if (remaining.length || !root) {
+    if (!root || candidates[root].type !== 'Card') {
+      let wrapper = 'generated-root';
+      while (Object.hasOwn(candidates, wrapper)) wrapper += '-';
+      if (Object.keys(candidates).length >= 100) fail();
+      elements[wrapper] = { type: 'Card', props: {}, children: root ? [root] : [] };
+      root = wrapper;
+    }
+    for (const key of remaining) if (!visited.has(key) && visit(key, 2)) elements[root].children.push(key);
+    warnings.add('已保留可独立显示的组件并整理层级');
+  }
+  // A title alone is not a usable substitute for the omitted answer/chart.
+  if (!root || (warnings.size > 0 && !Object.values(elements).some(element => element.type !== 'Card'))) fail([...warnings][0] || '没有可显示的交互组件');
+  return { spec: validateExplanationSpec({ root, elements }), warnings: [...warnings] };
+}
+
 export function validateExplanationSpec(value: unknown): ExplanationSpec {
   assertSafeJson(value);
   if (jsonByteLength(value) > MAX_GENUI_BYTES) fail();

@@ -1,6 +1,6 @@
 import { Allow, parse } from "partial-json";
 import { componentSchemas, idSchema } from "./catalog";
-import { normalizeGenUiAttachment } from "./profile";
+import { normalizeGenUiAttachment, normalizeGeneratedProps } from "./profile";
 import type { GenUiAttachment, ExplanationElement } from "./types";
 
 export interface GenUiPreviewProvenance {
@@ -93,7 +93,7 @@ function collectElements(value: unknown): Record<string, ExplanationElement> {
     if (!validId(key) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const element = raw as Record<string, unknown>;
     if (typeof element.type !== "string") continue;
-    const props = validProps(element.type, element.props);
+    const props = validProps(element.type, normalizeGeneratedProps(element.type, element.props, false));
     if (!props) continue;
     const children = Array.isArray(element.children)
       ? element.children.filter(validId)

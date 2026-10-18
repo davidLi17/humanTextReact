@@ -105,9 +105,9 @@ export class GenUiOutputBuffer {
     request: GenUiRequest,
     includeFallbackText = false,
     attachmentId = createRequestId()
-  ): { fallbackText: string; attachment: GenUiAttachment } {
+  ): { fallbackText: string; attachment: GenUiAttachment; warnings?: string[] } {
     try {
-      const parsed = parseGeneratedUiEnvelope(this.raw);
+      const parsed = parseGeneratedUiEnvelope(this.raw, true);
       const metadata = validateGenUiRequest(request);
       const candidate: GenUiAttachment = {
         id: attachmentId,
@@ -124,7 +124,7 @@ export class GenUiOutputBuffer {
       }
       const attachment = normalizeGenUiAttachment(candidate);
       if (!attachment) throw new Error(GENUI_FAILURE_TEXT);
-      return { fallbackText: parsed.fallbackText, attachment };
+      return { fallbackText: parsed.fallbackText, attachment, warnings: parsed.warnings };
     } catch {
       throw new Error(GENUI_FAILURE_TEXT);
     } finally {
@@ -135,7 +135,7 @@ export class GenUiOutputBuffer {
   finishAuto(
     request: GenUiRequest,
     attachmentId = createRequestId()
-  ): { fallbackText: string; attachment: GenUiAttachment } {
+  ): { fallbackText: string; attachment: GenUiAttachment; warnings?: string[] } {
     try {
       const parsed = parseGeneratedUiToolEnvelope(this.raw);
       const metadata = validateGenUiRequest(request);
@@ -153,7 +153,7 @@ export class GenUiOutputBuffer {
       if (jsonByteLength(candidate) > GENUI_ATTACHMENT_BYTE_LIMIT) throw new Error(GENUI_FAILURE_TEXT);
       const attachment = normalizeGenUiAttachment(candidate);
       if (!attachment) throw new Error(GENUI_FAILURE_TEXT);
-      return { fallbackText, attachment };
+      return { fallbackText, attachment, warnings: parsed.warnings };
     } catch (cause) {
       throw new Error(GENUI_FAILURE_TEXT, { cause });
     } finally {

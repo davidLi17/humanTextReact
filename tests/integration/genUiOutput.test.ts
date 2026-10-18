@@ -156,7 +156,8 @@ test('invalid final chart keeps readable preview text and explains the exact fai
   expect(result).toContain('第一季度收入较低，第二季度收入更高。');
   expect(result).not.toContain('876543');
   expect(updates.at(-1)).toMatchObject({done:true,genUiPending:false,genUiWarning:expect.stringContaining('图表分类数量与数值数量不一致')});
-  expect(updates.at(-1).genUi).toBeUndefined();
+  expect(updates.at(-1).genUi?.spec.elements.text).toBeDefined();
+  expect(updates.at(-1).genUi?.spec.elements.chart).toBeUndefined();
   expect(updates.at(-1).error).toBeUndefined();
 });
 
