@@ -212,8 +212,11 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
 
     // One trailing debounce shared by click + Enter. A burst longer than 400 ms
     // still waits until 400 ms after its final event; only the last question sends.
+    await expect(editor).toBeVisible();
+    const menuHeight = await content.locator('.menu').evaluate(el => el.getBoundingClientRect().height);
     await content.getByRole('button',{name:'提问',exact:true}).click();
     await expect(content.getByRole('status')).toHaveText('等待提问…');
+    expect(await content.locator('.menu').evaluate(el => el.getBoundingClientRect().height)).toBe(menuHeight);
     await content.waitForTimeout(250);
     await editor.fill('第二次输入'); await editor.press('Enter');
     await content.waitForTimeout(250);
@@ -238,11 +241,17 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     expect(restored.at(-1).content).toBe("继续解释");
 
     // Pending actions are cancelled by Esc, explicit cancel, exit and destruction.
-    for (const cancel of ['Escape', '取消', '退出选择', 'elementStop']) {
+    for (const cancel of ['Escape', '取消', '退出选择', 'elementStop', 'composition']) {
       await content.evaluate(() => (window as any).deliver({action:'elementStart'}));
       await content.locator('#card h2').click();
       await editor.fill('不应发送'); await editor.press('Enter');
-      if (cancel === 'Escape') await content.keyboard.press('Escape');
+      if (cancel === 'composition') {
+        await editor.dispatchEvent('compositionstart');
+        await content.waitForTimeout(450);
+        await editor.dispatchEvent('compositionend');
+        await expect(content.getByRole('status')).toHaveCount(0);
+        await expect(editor).toHaveValue('不应发送');
+      } else if (cancel === 'Escape') await content.keyboard.press('Escape');
       else if (cancel === 'elementStop') await content.evaluate(() => (window as any).deliver({action:'elementStop'}));
       else await content.getByRole('button',{name:cancel,exact:true}).click();
       await content.waitForTimeout(450);

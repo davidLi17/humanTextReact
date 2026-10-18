@@ -342,7 +342,7 @@ export class ElementPicker {
       input.disabled = this.busy || this.submitting;
       input.oninput = () => { this.draft = input.value; };
       input.addEventListener("compositionstart", () => { this.cancelPendingAsk(); this.composing = true; });
-      input.addEventListener("compositionend", () => { this.composing = false; });
+      input.addEventListener("compositionend", () => { this.composing = false; this.draft = input.value; this.render(); });
       const ask = () => this.scheduleAsk(input.value);
       input.onkeydown = e => {
         if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !this.composing && e.keyCode !== 229) {
@@ -351,7 +351,10 @@ export class ElementPicker {
       };
       const heading = document.createElement("div");
       heading.className = "menu-heading";
-      heading.textContent = "询问这个区域";
+      const title = document.createElement("span");
+      title.textContent = this.askTimer ? "等待提问…" : "询问这个区域";
+      if (this.askTimer) title.setAttribute("role", "status");
+      heading.append(title);
       const help = document.createElement("span");
       help.className = "help";
       help.tabIndex = 0;
@@ -405,12 +408,6 @@ export class ElementPicker {
       }
       if (this.busy || this.submitting) actions.querySelectorAll("button").forEach(b => b.disabled = true);
       menu.append(actions);
-      if (this.askTimer) {
-        const status = document.createElement("p");
-        status.setAttribute("role", "status");
-        status.textContent = "等待提问…";
-        menu.append(status);
-      }
       if (this.error) {
         const error = document.createElement("p");
         error.setAttribute("role", "alert");
