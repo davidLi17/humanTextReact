@@ -103,6 +103,11 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.getByPlaceholder('想问 AI 什么？').fill('第二处标记');
     await content.getByRole('button',{name:'保存并继续选择'}).click();
     await expect(content.locator('.dot')).toHaveCount(2);
+    const batchBytes = await content.evaluate(async () => {
+      const state = await (window as any).deliver({action:'elementState'});
+      return state.items.filter((item:any)=>!item.sent).reduce((sum:number,item:any)=>sum+atob(item.image.split(',')[1]).length,0);
+    });
+    await expect(content.locator('.image-size')).toContainText(`本次合计 ${(batchBytes/(1024*1024)).toFixed(2)} MB / 上限30 MB · 2/6张`);
     await content.locator('.dot').nth(1).click();
     await content.getByRole('button',{name:'删除标记',exact:true}).click();
     await expect(content.locator('.dot')).toHaveCount(1);
@@ -114,6 +119,10 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await expect(content.locator(".box.focus")).toHaveCount(1);
     await panel.getByText("查看实际发送快照", { exact: false }).click();
     const image = await panel.locator("img").getAttribute("src");
+    const actualImageBytes = Buffer.from(image!.split(',')[1], 'base64').length;
+    const sizeLabel = `截图 ${(actualImageBytes/(1024*1024)).toFixed(2)} MB / 上限5 MB`;
+    await expect(content.locator('.image-size')).toContainText(sizeLabel);
+    await expect(panel.locator('article small').first()).toContainText(sizeLabel);
     writeFileSync(testInfo.outputPath("actual-cropped-snapshot.png"), Buffer.from(image!.split(",")[1], "base64"));
     await expect(panel.locator("pre")).toContainText(
       "const a = 1;\nconsole.log(a);",

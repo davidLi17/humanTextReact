@@ -7,6 +7,7 @@ import { normalizeGenUiAttachment } from "@/entrypoints/shared/genui/profile";
 import { buildWebReadingHistoryPayload, type ActiveSidepanelRequest } from "@/entrypoints/shared/webReadingState";
 import { checkChatRequestBudget } from "@/entrypoints/shared/pageContext";
 import { createRequestId } from "@/entrypoints/shared/requestProtocol";
+import { sendImageRequest } from "@/entrypoints/shared/imageMessageTransport";
 import { MESSAGE_TYPES } from "@/entrypoints/shared/constants";
 
 export const GENUI_FEATURE_STORAGE_KEY = "sidepanel_genui_enabled";
@@ -99,11 +100,11 @@ export function useGenUiRequest(host: RequestHost) {
     const owner = { requestId: prepared.requestId, sessionId: session.id, assistantMessageId: prepared.assistant.id };
     host.start(owner, prepared.meta, prepared.user, prepared.assistant);
     try {
-      const response = await browser.runtime.sendMessage({
+      const response = await sendImageRequest({
         action: MESSAGE_TYPES.TRANSLATE, source: "sidepanel", targetKind: "sidepanel", sessionId: session.id,
         requestId: prepared.requestId, responseMode: "genui-v1", genUiRequest: prepared.meta,
         messages: prepared.payload, prismMode: false, bypassJargonVault: true, thinkingEnabled: false,
-      });
+      }, () => host.isPending(owner));
       if (!response?.success || host.isPending(owner)) host.fail(owner, "交互讲解未返回可用卡片，请重试或继续阅读原回答。");
     } catch { host.fail(owner, "交互讲解请求失败，请检查网络或模型设置后重试。"); }
   });

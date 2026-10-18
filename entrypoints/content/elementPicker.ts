@@ -5,6 +5,7 @@ import {
   type ElementSnapshot,
 } from "../shared/elementSnapshot";
 import { extractElementText, PRIVATE_ELEMENTS } from "./elementText";
+import { elementImageBudget, formatImageBytes, imageBytes } from "../shared/elementImages";
 import { contentLogger } from "../shared/logger";
 import { MESSAGE_TYPES } from "../shared/constants";
 
@@ -325,6 +326,18 @@ export class ElementPicker {
       const target = this.locked || this.hovered;
       if (target?.isConnected) outline(target, true);
     }
+    if (!this.locked && this.active && this.marks.size) {
+      const pending = [...this.marks.values()].map(item => item.snapshot).filter(item => !item.sent);
+      if (pending.length) {
+        const last = pending.at(-1)!;
+        const r = this.rect(this.marks.get(last.id)!.element);
+        const size = document.createElement("div"); size.className = "mark-tip visible image-size";
+        size.style.left = Math.max(8, Math.min(innerWidth - 288, r.x)) + "px";
+        size.style.top = Math.max(58, Math.min(innerHeight - 65, r.y + r.height + 8)) + "px";
+        size.textContent = `截图 ${formatImageBytes(imageBytes(last.image))} / 上限5 MB · 本次合计 ${formatImageBytes(elementImageBudget(pending).total)} / 上限30 MB · ${pending.length}/6张`;
+        this.ui.append(size);
+      }
+    }
     if (!this.locked && this.error) {
       const notice = document.createElement("div"); notice.className = "bar"; notice.setAttribute("role", "status"); notice.textContent = this.error; this.ui.append(notice);
     }
@@ -367,6 +380,13 @@ export class ElementPicker {
       heading.append(help);
       input.setAttribute("aria-label", "给 AI 的问题");
       menu.append(heading, input);
+      const saved = this.marks.get(this.editingId)?.snapshot;
+      if (saved) {
+        const pending = [...this.marks.values()].map(item => item.snapshot).filter(item => !item.sent || item.id === this.editingId);
+        const size = document.createElement("p"); size.className = "image-size";
+        size.textContent = `截图 ${formatImageBytes(imageBytes(saved.image))} / 上限5 MB · 本次合计 ${formatImageBytes(elementImageBudget(pending).total)} / 上限30 MB · ${pending.length}/6张`;
+        menu.append(size);
+      }
       const actions = document.createElement("div");
       actions.className = "menu-actions";
       actions.append(
@@ -585,7 +605,8 @@ export class ElementPicker {
         scope: `${partial ? "部分元素（超出视口）" : "完整元素"}；视口坐标 ${Math.round(clip.x)},${Math.round(clip.y)}，${Math.round(clip.width)}×${Math.round(clip.height)} CSS px；最长边1600像素；表单、嵌入内容及自定义元素已遮盖`,
       };
       this.marks.set(snapshot.id, { element: target, snapshot, fingerprint, pageUrl: location.href });
-      this.cancelEditor();
+      if (this.submitting) this.editingId = snapshot.id;
+      else this.cancelEditor();
       this.hovered = null;
       return true;
     } catch (error) {

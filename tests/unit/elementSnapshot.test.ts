@@ -1,8 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import {
-  MAX_ELEMENT_IMAGE_BYTES,
   cropRect,
-  fitsElementStorage,
   elementSourceUrl,
   elementSnapshotText,
   type ElementSnapshot,
@@ -13,18 +11,6 @@ import { buildModelParams } from "../../entrypoints/shared/modelCatalog";
 describe("element snapshots", () => {
   test("source attribution excludes query values, fragments and URL credentials",()=>{
     expect(elementSourceUrl("https://user:secret@example.com/report?token=private#password")).toBe("https://example.com/report");
-  });
-  test("bounds projected serialized sessions without silently deleting or truncating images", () => {
-    const sessions=[{content:"旧会话",images:[{data:"a".repeat(1000)}]}];
-    expect(fitsElementStorage(sessions,{content:"新问题",images:[{data:"b".repeat(1000)}]},5000)).toBe(true);
-    expect(fitsElementStorage(sessions,{content:"新问题",images:[{data:"b".repeat(5000)}]},5000)).toBe(false);
-    expect(sessions[0].images[0].data.length).toBe(1000);
-  });
-  test("a full 5 MiB PNG fits storage after base64 expansion; genuine history overflow stays bounded", () => {
-    const image = `data:image/png;base64,${"A".repeat(4 * Math.ceil(MAX_ELEMENT_IMAGE_BYTES / 3))}`;
-    const message = {content: "解释截图", images: [{data: image, mimeType: "image/png"}]};
-    expect(fitsElementStorage([], message)).toBe(true);
-    expect(fitsElementStorage([{content: "h".repeat(2 * 1024 * 1024)}], message)).toBe(false);
   });
   test("image rejection provides actionable feedback without dropping the attachment", () => {
     const error = createApiError(

@@ -1,3 +1,4 @@
+import { restoreImageRequest } from "../shared/imageMessageTransport";
 import { captureElement } from "./elementCapture";
 import {
   openSidePanel,
@@ -74,6 +75,8 @@ export class MessageHandler {
     },
     // 翻译
     [MESSAGE_TYPES.TRANSLATE]: async (request, sender) => {
+      if (request.imageTransferCount && !isVerifiedGenUiSender(request, sender, browser.runtime))
+        throw new Error("截图传输仅支持侧边栏请求");
       const responseMode: "text" | "genui-v1" = request.responseMode === undefined ? "text" : request.responseMode;
       if (responseMode !== "text" && responseMode !== "genui-v1") {
         throw new Error("不支持的响应模式");
@@ -107,6 +110,8 @@ export class MessageHandler {
       }
 
       try {
+        await restoreImageRequest(request, requestContext.controller.signal);
+        if (requestContext.controller.signal.aborted) throw new DOMException("请求已取消", "AbortError");
         const selectionContext =
           target.kind === "sidepanel"
             ? normalizeSelectionContext(request.selectionContext)

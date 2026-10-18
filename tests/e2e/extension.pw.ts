@@ -1563,3 +1563,57 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await testInfo.attach('native-tab-state.json', {body: JSON.stringify({aid,bid,a:await inspect(aid),b:await inspect(bid)},null,2),contentType:'application/json'});
   await browserCdp.detach();
 });
+
+test('large screenshot history persists and sends original images beyond Chrome runtime message size', async ({harness}, testInfo) => {
+  test.setTimeout(180_000);
+  const setup = await harness.context.newPage();
+  await setup.goto(`chrome-extension://${harness.extensionId}/options.html`);
+  // Two saved batches of six 5-MiB images. The live model endpoint is always mocked.
+  // Valid one-pixel PNGs with a large tEXt ancillary chunk exercise the actual byte budget.
+  const capacity = await setup.evaluate(async () => {
+    const chrome = (globalThis as any).chrome;
+    const base = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), c => c.charCodeAt(0));
+    const crc32 = (bytes: Uint8Array) => {
+      let crc = 0xffffffff;
+      for (const byte of bytes) { crc ^= byte; for (let bit=0;bit<8;bit++) crc = (crc>>>1) ^ (crc&1 ? 0xedb88320 : 0); }
+      return (crc ^ 0xffffffff) >>> 0;
+    };
+    const size = 5 * 1024 * 1024;
+    const makeImage = (number: number) => {
+      const bytes = new Uint8Array(size), start = base.length - 12;
+      bytes.set(base.subarray(0,start));
+      const length = size - base.length - 12, view = new DataView(bytes.buffer);
+      view.setUint32(start,length); bytes.set([116,69,88,116],start+4);
+      bytes[start+8] = 65 + number; bytes[start+9] = 0; // keyword, then null-separated text
+      view.setUint32(start+8+length,crc32(bytes.subarray(start+4,start+8+length)));
+      bytes.set(base.subarray(start),size-12);
+      let binary = ''; for (let offset=0;offset<bytes.length;offset+=8192) binary += String.fromCharCode(...bytes.subarray(offset,offset+8192));
+      return {data:`data:image/png;base64,${btoa(binary)}`,mimeType:'image/png'};
+    };
+    const now = Date.now();
+    const messages = [0,1].flatMap(batch => [
+      {id:`u${batch}`,role:'user',content:`第${batch+1}批截图`,images:Array.from({length:6},(_,i)=>makeImage(batch*6+i)),createdAt:now+batch*2,status:'completed'},
+      {id:`a${batch}`,role:'assistant',content:'截图已解释',createdAt:now+batch*2+1,status:'completed'},
+    ]);
+    await chrome.storage.local.set({sidepanel_chat_sessions:[{id:'large-images',title:'截图容量验证',createdAt:now,updatedAt:now,messages}],sidepanel_active_session_id:'large-images'});
+    return {storedBytes:await chrome.storage.local.getBytesInUse('sidepanel_chat_sessions'), imageBytes:size, batchBytes:size*6};
+  });
+  expect(capacity.batchBytes).toBe(30 * 1024 * 1024);
+  expect(capacity.storedBytes).toBeGreaterThan(64 * 1024 * 1024);
+  await setup.close();
+  const panel = await harness.context.newPage();
+  await panel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);
+  const composer = panel.getByPlaceholder(/输入追问、黑话术语或指令/);
+  await composer.fill('继续解释两批截图'); await composer.press('Enter');
+  await expect.poll(()=>harness.server.modelRequests.length,{timeout:60_000}).toBe(1);
+  const sent = harness.server.modelRequests[0].body.messages.flatMap((message:any)=>Array.isArray(message.content)?message.content:[]).filter((item:any)=>item.type==='image_url');
+  expect(sent).toHaveLength(12);
+  expect(sent.map((item:any)=>Buffer.from(item.image_url.url.split(',')[1],'base64').length)).toEqual(Array(12).fill(5*1024*1024));
+  await expect.poll(()=>panel.evaluate(async()=>Object.keys(await (globalThis as any).chrome.storage.local.get(null)).filter(key=>key.startsWith('image_request:')).length),{timeout:30_000}).toBe(0);
+  await panel.reload();
+  await composer.fill('恢复后继续提问'); await composer.press('Enter');
+  await expect.poll(()=>harness.server.modelRequests.length,{timeout:60_000}).toBe(2);
+  expect(harness.server.modelRequests[1].body.messages.flatMap((m:any)=>Array.isArray(m.content)?m.content:[]).filter((i:any)=>i.type==='image_url')).toHaveLength(12);
+  await testInfo.attach('real-capacity.json',{body:JSON.stringify({...capacity,apiImageCount:sent.length,decodedBytesEach:5*1024*1024}),contentType:'application/json'});
+  await panel.screenshot({path:testInfo.outputPath('large-history-restored.png')});
+});

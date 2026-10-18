@@ -3,6 +3,7 @@ import {
   elementSnapshotText,
   type ElementSnapshot,
 } from "../../shared/elementSnapshot";
+import { elementImageBudget, formatImageBytes, imageBytes } from "../../shared/elementImages";
 import { getActiveTab, getSidePanelTabId } from "../../shared/sidepanelUtils";
 import "./ElementMarks.less";
 
@@ -125,6 +126,8 @@ export function ElementMarks({
               )
                 throw new Error("请重新选择失效目标并填写问题");
               if (!pending.length) throw new Error("没有待发送的问题，请先修改问题或添加标记");
+              const imageError = elementImageBudget(pending).error;
+              if (imageError) throw new Error(imageError);
               if (onSend(pending)) {
                 await call("elementSent", {
                   ids: pending.map((item: ElementSnapshot) => item.id),
@@ -162,6 +165,7 @@ export function ElementMarks({
           onMouseLeave={() => run("elementHover", { id: "" })}
         >
           <div className="mark-heading"><span className="mark-number">{item.number}</span><strong title={item.title}>{item.title}</strong><span className="mark-status">{item.sent ? "已发送" : "待发送"}</span></div>
+          <small>截图 {formatImageBytes(imageBytes(item.image))} / 上限5 MB</small>
           {item.invalid && (
             <p role="alert">目标已失效，请删除后重新选择。快照仍是原内容。</p>
           )}
@@ -204,6 +208,7 @@ export function ElementMarks({
           </button>
         </article>
       ))}
+      {!!pendingItems.length && <small>本次合计 {formatImageBytes(elementImageBudget(pendingItems).total)} / 上限30 MB · {pendingItems.length}/6张</small>}
       {!!pendingItems.length && (
         <button
           className="marks-send"

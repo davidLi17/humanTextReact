@@ -77,32 +77,16 @@ export function formatMessageForPayload(message: {
     };
   }
 
-  if (Array.isArray(content)) {
-    return {
-      role: message.role,
-      content,
-      images,
-      ...(selectionContext ? { selectionContext } : {}),
-    };
-  }
-
+  const existing = Array.isArray(content) ? content : [];
+  const urls = new Set(existing.filter(item => item?.type === "image_url").map(item => item.image_url?.url));
   const multimodalContent: MultimodalContentItem[] = [
-    ...images.map((img) => ({
-      type: "image_url" as const,
-      image_url: { url: img.data },
+    ...images.filter(img => !urls.has(img.data)).map(img => ({
+      type: "image_url" as const, image_url: { url: img.data },
     })),
-    {
-      type: "text" as const,
-      text: typeof content === "string" ? content : "",
-    },
+    ...(Array.isArray(content) ? content : [{type: "text" as const, text: content || ""}]),
   ];
-
-  return {
-    role: message.role,
-    content: multimodalContent,
-    images,
-    ...(selectionContext ? { selectionContext } : {}),
-  };
+  // Each image occurs once on the extension wire, as well as in the API payload.
+  return {role: message.role, content: multimodalContent, ...(selectionContext ? {selectionContext} : {})};
 }
 
 /**

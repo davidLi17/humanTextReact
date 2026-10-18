@@ -1,7 +1,9 @@
 import { getSidePanelTabId, sidepanelPendingKey } from "../shared/sidepanelUtils";
 import { tabStateKey } from "./tabStateStorage";
 import { ElementMarks } from "./components/ElementMarks";
-import { elementSnapshotText, fitsElementStorage, type ElementSnapshot } from "../shared/elementSnapshot";
+import { sendImageRequest } from "../shared/imageMessageTransport";
+import { elementImageBudget } from "../shared/elementImages";
+import { elementSnapshotText, type ElementSnapshot } from "../shared/elementSnapshot";
 import {
   DEFAULT_SETTINGS,
   MESSAGE_TYPES,
@@ -396,6 +398,7 @@ export default function SidePanelApp() {
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<string | undefined>(undefined);
+  const sendSidepanelRequest = (request: any) => sendImageRequest(request, () => activeRequestIdRef.current === request.requestId);
   const genUiRequestRef = useRef<{ requestId: string; meta: GenUiRequestMeta; automatic?: boolean } | undefined>(undefined);
   const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
     undefined
@@ -1876,7 +1879,7 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response = (await sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -1996,7 +1999,7 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response = (await sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -2206,12 +2209,9 @@ export default function SidePanelApp() {
     );
     if (!currentSession || !text.trim()) return false;
 
-    if (options.elementSnapshots && !fitsElementStorage(sessionsRef.current, {
-      content: text, images: imagesToSend,
-      elementSnapshots: options.elementSnapshots.map(({image, ...snapshot}) => snapshot),
-    })) {
-      showToast("会话快照接近存储容量上限，请先导出并删除不需要的会话，再发送标记。待发送清单已保留。");
-      return false;
+    if (options.elementSnapshots) {
+      const error = elementImageBudget(options.elementSnapshots).error;
+      if (error) { showToast(error); return false; }
     }
 
     const userMessagePreview: ChatPayloadMessage = {
@@ -2295,7 +2295,7 @@ export default function SidePanelApp() {
     setExtractError(null);
     scrollToBottom(true);
 
-    void browser.runtime.sendMessage({
+    void sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -2736,7 +2736,7 @@ export default function SidePanelApp() {
     }
 
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response = (await sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -2846,7 +2846,7 @@ export default function SidePanelApp() {
     scrollToBottom(true);
 
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response = (await sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",
@@ -3062,7 +3062,7 @@ export default function SidePanelApp() {
     }
 
     try {
-      const response = (await browser.runtime.sendMessage({
+      const response = (await sendSidepanelRequest({
         action: MESSAGE_TYPES.TRANSLATE,
         requestId: currentRequestId,
         targetKind: "sidepanel",

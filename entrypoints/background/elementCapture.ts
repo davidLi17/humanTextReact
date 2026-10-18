@@ -1,4 +1,5 @@
 import { cropRect, MAX_ELEMENT_IMAGE_BYTES } from "../shared/elementSnapshot";
+import { formatImageBytes } from "../shared/elementImages";
 /** Never return/store the full viewport: only the selected, redacted crop leaves this function. */
 export async function captureElement(
   request: any,
@@ -88,7 +89,7 @@ export async function captureElement(
       await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer(),
     );
     if (bytes.length > MAX_ELEMENT_IMAGE_BYTES)
-      throw new Error("截图超过5MB，请选择更小的区域");
+      throw new Error(`截图超过5MB：实际 ${formatImageBytes(bytes.length)}（${bytes.length} 字节），请选择更小的区域`);
     let binary = "";
     for (let i = 0; i < bytes.length; i += 8192)
       binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
