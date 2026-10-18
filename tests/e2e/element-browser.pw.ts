@@ -201,10 +201,11 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.screenshot({path:testInfo.outputPath('compact-web-editor.png')});
     await content.setViewportSize({width:340,height:580});
     await content.emulateMedia({colorScheme:'dark'});
-    const menuBounds = await content.locator('.menu').boundingBox();
-    expect(menuBounds!.x).toBeGreaterThanOrEqual(0);
-    expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(340);
-    expect(menuBounds!.y + menuBounds!.height).toBeLessThanOrEqual(580);
+    // Resize replaces the shadow editor; wait for its new layout, not the detached node.
+    await expect.poll(async () => {
+      const bounds = await content.locator('.menu').boundingBox();
+      return !!bounds && bounds.x >= 0 && bounds.x + bounds.width <= 340 && bounds.y + bounds.height <= 580;
+    }).toBe(true);
     await content.screenshot({path:testInfo.outputPath('compact-web-editor-dark-narrow.png')});
     await content.emulateMedia({colorScheme:'light'});
     await content.setViewportSize({width:1000,height:800});
