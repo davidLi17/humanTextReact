@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMemoizedFn } from "ahooks";
-import type { ChatMessage, ChatSession } from "@/entrypoints/shared/chatTypes";
+import type { ChatMessage, ChatSession, ChatPayloadMessage } from "@/entrypoints/shared/chatTypes";
 import type { GenUiRequestMeta } from "@/entrypoints/shared/genui/types";
 import { GENUI_SYSTEM_PROMPT } from "@/entrypoints/shared/genui/prompt";
 import { normalizeGenUiAttachment } from "@/entrypoints/shared/genui/profile";
@@ -19,7 +19,13 @@ export function useGenUiFeature(onError: (message: string) => void) {
     void browser.storage.local.get(GENUI_FEATURE_STORAGE_KEY).then((stored) => {
       if (!cancelled) { setEnabled(stored[GENUI_FEATURE_STORAGE_KEY] !== false); setLoaded(true); }
     }, () => { if (!cancelled) { setEnabled(false); setLoaded(true); } });
-    return () => { cancelled = true; };
+    const onChanged = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area === "local" && GENUI_FEATURE_STORAGE_KEY in changes) {
+        setEnabled(changes[GENUI_FEATURE_STORAGE_KEY].newValue !== false);
+      }
+    };
+    browser.storage.onChanged.addListener(onChanged);
+    return () => { cancelled = true; browser.storage.onChanged.removeListener(onChanged); };
   }, []);
   const toggle = useMemoizedFn((value: boolean) => {
     if (!loaded) return;
@@ -34,6 +40,14 @@ function fingerprint(value: string): string {
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
   return `ctx-${(hash >>> 0).toString(16)}-${value.length}`;
+}
+
+export function prepareAutoGenUiRequest(history: ChatMessage[], payload: ChatPayloadMessage[], assistantMessageId: string): GenUiRequestMeta {
+  return {
+    sourceMessageIds: history.filter(message => message.role === "user" || message.role === "assistant").slice(-100).map(message => message.id),
+    contextFingerprint: fingerprint(JSON.stringify(payload)),
+    assistantMessageId,
+  };
 }
 export function prepareGenUiRequest(session: ChatSession, sourceMessageId: string) {
   const index = session.messages.findIndex((message) => message.id === sourceMessageId && message.role === "assistant");

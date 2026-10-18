@@ -2220,6 +2220,7 @@ describe("Sidepanel GenUI request lifecycle", () => {
       assistantMessageId: request.genUiRequest.assistantMessageId,
       done: true, content: "可以点击树节点查看关系。",
       genUi: { id: "local-card", protocolVersion: 1, catalogVersion: "explanation-v1", revision: 1,
+        fallbackText: "目录里的 Button.tsx 是按钮组件。",
         sourceMessageIds: request.genUiRequest.sourceMessageIds,
         contextFingerprint: request.genUiRequest.contextFingerprint,
         spec: { root: "tree", elements: { tree: { type: "TreeInspector", props: { nodes: [
@@ -2229,40 +2230,52 @@ describe("Sidepanel GenUI request lifecycle", () => {
       },
     };
   }
-  test("normal completion keeps source, ignores raw partials and persists local state through existing queue", async () => {
+  async function askQuestion() {
+    const input = await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
+    fireEvent.change(input, { target: { value: "讲解这个目录的层级关系" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  }
+  test("normal question shows text and interactive card in one answer, restores state and supplies follow-up context", async () => {
     const pending = createDeferred<any>();
     const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });
     setTestGlobal("browser", mock.browser);
     const view = render(<SidePanelApp />);
-    const button = await screen.findByRole("button", { name: "交互讲解" });
-    fireEvent.click(button); fireEvent.click(button);
+    await askQuestion();
     const request = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(1); return getTranslateMessages(mock)[0]; });
-    expect(request.prismMode).toBe(false); expect(request.bypassJargonVault).toBe(true);
-    act(() => mock.emitRuntimeMessage({ ...terminal(request), done: false, content: '{"version":1,"raw-secret-marker":true}' }));
-    expect(screen.queryByText(/raw-secret-marker/)).toBeNull();
+    expect(request.autoGenUi).toBe(true);
+    expect(screen.queryByRole("button", { name: "交互讲解" })).toBeNull();
+    act(() => mock.emitRuntimeMessage({ ...terminal(request), genUi: undefined, done: false, content: "先看目录关系。", genUiPending: true }));
+    expect(await screen.findByText("先看目录关系。")).toBeTruthy();
+    expect(screen.getByText("正在生成交互讲解…")).toBeTruthy();
     act(() => mock.emitRuntimeMessage(terminal(request)));
     await act(async () => { pending.resolve({ success: true }); });
     expect(await screen.findByLabelText("交互讲解卡片")).toBeTruthy();
     expect(screen.getByText("之前的回答")).toBeTruthy();
+    expect(screen.getByText("可以点击树节点查看关系。")).toBeTruthy();
     fireEvent.click(screen.getAllByRole("button", { name: "Button.tsx" })[0]);
     await waitFor(() => {
       const stored = mock.localStore.sidepanel_chat_sessions as any[];
       expect(stored[0].messages.at(-1).genUi.viewState.tree.selectedNodeId).toBe("child");
-      expect(JSON.stringify(stored)).not.toContain("raw-secret-marker");
+      expect(stored[0].messages).toHaveLength(4);
     });
     expect(getTranslateMessages(mock)).toHaveLength(1);
     view.unmount(); render(<SidePanelApp />);
     expect(await screen.findByText("本地选中按钮")).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: "交互讲解开关" }));
-    expect(await screen.findByText("可以点击树节点查看关系。")).toBeTruthy();
-    expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
+    act(() => {
+      for (const listener of mock.storageListeners) listener({ sidepanel_genui_enabled: { newValue: false } }, "local");
+    });
+    expect(screen.getByLabelText("交互讲解卡片")).toBeTruthy();
+    await askQuestion();
+    const followUp = getTranslateMessages(mock)[1];
+    expect(followUp.autoGenUi).toBeUndefined();
+    expect(followUp.messages.find((message: any) => message.role === "assistant" && message.content.includes("Button.tsx"))?.content).toContain("目录里的 Button.tsx 是按钮组件。");
   });
-  test("wrong session and late response after stop never attach to a message; explicit retry starts new genui request", async () => {
+  test("stopping ignores late cards and retry remains an automatic normal conversation request", async () => {
     const pending = createDeferred<any>();
     const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });
     setTestGlobal("browser", mock.browser);
     render(<SidePanelApp />);
-    fireEvent.click(await screen.findByRole("button", { name: "交互讲解" }));
+    await askQuestion();
     const request = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(1); return getTranslateMessages(mock)[0]; });
     act(() => mock.emitRuntimeMessage({ ...terminal(request), sessionId: "another-session" }));
     expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
@@ -2271,7 +2284,7 @@ describe("Sidepanel GenUI request lifecycle", () => {
     expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "重试" }));
     await waitFor(() => expect(getTranslateMessages(mock)).toHaveLength(2));
-    expect(getTranslateMessages(mock)[1].responseMode).toBe("genui-v1");
+    expect(getTranslateMessages(mock)[1].autoGenUi).toBe(true);
     expect(getTranslateMessages(mock)[1].requestId).not.toBe(request.requestId);
   });
 });

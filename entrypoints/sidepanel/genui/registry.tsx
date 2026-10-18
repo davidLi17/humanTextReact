@@ -4,6 +4,7 @@ import type { Spec } from "@json-render/core";
 import { explanationCatalog } from "@/entrypoints/shared/genui/catalog";
 import type { ExplanationSpec } from "@/entrypoints/shared/genui/types";
 import { TreeInspector, ConceptTabs, CompareTable, StepViewer } from "./components/ExplanationControls";
+import { ExplanationChart } from "./components/ExplanationChart";
 
 // Host-only identity is added AFTER profile validation and never accepted from a model/import.
 // No runtime action handler, browser object, settings, expression function or network API is passed.
@@ -18,5 +19,6 @@ const registry = {
   ConceptTabs: ({ element }) => <ConceptTabs elementId={element.props.__hostElementId} tabs={element.props.tabs} />,
   CompareTable: ({ element }) => <CompareTable elementId={element.props.__hostElementId} columns={element.props.columns} rows={element.props.rows} />,
   StepViewer: ({ element }) => <StepViewer elementId={element.props.__hostElementId} steps={element.props.steps} />,
+  Chart: ({ element }) => <ExplanationChart {...element.props} />,
 } satisfies ComponentRegistry;
 export const ExplanationRenderer = createRenderer(explanationCatalog, registry);

@@ -13,6 +13,7 @@ export interface GenUiAttachment {
   spec: ExplanationSpec;
   sourceMessageIds: string[];
   contextFingerprint: string;
+  fallbackText?: string;
   viewState?: Record<string, { selectedNodeId?: string; activeTabId?: string; step?: number }>;
 }
 export interface GeneratedUiEnvelope { version: 1; fallbackText: string; spec: ExplanationSpec }

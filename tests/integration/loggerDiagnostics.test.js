@@ -89,6 +89,7 @@ describe("diagnostic redaction", () => {
       },
     ]);
     expect(normalizeDiagnosticRecord({ id: "invalid" })).toBeUndefined();
+    expect(normalizeDiagnosticRecord({ ...createRecord("sidepanel-record"), context: "sidepanel" })?.context).toBe("sidepanel");
   });
 });
 

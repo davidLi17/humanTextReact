@@ -30,6 +30,7 @@ const LOGGER_CONTEXTS = new Set<LoggerContext>([
   "content",
   "popup",
   "options",
+  "sidepanel",
 ]);
 
 function getBrowserApi(): any {

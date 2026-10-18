@@ -21,6 +21,7 @@ import type {
 import { SettingsUtils } from "@/entrypoints/shared/settingsUtils";
 import { FontScaleControl } from "@/entrypoints/shared/FontScaleControl";
 import { useFontScale } from "@/entrypoints/shared/useFontScale";
+import { useGenUiFeature } from "@/entrypoints/sidepanel/genui/useGenUiRequest";
 import {
   buildBackup,
   createBackupFileName,
@@ -98,6 +99,9 @@ function Options() {
   } = useFontScale();
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [activeTab, setActiveTab] = useState<TabCategory>("all");
+  const genUiFeature = useGenUiFeature((message) =>
+    optionsLogger.error(message)
+  );
 
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -1033,6 +1037,24 @@ function Options() {
                 </div>
                 <div className="setting-hint">
                   开启后将折叠展示 AI 的推理思考链，清晰了解黑话翻译背后的拆解逻辑。
+                </div>
+              </div>
+
+              <div className="setting-item">
+                <label htmlFor="genUiEnabled">自动交互讲解</label>
+                <div className="switch-container">
+                  <input
+                    type="checkbox"
+                    id="genUiEnabled"
+                    checked={genUiFeature.enabled}
+                    disabled={!genUiFeature.ready}
+                    onChange={(event) => genUiFeature.toggle(event.target.checked)}
+                    className="switch-input"
+                  />
+                  <label htmlFor="genUiEnabled" className="switch-label"></label>
+                </div>
+                <div className="setting-hint">
+                  AI 会根据问题选择合适的交互方式。
                 </div>
               </div>
 

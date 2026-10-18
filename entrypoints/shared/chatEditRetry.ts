@@ -119,6 +119,10 @@ export function retryAssistantMessageAndTruncate(
     errorMessage: undefined,
     suggestedQuestions: undefined,
     resultSource: undefined,
+    genUi: undefined,
+    genUiPreview: undefined,
+    genUiPending: undefined,
+    genUiWarning: undefined,
     createdAt: now,
   };
 

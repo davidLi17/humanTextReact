@@ -78,9 +78,10 @@ export class MessageHandler {
       if (responseMode !== "text" && responseMode !== "genui-v1") {
         throw new Error("不支持的响应模式");
       }
-      const genUiRequest = responseMode === "genui-v1"
+      const autoGenUi = responseMode === "text" && request.autoGenUi === true;
+      const genUiRequest = responseMode === "genui-v1" || autoGenUi
         ? validateGenUiRequest(request.genUiRequest) : undefined;
-      if (responseMode === "genui-v1" && !isVerifiedGenUiSender(request, sender, browser.runtime)) {
+      if ((responseMode === "genui-v1" || autoGenUi) && !isVerifiedGenUiSender(request, sender, browser.runtime)) {
         throw new Error("交互解释仅支持来自侧边栏的请求");
       }
       const target = getRequestTarget(request, sender);
@@ -131,6 +132,7 @@ export class MessageHandler {
           prismMode: responseMode === "genui-v1" ? false : request.prismMode,
           responseMode,
           genUiRequest,
+          autoGenUi,
         };
 
         const result = await TranslationService.translateText(

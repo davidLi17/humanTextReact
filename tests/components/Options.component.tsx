@@ -196,6 +196,25 @@ describe("Options 设置页面组件级交互与逻辑增强", () => {
     expect((screen.getByLabelText("划词快捷操作条") as HTMLInputElement).checked).toBe(false);
   });
 
+  test("自动交互讲解默认开启，关闭后立即保存并在重开时保持关闭", async () => {
+    const mock = createBrowserMock();
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("chrome", mock.browser);
+    const view = render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+
+    const toggle = screen.getByLabelText("自动交互讲解") as HTMLInputElement;
+    await waitFor(() => expect(toggle.disabled).toBe(false));
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mock.localStore.sidepanel_genui_enabled).toBe(false));
+
+    view.unmount();
+    render(<Options />);
+    await screen.findByDisplayValue("sk-initial-key");
+    await waitFor(() => expect((screen.getByLabelText("自动交互讲解") as HTMLInputElement).checked).toBe(false));
+  });
+
   test("文本输入自动保存最终值，连续切换不会丢失修改", async () => {
     const mock = createBrowserMock();
     setTestGlobal("browser", mock.browser);

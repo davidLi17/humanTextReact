@@ -1,5 +1,5 @@
 import { normalizeGenUiSessions } from "./genui/profile";
-import { ChatSession } from "./chatTypes";
+import { ChatSession, getAssistantReadableContent } from "./chatTypes";
 import { formatDateTime } from "@/entrypoints/popup/utils/helpers";
 import {
   normalizeGroundedGoalMeta,
@@ -17,9 +17,9 @@ function getExportAssistantContent(
     preceding?.role === "user" &&
     normalizeGroundedGoalMeta(preceding.groundedGoalMeta)
   ) {
-    return stripGroundedEvidenceBlock(message.content || "");
+    return stripGroundedEvidenceBlock(getAssistantReadableContent(message));
   }
-  return message?.content || "";
+  return message ? getAssistantReadableContent(message) : "";
 }
 
 /**

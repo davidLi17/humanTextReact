@@ -56,6 +56,8 @@ export function StepViewer({ steps, elementId }: Props<"StepViewer">) {
   const [state, update] = useElementViewState(elementId);
   const step = Math.min(Math.max(state.step ?? 0, 0), steps.length - 1);
   return <section className="genui-steps" aria-label="步骤讲解演示">
+    <div className="genui-step-progress" aria-label="步骤进度">{steps.map((item, index) => <button type="button" key={item.id} aria-current={index === step ? "step" : undefined}
+      aria-label={`第 ${index + 1} 步：${item.title}`} onClick={() => update({ step: index })}>{index + 1}</button>)}</div>
     <small>讲解演示 · {step + 1} / {steps.length}</small>
     <div aria-live="polite"><h4>{steps[step].title}</h4><p>{steps[step].description}</p></div>
     <div className="genui-controls"><button type="button" disabled={step === 0} onClick={() => update({ step: step - 1 })}>上一步</button>

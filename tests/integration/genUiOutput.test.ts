@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { GenUiOutputBuffer, GENUI_FAILURE_TEXT, GENUI_ATTACHMENT_BYTE_LIMIT, isVerifiedGenUiSender, validateGenUiRequest } from '../../entrypoints/background/genUiOutput';
+import { AUTO_GENUI_TOO_LARGE_TEXT, GenUiOutputBuffer, GENUI_FAILURE_TEXT, GENUI_ATTACHMENT_BYTE_LIMIT, isVerifiedGenUiSender, validateGenUiRequest } from '../../entrypoints/background/genUiOutput';
 import { TranslationService } from '../../entrypoints/background/translationService';
 import { MessageHandler } from '../../entrypoints/background/messageHandler';
 import { MessageUtils } from '../../entrypoints/background/messageUtils';
@@ -10,6 +10,8 @@ import { createSidepanelTarget } from '../../entrypoints/shared/requestProtocol'
 import { jsonByteLength, normalizeGenUiAttachment } from '../../entrypoints/shared/genui/profile';
 import { parseGeneratedUiEnvelope } from '../../entrypoints/shared/genui/parse';
 import { GENUI_SYSTEM_PROMPT } from '../../entrypoints/shared/genui/prompt';
+import { createGenUiPreview } from '../../entrypoints/shared/genui/streamPreview';
+import { AUTO_GENUI_CAPABILITY_PROMPT } from '../../entrypoints/shared/genui/tool';
 import { setRequestTimeoutRuntimeForTests } from '../../entrypoints/shared/requestTimeout';
 import { MESSAGE_TYPES } from '../../entrypoints/shared/constants';
 
@@ -17,6 +19,7 @@ const meta = {sourceMessageIds:['source-1'], contextFingerprint:'fingerprint-1',
 const envelope = {version:1, fallbackText:'安全的文字解释', spec:{root:'root',elements:{root:{type:'Card',props:{title:'概念'},children:[]}}}};
 const raw = JSON.stringify(envelope);
 const frame = (content: string, finish_reason: string | null = null, reasoning_content = '') => `data: ${JSON.stringify({choices:[{delta:{content,reasoning_content},finish_reason}]})}\n\n`;
+const toolFrame = (toolCall: unknown, finish_reason: string | null = null) => `data: ${JSON.stringify({choices:[{delta:{tool_calls:[toolCall]},finish_reason}]})}\n\n`;
 const originals = {fetch:globalThis.fetch, settings:SettingsUtils.getSettings, send:MessageUtils.sendRuntimeMessage, history:HistoryManager.saveTranslationHistory};
 let updates: any[];
 let histories: any[][];
@@ -49,6 +52,89 @@ function mockStream(sse:string) {
   }) as unknown as typeof fetch;
 }
 const params = {text:'测试', responseMode:'genui-v1' as const, genUiRequest:meta, prismMode:true, messages:[{role:'system' as const,content:'untrusted prompt'},{role:'user' as const,content:'测试'}]};
+const autoParams = {...params,responseMode:'text' as const,autoGenUi:true,prismMode:false};
+
+test('automatic GenUI keeps streamed text and attaches one validated tool card',async()=>{
+  const argumentsText=JSON.stringify(envelope);
+  mockStream(
+    frame('正文')+
+    toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText.slice(0,30)}})+
+    toolFrame({index:0,function:{arguments:argumentsText.slice(30)}},'tool_calls')
+  );
+  expect(await TranslationService.translateText(autoParams,context())).toBe('正文');
+  expect(body.tools?.[0].function.name).toBe('render_interactive_explanation');
+  expect(body.messages).toContainEqual({role:'system',content:AUTO_GENUI_CAPABILITY_PROMPT});
+  expect(body.messages).toContainEqual({role:'system',content:'untrusted prompt'});
+  expect(updates[0]).toMatchObject({content:'正文',assistantMessageId:meta.assistantMessageId});
+  expect(updates.at(-1)).toMatchObject({content:'正文',done:true,assistantMessageId:meta.assistantMessageId,genUiPending:false,genUi:{fallbackText:envelope.fallbackText}});
+});
+
+test('stream preview retains the first complete step before later tool arguments finish',()=>{
+  const preview=createGenUiPreview(
+    '{"version":1,"spec":{"root":"root","elements":{"root":{"type":"Card","props":{"title":"流程"},"children":["steps"]},"steps":{"type":"StepViewer","props":{"steps":[{"id":"step-1","title":"第一步","description":"已完成"},{"id":"step-2","title":"第二',
+    meta,
+    'preview-1'
+  );
+  expect(preview?.id).toBe('preview-1');
+  expect(preview?.spec.elements.steps).toMatchObject({
+    type:'StepViewer',props:{steps:[{id:'step-1',title:'第一步',description:'已完成'}]},
+  });
+});
+
+test('stream preview aligns chart categories with complete series values',()=>{
+  const preview=createGenUiPreview(
+    '{"version":1,"spec":{"root":"root","elements":{"root":{"type":"Card","props":{"title":"趋势"},"children":["chart"]},"chart":{"type":"Chart","props":{"type":"line","categories":["一月","二月","三月"],"series":[{"name":"销量","values":[12,18,',
+    meta,
+    'preview-chart'
+  );
+  expect(preview?.spec.elements.chart).toMatchObject({
+    type:'Chart',props:{categories:['一月','二月'],series:[{name:'销量',values:[12,18]}]},
+  });
+});
+
+test('automatic GenUI retries a tool-rejecting provider once and returns text',async()=>{
+  const bodies:any[]=[];
+  globalThis.fetch=(async (_url: unknown,options?: RequestInit)=>{
+    bodies.push(JSON.parse(String(options?.body)));
+    return bodies.length===1
+      ? new Response('tools are unsupported',{status:400})
+      : new Response(frame('纯文字','stop'));
+  }) as unknown as typeof fetch;
+  expect(await TranslationService.translateText(autoParams,context())).toBe('纯文字');
+  expect(bodies).toHaveLength(2);expect(bodies[0].tools).toBeDefined();expect(bodies[1].tools).toBeUndefined();
+  expect(bodies[1].messages).not.toContainEqual({role:'system',content:AUTO_GENUI_CAPABILITY_PROMPT});
+  expect(updates[0]).toMatchObject({content:'纯文字',assistantMessageId:meta.assistantMessageId,genUiPending:false});
+  expect(updates.at(-1)).toMatchObject({content:'纯文字',done:true,genUiPending:false,genUiWarning:'当前模型未提供交互讲解，已保留文字回答。'});
+});
+
+test('automatic GenUI keeps a readable tool fallback when its card is invalid',async()=>{
+  const argumentsText=JSON.stringify({...envelope,spec:{root:'missing',elements:{}}});
+  mockStream(toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText}},'tool_calls'));
+  expect(await TranslationService.translateText(autoParams,context())).toBe(envelope.fallbackText);
+  expect(updates.at(-1)).toMatchObject({content:envelope.fallbackText,done:true,genUiWarning:'交互讲解未通过校验，已保留文字回答。'});
+  expect(updates.at(-1).genUi).toBeUndefined();
+});
+
+for (const [name, fallbackText] of [
+  ['missing fallback', undefined],
+  ['empty fallback', ''],
+  ['overlong fallback', 'x'.repeat(2_001)],
+] as const) test(`automatic GenUI keeps a valid card with ${name}`, async () => {
+  const argumentsText=JSON.stringify({version:1,spec:envelope.spec,...(fallbackText === undefined ? {} : {fallbackText})});
+  mockStream(toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText}},'tool_calls'));
+  expect(await TranslationService.translateText(autoParams,context())).toBe('概念');
+  expect(updates.at(-1)).toMatchObject({content:'概念',done:true,genUi:{fallbackText:'概念'}});
+});
+
+test('automatic GenUI stops collecting after tool arguments exceed its byte limit',async()=>{
+  mockStream(
+    toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:'x'.repeat(65_537)}})+
+    toolFrame({index:0,function:{arguments:JSON.stringify(envelope)}},'tool_calls')
+  );
+  await expect(TranslationService.translateText(autoParams,context())).rejects.toThrow(AUTO_GENUI_TOO_LARGE_TEXT);
+  expect(updates.at(-1)).toMatchObject({error:AUTO_GENUI_TOO_LARGE_TEXT,done:true,genUiPending:false});
+  expect(updates.at(-1).genUi).toBeUndefined();
+});
 
 test('GenUI emits only complete validated fallback and host metadata, never reasoning/JSON', async()=>{
   mockStream(frame(raw.slice(0,20))+frame(raw.slice(20),'stop','private reasoning')+'data: [DONE]\n\n');

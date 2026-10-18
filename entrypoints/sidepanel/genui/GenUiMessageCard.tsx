@@ -15,24 +15,23 @@ interface Props {
   content: string;
   sourceLabels: string[];
   onStateChange(state: NonNullable<GenUiAttachment["viewState"]>): void;
-  onFollowUp(): void;
+  /** A preview is rendered only after it passes the same strict attachment validation. */
+  streaming?: boolean;
 }
-function ValidatedCard({ attachment, content, sourceLabels, onStateChange, onFollowUp }: Props) {
+function ValidatedCard({ attachment, content, sourceLabels, onStateChange, streaming }: Omit<Props, "attachment"> & { attachment: GenUiAttachment }) {
   const [textOnly, setTextOnly] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const { viewState: initialState, ...baseAttachment } = attachment;
   const state = useGenUiState(initialState, onStateChange, Math.max(0, MAX_GENUI_BYTES - jsonByteLength(baseAttachment) - 13));
   const spec = useMemo(() => toRuntimeSpec(attachment.spec), [attachment.spec]);
   return <section className="genui-message-card" aria-label="交互讲解卡片">
-    <header><strong>AI 交互讲解</strong><span>预设控件 · 点击不调用模型</span></header>
-    <p className="genui-source">来源：{sourceLabels.join("；") || "当前对话回答"}</p>
+    <header><div><strong>交互讲解</strong><p className="genui-source">来源：{sourceLabels.join("；") || "当前对话回答"}</p></div>{streaming && <span className="genui-streaming" role="status">生成中</span>}</header>
     <div className="genui-toolbar">
       <button type="button" onClick={() => setTextOnly(!textOnly)}>{textOnly ? "交互版本" : "文字版本"}</button>
       <button type="button" onClick={async () => {
         try { if (!navigator.clipboard?.writeText) throw new Error("unavailable"); await navigator.clipboard.writeText(content); setCopyStatus("已复制摘要"); }
         catch { setCopyStatus("复制失败，请切换文字版本手动复制"); }
       }}>复制摘要</button>
-      <button type="button" onClick={onFollowUp}>填入追问</button>
       {copyStatus && <small role="status">{copyStatus}</small>}
     </div>
     {textOnly ? <p className="genui-text">{content}</p> : <GenUiErrorBoundary fallbackText={content}>

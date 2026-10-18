@@ -75,6 +75,16 @@ describe('strict explanation protocol', () => {
     ]) expect(() => validateExplanationSpec(tree(nodes))).toThrow();
     expect(() => validateExplanationSpec({ root: 't', elements: { t: { type: 'CompareTable', props: { columns: [{ id: 'a', label: 'A' }], rows: [{ id: 'r', cells: { b: 'wrong column' } }] }, children: [] } } })).toThrow();
   });
+  test('accepts bounded chart data and rejects shape mismatches', () => {
+    const chart = { root: 'chart', elements: { chart: { type: 'Chart', props: { type: 'line', title: '本周趋势', categories: ['周一', '周二'], series: [{ name: '访问量', values: [12, 18] }] }, children: [] } } };
+    expect(() => validateExplanationSpec(chart)).not.toThrow();
+    const wrongLength = structuredClone(chart); wrongLength.elements.chart.props.series[0].values = [12];
+    const manyPieSeries = structuredClone(chart); manyPieSeries.elements.chart.props.type = 'pie'; manyPieSeries.elements.chart.props.series.push({ name: '备用', values: [1, 2] });
+    const negativePie = structuredClone(chart); negativePie.elements.chart.props.type = 'pie'; negativePie.elements.chart.props.series[0].values = [12, -1];
+    expect(() => validateExplanationSpec(wrongLength)).toThrow();
+    expect(() => validateExplanationSpec(manyPieSeries)).toThrow();
+    expect(() => validateExplanationSpec(negativePie)).toThrow();
+  });
 });
 
 describe('attachment storage and text compatibility', () => {
@@ -102,6 +112,13 @@ describe('attachment storage and text compatibility', () => {
     for (const text of [formatSessionAsMarkdown(value), formatSessionAsPlainText(value)]) {
       expect(text).toContain('完整文字解释'); expect(text).not.toContain('contextFingerprint'); expect(text).not.toContain('explanation-v1');
     }
+    value.messages[0].genUi = normalizeGenUiAttachment({ ...attachment(), fallbackText: '第二步：进入组件目录。' })!;
+    expect(normalizeGenUiAttachment(value.messages[0].genUi)?.fallbackText).toBe('第二步：进入组件目录。');
+    expect(buildHistoryPayload(value.messages)[0].content).toBe('完整文字解释\n\n第二步：进入组件目录。');
+    expect(formatSessionAsMarkdown(value)).toContain('第二步：进入组件目录。');
+    expect(JSON.parse(formatSessionAsJson(value)).messages[0].genUi.fallbackText).toBe('第二步：进入组件目录。');
+    value.messages[0].content = '第二步：进入组件目录。';
+    expect(buildHistoryPayload(value.messages)[0].content).toBe('第二步：进入组件目录。');
   });
   test('JSON export retains valid structured UI and drops malicious attachments', () => {
     expect(JSON.parse(formatSessionAsJson(session())).messages[0].genUi).toEqual(attachment());
@@ -130,5 +147,14 @@ describe('attachment storage and text compatibility', () => {
     expect(clean.messages[0].genUi).toBeUndefined();
     expect(clean.messages.at(-1)?.genUi).toBeDefined();
     expect(clean.messages.every(message => !message.genUi?.viewState)).toBe(true);
+  });
+  test('drops transient streaming previews during session normalization', () => {
+    const value = session();
+    (value.messages[0] as any).genUiPreview = attachment();
+    (value.messages[0] as any).genUiPending = true;
+    const clean = normalizeGenUiSessions([value])[0].messages[0];
+    expect(clean.genUi).toBeDefined();
+    expect((clean as any).genUiPreview).toBeUndefined();
+    expect((clean as any).genUiPending).toBeUndefined();
   });
 });

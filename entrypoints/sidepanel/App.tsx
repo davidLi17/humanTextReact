@@ -121,7 +121,8 @@ import JargonVaultPanel from "./components/JargonVaultPanel";
 import JargonSaveDialog from "./components/JargonSaveDialog";
 import PrismResultTabs from "./components/PrismResultTabs";
 import GenUiMessageCard from "./genui/GenUiMessageCard";
-import { useGenUiRequest, useGenUiFeature, acceptGenUiCompletion } from "./genui/useGenUiRequest";
+import { useGenUiRequest, useGenUiFeature, acceptGenUiCompletion, prepareAutoGenUiRequest } from "./genui/useGenUiRequest";
+import { getAssistantReadableContent } from "@/entrypoints/shared/chatTypes";
 import { normalizeGenUiAttachment, normalizeGenUiSessions } from "@/entrypoints/shared/genui/profile";
 import type { GenUiAttachment, GenUiRequestMeta } from "@/entrypoints/shared/genui/types";
 import PageContextCard from "./components/PageContextCard";
@@ -395,7 +396,7 @@ export default function SidePanelApp() {
   const sidepanelContainerRef = useRef<HTMLDivElement>(null);
   const chatContentRef = useRef<HTMLElement>(null);
   const activeRequestIdRef = useRef<string | undefined>(undefined);
-  const genUiRequestRef = useRef<{ requestId: string; meta: GenUiRequestMeta } | undefined>(undefined);
+  const genUiRequestRef = useRef<{ requestId: string; meta: GenUiRequestMeta; automatic?: boolean } | undefined>(undefined);
   const activeRequestOwnerRef = useRef<ActiveSidepanelRequest | undefined>(
     undefined
   );
@@ -688,7 +689,13 @@ export default function SidePanelApp() {
         if (session.id !== sessionId) return session;
         const messages = session.messages.map((message) =>
           message.id === assistantMessageId && message.role === "assistant"
-            ? { ...message, status: "error" as const, errorMessage }
+            ? {
+                ...message,
+                status: "error" as const,
+                errorMessage,
+                genUiPreview: undefined,
+                genUiPending: undefined,
+              }
             : message
         );
         return { ...session, messages, updatedAt: Date.now() };
@@ -902,6 +909,18 @@ export default function SidePanelApp() {
   };
 
   const genUiFeature = useGenUiFeature(showToast);
+  const automaticGenUiParams = (
+    requestId: string,
+    assistantMessageId: string,
+    history: ChatMessage[],
+    payload: ChatPayloadMessage[],
+    enabled = true
+  ) => {
+    if (!genUiFeature.enabled || !enabled) return {};
+    const meta = prepareAutoGenUiRequest(history, payload, assistantMessageId);
+    genUiRequestRef.current = { requestId, meta, automatic: true };
+    return { autoGenUi: true, genUiRequest: meta };
+  };
   const handleGenerateGenUi = useGenUiRequest({
     enabled: genUiFeature.enabled,
     canStart: () => !activeRequestIdRef.current && !isStreaming && !isExtractingPage && !isManualDispatching,
@@ -1061,9 +1080,14 @@ export default function SidePanelApp() {
         const owner = getActiveSidepanelRequestOwner(requestId, activeRequestOwnerRef.current);
         if (!owner || (sessionId && sessionId !== owner.sessionId)) return;
         const genUiRequest = genUiRequestRef.current && genUiRequestRef.current.requestId === requestId ? genUiRequestRef.current.meta : undefined;
-        if (genUiRequest && (message.assistantMessageId !== owner.assistantMessageId || !done)) return;
+        const manualGenUi = Boolean(genUiRequest && !genUiRequestRef.current?.automatic);
+        if (message.assistantMessageId && message.assistantMessageId !== owner.assistantMessageId) return;
+        if (manualGenUi && (message.assistantMessageId !== owner.assistantMessageId || !done)) return;
         const attachment = genUiRequest ? acceptGenUiCompletion(message, owner, genUiRequest) : undefined;
-        const rejectedGenUi = Boolean(genUiRequest && !error && !attachment);
+        const preview = !done
+          ? normalizeGenUiAttachment(message.genUiPreview)
+          : undefined;
+        const rejectedGenUi = Boolean(manualGenUi && !error && !attachment);
         const targetSessionId = owner.sessionId;
         const updatedSessions = sessionsRef.current.map((s) => {
             if (s.id !== targetSessionId) return s;
@@ -1073,7 +1097,7 @@ export default function SidePanelApp() {
             const lastMsg = messages[messageIndex];
 
             if (lastMsg && lastMsg.role === "assistant") {
-              const updatedContent = genUiRequest
+              const updatedContent = manualGenUi
                 ? (attachment && typeof content === "string" ? content : lastMsg.content)
                 : content ?? lastMsg.content;
               const suggestedQuestions =
@@ -1087,17 +1111,20 @@ export default function SidePanelApp() {
                 ...lastMsg,
                 content: updatedContent,
                 ...(attachment ? { genUi: attachment } : {}),
+                genUiPreview: done ? undefined : preview ?? lastMsg.genUiPreview,
+                genUiPending: !done && Boolean(message.genUiPending),
+                genUiWarning: message.genUiWarning || undefined,
                 reasoningContent:
-                  genUiRequest ? undefined : reasoningContent ?? lastMsg.reasoningContent,
+                  manualGenUi ? undefined : reasoningContent ?? lastMsg.reasoningContent,
                 hasReasoning:
-                  genUiRequest ? false : Boolean(reasoningContent) || lastMsg.hasReasoning,
+                  manualGenUi ? false : Boolean(reasoningContent) || lastMsg.hasReasoning,
                 suggestedQuestions,
                 status: error || rejectedGenUi
                   ? "error"
                   : done
                   ? "completed"
                   : "streaming",
-                errorMessage: genUiRequest && (error || rejectedGenUi) ? "交互讲解未通过校验，请重试或继续阅读原回答。" : error || undefined,
+                errorMessage: manualGenUi && (error || rejectedGenUi) ? "交互讲解未通过校验，请重试或继续阅读原回答。" : error || undefined,
                 resultSource: resultSource ?? lastMsg.resultSource,
               };
               messages[messageIndex] = updatedMsg;
@@ -2277,7 +2304,14 @@ export default function SidePanelApp() {
         messages: prepared.payload,
         thinkingEnabled,
         prismMode: options.prismMode ?? requestSettingsRef.current.prismMode,
+        ...automaticGenUiParams(currentRequestId, assistantMessageId, updatedSession.messages.slice(0, -1), prepared.payload,
+          !options.groundedGoalMeta && !options.conversationRecapMeta && !(options.prismMode ?? requestSettingsRef.current.prismMode)),
         ...(options.bypassJargonVault ? { bypassJargonVault: true } : {}),
+      }).then((response) => {
+        if (response?.success === false) {
+          markAssistantMessageAsError(currentSession.id, assistantMessageId,
+            response.error || "请求失败，请重试", currentRequestId);
+        }
       }).catch((error: any) => {
       logger.error("发送翻译请求失败:", error);
       markAssistantMessageAsError(
@@ -2710,7 +2744,13 @@ export default function SidePanelApp() {
         sessionId: currentSession.id,
         messages: messagesPayload,
         thinkingEnabled,
+        ...automaticGenUiParams(currentRequestId, assistantMessageId, nextMessages.slice(0, -1), messagesPayload,
+          !isWebReadingMessage && !oldUserMsg.groundedGoalMeta && !oldUserMsg.conversationRecapMeta && !requestSettingsRef.current.prismMode),
       })) as WebReadingResponse;
+      if (response?.success === false) {
+        markAssistantMessageAsError(currentSession.id, assistantMessageId,
+          response.error || "请求失败，请重试", currentRequestId);
+      }
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
@@ -3038,7 +3078,13 @@ export default function SidePanelApp() {
           refinementMeta || groundedGoalMeta || conversationRecapMeta
             ? true
             : bypassJargonVault,
+        ...automaticGenUiParams(currentRequestId, assistantMessageId, historyMessages, messagesPayload,
+          !replayPrompt && !groundedGoalMeta && !conversationRecapMeta && !(refinementMeta ? false : requestSettingsRef.current.prismMode)),
       })) as WebReadingResponse;
+      if (response?.success === false) {
+        markAssistantMessageAsError(currentSession.id, assistantMessageId,
+          response.error || "请求失败，请重试", currentRequestId);
+      }
       if (replayPrompt?.success) {
         if (!isSuccessfulWebReadingResponse(response)) {
           markAssistantMessageAsError(
@@ -3096,6 +3142,8 @@ export default function SidePanelApp() {
                 ...message,
                 status: "error" as const,
                 errorMessage: "生成已停止，可点击重试继续当前内容。",
+                genUiPreview: undefined,
+                genUiPending: undefined,
               }
             : message
         );
@@ -3671,7 +3719,6 @@ export default function SidePanelApp() {
           </div>
 
           <div className="quick-bar-right">
-            <label className="genui-feature-toggle"><input type="checkbox" aria-label="交互讲解开关" disabled={!genUiFeature.ready} checked={genUiFeature.enabled} onChange={(event) => genUiFeature.toggle(event.target.checked)} />交互讲解</label>
             <ThemeModeSelector
               value={themeMode}
               onChange={(mode) => setThemeMode(mode)}
@@ -4247,23 +4294,26 @@ export default function SidePanelApp() {
                             此总览基于旧分段结果，当前已失效，请重新生成全文总览。
                           </div>
                         )}
-                        {message.content ? (
+                        {message.content || message.genUi || message.genUiPreview ? (
                           <>
-                            {message.genUi && genUiFeature.enabled ? (
-                              <GenUiMessageCard
-                                key={`${activeSession.id}:${message.id}:${message.genUi.id}:${message.genUi.revision}`}
-                                attachment={message.genUi} content={message.content}
-                                sourceLabels={activeSession.messages.filter((entry) => message.genUi!.sourceMessageIds.includes(entry.id) && entry.pageMeta).map((entry) => `${entry.pageMeta!.title}${entry.pageMeta!.segmentIndex ? ` · 第 ${entry.pageMeta!.segmentIndex} 段` : ""}`)}
-                                onStateChange={(state) => updateGenUiViewState(activeSession.id, message.id, message.genUi!, state)}
-                                onFollowUp={() => { setInputText(`关于这张交互讲解：${message.content.slice(0, 600)}\n我想进一步了解：`); inputRef.current?.focus(); }}
+                            {message.content && !(message.genUi && message.content === message.genUi.fallbackText) && (
+                              <PrismResultTabs
+                                content={groundedResult?.content ?? message.content}
+                                isStreaming={message.status === "streaming"}
+                                onCopyCorporate={() => showToast("已复制向上汇报版，可直接粘贴进周报！")}
                               />
-                            ) : <PrismResultTabs
-                              content={groundedResult?.content ?? message.content}
-                              isStreaming={message.status === "streaming"}
-                              onCopyCorporate={() => {
-                                showToast("已复制向上汇报版，可直接粘贴进周报！");
-                              }}
-                            />}
+                            )}
+                            {(message.genUi || message.genUiPreview) && (
+                              <GenUiMessageCard
+                                key={`${activeSession.id}:${message.id}:${(message.genUi ?? message.genUiPreview)!.id}:${(message.genUi ?? message.genUiPreview)!.revision}`}
+                                attachment={(message.genUi ?? message.genUiPreview)!} content={(message.genUi ?? message.genUiPreview)!.fallbackText ?? message.content}
+                                streaming={!message.genUi}
+                                sourceLabels={activeSession.messages.filter((entry) => (message.genUi ?? message.genUiPreview)!.sourceMessageIds.includes(entry.id) && entry.pageMeta).map((entry) => `${entry.pageMeta!.title}${entry.pageMeta!.segmentIndex ? ` · 第 ${entry.pageMeta!.segmentIndex} 段` : ""}`)}
+                                onStateChange={(state) => {
+                                  if (message.genUi) updateGenUiViewState(activeSession.id, message.id, message.genUi, state);
+                                }}
+                              />
+                            )}
                             {groundedResult && (
                               <GroundedEvidencePanel
                                 result={groundedResult}
@@ -4271,14 +4321,16 @@ export default function SidePanelApp() {
                               />
                             )}
                           </>
-                        ) : message.status === "streaming" ? (
+                        ) : message.status === "streaming" && !message.genUiPending ? (
                           <div className="streaming-dots">
                             <span></span>
                             <span></span>
                             <span></span>
-                            {activeSession.messages[activeSession.messages.findIndex((entry) => entry.id === message.id) - 1]?.genUiRequest ? "正在准备交互讲解，完成校验后显示..." : "正在提炼人话速读报告..."}
+                            正在生成回答…
                           </div>
                         ) : null}
+                        {message.status === "streaming" && message.genUiPending && !message.genUiPreview && <p role="status">正在生成交互讲解…</p>}
+                        {message.genUiWarning && <p role="status">{message.genUiWarning}</p>}
 
                         {message.status === "error" && (
                           <div className="error-card-body">
@@ -4317,7 +4369,6 @@ export default function SidePanelApp() {
                     {/* 卡片底部操作 */}
                     {message.content && message.role === "assistant" && (
                       <div className="bubble-footer">
-                        {genUiFeature.enabled && <button type="button" className="action-link-btn" disabled={isStreaming || isExtractingPage || message.status !== "completed"} onClick={() => void handleGenerateGenUi(message.id)}>交互讲解</button>}
                         <div className="refinement-action-group">
                           <button
                             type="button"
@@ -4419,7 +4470,7 @@ export default function SidePanelApp() {
                           onClick={() =>
                             handleCopy(
                               message.id,
-                              groundedResult?.content ?? message.content
+                              groundedResult?.content ?? getAssistantReadableContent(message)
                             )
                           }
                         >

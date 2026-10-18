@@ -16,7 +16,7 @@ function attachment(id = "artifact-a"): GenUiAttachment {
     },
   } };
 }
-const props = { content: "这是文字回退", sourceLabels: ["原文 · 第 1 段"], onFollowUp() {} };
+const props = { content: "这是文字回退", sourceLabels: ["原文 · 第 1 段"] };
 afterEach(cleanup);
 describe("GenUI local registry", () => {
   test("all controls render, work locally, and persist only bounded navigation state", () => {
@@ -37,6 +37,7 @@ describe("GenUI local registry", () => {
     expect(container.querySelector("img")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "文字版本" }));
     expect(screen.getByText("这是文字回退")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "填入追问" })).toBeNull();
   });
   test("same element IDs in two artifacts stay isolated; restored state and keyboard tabs work", () => {
     const one = attachment(); one.viewState = { steps: { step: 1 } };
@@ -53,5 +54,14 @@ describe("GenUI local registry", () => {
     const { container } = render(<GenUiMessageCard {...props} attachment={malicious} onStateChange={() => {}} />);
     expect(screen.getByText("这是文字回退")).toBeTruthy();
     expect(container.querySelector("iframe")).toBeNull();
+  });
+  test("renders validated charts while a legal streaming preview is shown", () => {
+    const chart = attachment();
+    chart.spec.elements.card.children = ["chart"];
+    for (const id of ["tree", "tabs", "steps", "table", "text"]) delete chart.spec.elements[id];
+    chart.spec.elements.chart = { type: "Chart", props: { type: "bar", title: "每周访问量", categories: ["周一", "周二"], series: [{ name: "访问量", values: [8, 13] }] }, children: [] };
+    render(<GenUiMessageCard {...props} attachment={chart} streaming onStateChange={() => {}} />);
+    expect(screen.getByRole("img", { name: "每周访问量，访问量" })).toBeTruthy();
+    expect(screen.getByText("生成中")).toBeTruthy();
   });
 });

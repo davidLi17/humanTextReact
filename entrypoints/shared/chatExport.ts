@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { ChatMessage, ChatSession } from "./chatTypes";
+import { ChatMessage, ChatSession, getAssistantReadableContent } from "./chatTypes";
 
 /**
  * 导出对话配置项
@@ -86,7 +86,7 @@ function formatMessageToMarkdown(
     }
 
     if (message.content) {
-      lines.push(message.content);
+      lines.push(getAssistantReadableContent(message));
     } else if (message.status === "error") {
       lines.push(`> ⚠️ *生成出错：${message.errorMessage || "未知错误"}*`);
     }

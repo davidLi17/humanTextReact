@@ -80,6 +80,12 @@ export function validateExplanationSpec(value: unknown): ExplanationSpec {
         if (Object.keys(row.cells).length !== keys.length || keys.some(key => !Object.hasOwn(row.cells, key))) fail();
       }
     }
+    if (type === 'Chart') {
+      const chart = props as typeof componentSchemas.Chart._output;
+      if (chart.type === 'pie' && chart.series.length !== 1) fail();
+      if (chart.series.some(series => series.values.length !== chart.categories.length)) fail();
+      if (chart.type === 'pie' && chart.series[0].values.some(value => value < 0)) fail();
+    }
     elements[key] = { type, props, children } as ExplanationElement;
   }
   const visited = new Set<string>();
@@ -97,12 +103,16 @@ export function normalizeGenUiAttachment(value: unknown): GenUiAttachment | unde
   try {
     assertSafeJson(value);
     if (jsonByteLength(value) > MAX_GENUI_BYTES) fail();
-    const raw = object(value, ['id', 'protocolVersion', 'catalogVersion', 'revision', 'spec', 'sourceMessageIds', 'contextFingerprint', 'viewState']);
+    const raw = object(value, ['id', 'protocolVersion', 'catalogVersion', 'revision', 'spec', 'sourceMessageIds', 'contextFingerprint', 'fallbackText', 'viewState']);
     if (raw.protocolVersion !== 1 || raw.catalogVersion !== 'explanation-v1' || !Number.isSafeInteger(raw.revision) || raw.revision < 1) fail();
     const spec = validateExplanationSpec(raw.spec);
     if (!Array.isArray(raw.sourceMessageIds) || !raw.sourceMessageIds.length || raw.sourceMessageIds.length > 100) fail();
     const sourceMessageIds = raw.sourceMessageIds.map(id); unique(sourceMessageIds);
     const result: GenUiAttachment = { id: id(raw.id), protocolVersion: 1, catalogVersion: 'explanation-v1', revision: raw.revision, spec, sourceMessageIds, contextFingerprint: id(raw.contextFingerprint) };
+    if (raw.fallbackText !== undefined) {
+      if (typeof raw.fallbackText !== 'string' || !raw.fallbackText.trim() || raw.fallbackText.length > 16_000) fail();
+      result.fallbackText = raw.fallbackText;
+    }
     if (raw.viewState !== undefined) {
       const state = object(raw.viewState, Object.keys(spec.elements));
       result.viewState = {};
@@ -146,7 +156,8 @@ export function normalizeGenUiSessions<T extends { messages: any[] }>(sessions: 
     const ids = new Set(session.messages.filter(message => message && typeof message.id === 'string').map(message => message.id));
     return { ...session, messages: session.messages.map(message => {
       if (!message || typeof message !== 'object') return message;
-      const { genUi: raw, genUiRequest: request, ...rest } = message;
+      // Streaming previews are transient. Only a finalized, validated attachment belongs in history.
+      const { genUi: raw, genUiRequest: request, genUiPreview: _preview, genUiPending: _pending, ...rest } = message;
       const intent = message.role === 'user' ? normalizeGenUiRequestIntent(request) : undefined;
       // Restored intent is inert metadata, never permission. Drop dangling source references.
       if (intent && intent.sourceMessageIds.every(sourceId => ids.has(sourceId))) rest.genUiRequest = intent;

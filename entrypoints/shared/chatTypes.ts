@@ -36,6 +36,13 @@ export interface MultimodalTextItem {
 
 export type MultimodalContentItem = MultimodalImageUrlItem | MultimodalTextItem;
 
+/** Text used for follow-up context, copying and exports, including card details. */
+export function getAssistantReadableContent(message: { content: string; genUi?: { fallbackText?: string } }): string {
+  const explanation = message.genUi?.fallbackText?.trim();
+  if (!explanation || message.content.includes(explanation)) return message.content;
+  return [message.content, explanation].filter(Boolean).join("\n\n");
+}
+
 export interface ChatPayloadMessage {
   role: ChatRole;
   content: string | MultimodalContentItem[];
@@ -54,11 +61,12 @@ export function formatMessageForPayload(message: {
   content: string | any[];
   images?: ChatImageContent[];
   selectionContext?: SelectionContext;
+  genUi?: { fallbackText?: string };
 }): ChatPayloadMessage {
   const selectionContext = message.selectionContext;
   const content =
     message.role === "assistant" && typeof message.content === "string"
-      ? stripGroundedEvidenceBlock(message.content)
+      ? stripGroundedEvidenceBlock(getAssistantReadableContent({ content: message.content, genUi: message.genUi }))
       : message.content;
   const images = message.images;
   if (!images || images.length === 0) {
@@ -129,6 +137,10 @@ export interface ChatMessage {
   elementSnapshots?: Omit<import("./elementSnapshot").ElementSnapshot, "image">[];
   /** Optional validated local interactive explanation. Never included in ordinary model payloads. */
   genUi?: import("./genui/types").GenUiAttachment;
+  /** Ephemeral validated snapshot while a tool argument is still streaming. */
+  genUiPreview?: import("./genui/types").GenUiAttachment;
+  genUiPending?: boolean;
+  genUiWarning?: string;
   genUiRequest?: import("./genui/types").GenUiRequestIntent;
   id: string;
   role: ChatRole;
