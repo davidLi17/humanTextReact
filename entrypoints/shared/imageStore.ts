@@ -44,9 +44,17 @@ export async function blobDataUrl(blob: Blob): Promise<string> {
   return `data:${blob.type || "image/png"};base64,${btoa(binary)}`;
 }
 
+/** Canvas/file images are already Base64; decoding is local and must not call fetch. */
+function imageDataBlob(data: string): Blob {
+  const comma = data.indexOf(",");
+  if (comma < 0 || !data.slice(0, comma).endsWith(";base64")) throw new Error("无效的图片数据，请重新选择");
+  const binary = atob(data.slice(comma + 1));
+  return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], {type:data.slice(5, comma).split(";")[0]});
+}
+
 export async function storeImage(data: string): Promise<string> {
   if (!data.startsWith("data:image/")) return data;
-  const blob = await (await fetch(data)).blob();
+  const blob = imageDataBlob(data);
   const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
   const id = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   await transaction("images", "readwrite", store => store.put(blob, id));
@@ -113,7 +121,7 @@ export async function collectUnusedImages(localValues: unknown, draftValues: unk
 }
 
 export async function stageTransfer(key: string, data: string): Promise<void> {
-  const blob = await (await fetch(data)).blob();
+  const blob = imageDataBlob(data);
   await transaction("transfers", "readwrite", store => store.put(blob, key));
 }
 export async function readTransfer(key: string): Promise<string> {

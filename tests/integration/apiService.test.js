@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test, beforeEach, afterEach } from "bun:test";
 import {
   ApiService,
   classifyConnectionTestResponse,
@@ -11,7 +11,9 @@ import {
   setTestGlobal,
 } from "../helpers/testEnvironment.js";
 
-const restoreGlobals = preserveGlobals("fetch", "browser", "chrome");
+let restoreGlobals;
+beforeEach(() => { restoreGlobals = preserveGlobals("fetch", "browser", "chrome"); });
+afterEach(() => restoreGlobals());
 
 const KIMI_URL = "https://api.moonshot.cn/v1/chat/completions";
 const DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions";

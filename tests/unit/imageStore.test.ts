@@ -13,9 +13,10 @@ const sessions = (): any[] => [{id:"one",title:"截图",createdAt:1,updatedAt:1,
   messages:[{id:"m",role:"user",content:"解释表格",createdAt:1,images:[{data:image,mimeType:"image/png"}]}]}];
 
 test("legacy Base64 checkpoints become deduplicated Blob refs; hydration is lazy, export and model restore original bytes", async () => {
-  const restore = preserveGlobals("browser");
+  const restore = preserveGlobals("browser", "fetch");
   const memory = createMemoryBrowserStorage() as any; setTestGlobal("browser", memory.browser);
   try {
+    setTestGlobal("fetch", () => {throw new Error("图片解码不应调用网络 fetch");});
     const storage = new WebReadingProgressStorage(memory.browser.storage.local);
     const old = sessions(); old[0].messages.push({...old[0].messages[0],id:"again"});
     await storage.enqueueCheckpoint({progressMap:new Map(),sessions:old});
