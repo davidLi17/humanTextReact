@@ -63,7 +63,9 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Run extension E2E
-        run: bun run test:e2e
+        run: |
+          bun run zip
+          bun run test:e2e:built
 
       - name: Upload E2E diagnostics
         if: always()

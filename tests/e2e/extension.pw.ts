@@ -838,6 +838,16 @@ test("回顾对话主线只请求当前会话，四节结果和覆盖范围刷�
   expect(requestText).not.toContain("F3网页正文绝不能重复进入回顾请求");
   expect(requestText).not.toContain("另一会话绝不进入当前回顾请求");
 
+  // The DOM can show the final chunk before its storage checkpoint finishes.
+  // Snapshot the completed answer so reload compares two persisted final states.
+  await expect.poll(async () => {
+    const sessions = await readSessions(sidepanel);
+    return sessions.find(session => session.id === currentSession.id)?.messages.at(-1);
+  }).toMatchObject({
+    role: "assistant",
+    status: "completed",
+    content: expect.stringContaining("今天确认验收时间并同步负责人。"),
+  });
   const stored = await readSessions(sidepanel);
   const recapUser = stored[0].messages.find((message: any) => message.conversationRecapMeta);
   expect(recapUser).toMatchObject({
