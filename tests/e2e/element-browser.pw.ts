@@ -222,6 +222,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     // One trailing debounce shared by click + Enter. A burst longer than 400 ms
     // still waits until 400 ms after its final event; only the last question sends.
     await expect(editor).toBeVisible();
+    await expect.poll(() => content.locator('.menu').evaluate(el => el.getBoundingClientRect().height)).toBeGreaterThan(100);
     const menuHeight = await content.locator('.menu').evaluate(el => el.getBoundingClientRect().height);
     await content.getByRole('button',{name:'提问',exact:true}).click();
     await expect(content.getByRole('status')).toHaveText('等待提问…');
