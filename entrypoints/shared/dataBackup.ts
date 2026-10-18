@@ -1,3 +1,4 @@
+import { exportSessionImages, persistSessionImages, collectUnusedImages, withImageStoreLock } from "./imageStore";
 import { normalizeGenUiSessions } from "./genui/profile";
 /**
  * 全量数据备份与恢复（v1 备份格式）
@@ -231,7 +232,7 @@ async function readSessionsForBackup(): Promise<BackupSessionsData> {
   const rawActiveId = result?.[ACTIVE_SESSION_STORAGE_KEY];
   return {
     sessions: Array.isArray(rawSessions)
-      ? (rawSessions.filter(
+      ? await exportSessionImages(rawSessions.filter(
           (session) => isPlainObject(session) && typeof session.id === "string"
         ) as ChatSession[])
       : [],
@@ -492,27 +493,31 @@ export async function restoreBackup(
   try {
     const storage = getStorageArea("local");
     if (!storage) throw new Error("当前环境没有可用的本地存储");
-    const sessions = data.sessions.sessions;
-    const payload: Record<string, unknown> = {
-      [SESSIONS_STORAGE_KEY]: sessions,
-      // 备份 v1 不携带未读全文；恢复会话时必须同步清空本机旧断点。
-      [WEB_READING_PROGRESS_STORAGE_KEY]: {
-        version: WEB_READING_PROGRESS_VERSION,
-        records: {},
-      },
-    };
-    if (
-      data.sessions.activeSessionId &&
-      sessions.some((session) => session.id === data.sessions.activeSessionId)
-    ) {
-      payload[ACTIVE_SESSION_STORAGE_KEY] = data.sessions.activeSessionId;
-    } else if (sessions.length > 0) {
-      // 备份未指定有效激活会话时，回落到第一个会话（与侧边栏加载逻辑一致）
-      payload[ACTIVE_SESSION_STORAGE_KEY] = sessions[0].id;
-    } else {
-      payload[ACTIVE_SESSION_STORAGE_KEY] = "";
-    }
-    await storage.set(payload);
+    await withImageStoreLock(async () => {
+      const sessions = await persistSessionImages(data.sessions.sessions);
+      const payload: Record<string, unknown> = {
+        [SESSIONS_STORAGE_KEY]: sessions,
+        // 备份 v1 不携带未读全文；恢复会话时必须同步清空本机旧断点。
+        [WEB_READING_PROGRESS_STORAGE_KEY]: {
+          version: WEB_READING_PROGRESS_VERSION,
+          records: {},
+        },
+      };
+      if (
+        data.sessions.activeSessionId &&
+        sessions.some((session) => session.id === data.sessions.activeSessionId)
+      ) {
+        payload[ACTIVE_SESSION_STORAGE_KEY] = data.sessions.activeSessionId;
+      } else if (sessions.length > 0) {
+        // 备份未指定有效激活会话时，回落到第一个会话（与侧边栏加载逻辑一致）
+        payload[ACTIVE_SESSION_STORAGE_KEY] = sessions[0].id;
+      } else {
+        payload[ACTIVE_SESSION_STORAGE_KEY] = "";
+      }
+      await storage.set(payload);
+      const sessionStorage = ((globalThis as any).browser || (globalThis as any).chrome)?.storage?.session;
+      await collectUnusedImages(await storage.get(null), await sessionStorage?.get(null));
+    });
     restored.push("sessions");
   } catch (error) {
     failed.push("sessions");

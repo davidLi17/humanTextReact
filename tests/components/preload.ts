@@ -1,9 +1,12 @@
+import {installImageStoreEnvironment} from "../helpers/imageStoreEnvironment";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { plugin } from "bun";
 
 GlobalRegistrator.register({
   url: "chrome-extension://human-language-translator/sidepanel.html",
 });
+
+installImageStoreEnvironment();
 
 process.env.RTL_SKIP_AUTO_CLEANUP = "true";
 

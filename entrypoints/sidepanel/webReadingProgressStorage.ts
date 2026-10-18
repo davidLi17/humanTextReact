@@ -1,3 +1,4 @@
+import { persistSessionImages, collectUnusedImages, withImageStoreLock, migrateLegacyImages } from "../shared/imageStore";
 import { getTabStateStorage } from "./tabStateStorage";
 import { normalizeGenUiSessions } from "@/entrypoints/shared/genui/profile";
 import {
@@ -94,6 +95,7 @@ export async function loadWebReadingHydrationSnapshot(
   storage = getLocalStorageArea()
 ): Promise<WebReadingHydrationSnapshot> {
   if (!storage) throw new Error("当前环境没有可用的本地存储");
+  await migrateLegacyImages().catch(error => console.error("迁移旧截图失败，继续读取原会话", error));
   const stored = await storage.get([
     SIDEPANEL_SESSIONS_STORAGE_KEY,
     SIDEPANEL_ACTIVE_SESSION_STORAGE_KEY,
@@ -136,21 +138,31 @@ export class WebReadingProgressStorage {
     const sessionsSnapshot = params.sessions
       ? structuredClone(normalizeGenUiSessions(params.sessions))
       : undefined;
-    const operation = this.writeQueue.then(async () => {
+    const operation = this.writeQueue.then(() => withImageStoreLock(async () => {
       if (!this.storage) throw new Error("当前环境没有可用的本地存储");
       const payload: Record<string, unknown> = {
         [WEB_READING_PROGRESS_STORAGE_KEY]: serialized.store,
       };
       if (sessionsSnapshot) {
-        payload[SIDEPANEL_SESSIONS_STORAGE_KEY] = sessionsSnapshot;
+        payload[SIDEPANEL_SESSIONS_STORAGE_KEY] = await persistSessionImages(sessionsSnapshot);
       }
       if (params.activeSessionId !== undefined) {
         payload[SIDEPANEL_ACTIVE_SESSION_STORAGE_KEY] =
           params.activeSessionId;
       }
       await this.storage.set(payload);
+      if (sessionsSnapshot) {
+        // Read the merged global state, not a tab snapshot; another tab may own retained images.
+        const api = (globalThis as any).browser || (globalThis as any).chrome;
+        if (api?.storage?.local) {
+          await collectUnusedImages(
+            await api.storage.local.get(null),
+            await api.storage.session?.get(null),
+          );
+        }
+      }
       return { success: true as const, ...serialized };
-    });
+    }));
     this.writeQueue = operation.then(
       () => undefined,
       () => undefined

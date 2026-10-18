@@ -159,7 +159,7 @@ describe("网页阅读断点存储协调器", () => {
       prioritySessionId: "session-1",
     });
 
-    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(writes).toHaveLength(1);
     expect(writes[0][SIDEPANEL_SESSIONS_STORAGE_KEY]).toEqual(firstSessions);
     expect(
@@ -169,7 +169,7 @@ describe("网页阅读断点存储协调器", () => {
 
     pendingWrites[0].resolve();
     await first;
-    await Promise.resolve();
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(writes).toHaveLength(2);
     expect(writes[1][SIDEPANEL_SESSIONS_STORAGE_KEY]).toEqual([]);
     expect(writes[1][WEB_READING_PROGRESS_STORAGE_KEY].records).toEqual({});

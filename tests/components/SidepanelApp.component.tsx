@@ -1,3 +1,4 @@
+import {restoreImageRequest} from "../../entrypoints/shared/imageMessageTransport";
 import React from "react";
 import {
   act,
@@ -533,13 +534,15 @@ describe("Sidepanel App 真实 React 交互", () => {
     await screen.findByText("表格解释完成");
     await waitFor(()=>{
       const stored=mock.localStore.sidepanel_chat_sessions as any[];
-      expect(stored?.flatMap(s=>s.messages).find(m=>m.elementSnapshots)?.images[0].data).toBe(snapshot.image);
+      expect(stored?.flatMap(s=>s.messages).find(m=>m.elementSnapshots)?.images[0].data).toMatch(/^humantext-blob:/);
     });
     view.unmount();render(<SidePanelApp />);
     const input=await screen.findByPlaceholderText(/输入追问、黑话术语或指令/);
     fireEvent.change(input,{target:{value:"继续解释"}});fireEvent.click(screen.getByRole("button",{name:"发送"}));
     await waitFor(()=>expect(mock.sentMessages.filter(m=>m.action===MESSAGE_TYPES.TRANSLATE)).toHaveLength(2));
     const followup=mock.sentMessages.filter(m=>m.action===MESSAGE_TYPES.TRANSLATE)[1];
+    expect(JSON.stringify(followup.messages)).toContain("humantext-blob:");
+    await restoreImageRequest(followup);
     expect(JSON.stringify(followup.messages)).toContain(snapshot.image);
   });
 

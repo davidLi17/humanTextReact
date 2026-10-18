@@ -1,3 +1,9 @@
+import {installImageStoreEnvironment} from "../helpers/imageStoreEnvironment";
+import {beforeEach, afterEach} from "bun:test";
+let restoreImageEnvironment: () => void;
+beforeEach(() => {restoreImageEnvironment = installImageStoreEnvironment();});
+afterEach(() => restoreImageEnvironment());
+import { stageTransfer, removeTransfers } from "../../entrypoints/shared/imageStore";
 import { expect, test } from "bun:test";
 import { sendImageRequest, restoreImageRequest } from "../../entrypoints/shared/imageMessageTransport";
 import { createMemoryBrowserStorage, preserveGlobals, setTestGlobal } from "../helpers/testEnvironment.js";
@@ -21,10 +27,9 @@ test("large image histories use a small runtime message and restore identical by
 test("cancelling while staging never starts a model request, and temporary images are removed", async () => {
   const restore = preserveGlobals("browser"); const memory = createMemoryBrowserStorage() as any; let active = true, calls = 0;
   try {
-    const set = memory.browser.storage.local.set;
-    memory.browser.storage.local.set = async (value: any) => {await set(value); active = false;};
+    let checks = 0;
     setTestGlobal("browser", {...memory.browser,runtime:{sendMessage:async()=>{calls++;}}});
-    expect(await sendImageRequest(request(),()=>active)).toEqual({success:true,cancelled:true});
+    expect(await sendImageRequest(request(),()=>++checks < 2)).toEqual({success:true,cancelled:true});
     expect(calls).toBe(0); expect(Object.keys(memory.stores.local)).toHaveLength(0);
   } finally {restore();}
 });
@@ -36,11 +41,10 @@ test("failed transport keeps its error and clears staged images", async () => {
     expect(Object.keys(memory.stores.local)).toHaveLength(0);
   } finally {restore();}
 });
-test("cancelling background restoration stops reading the remaining images", async () => {
-  const restore = preserveGlobals("browser"), controller = new AbortController(); let reads = 0;
+test("cancelling background restoration aborts before resolving image bytes", async () => {
+  const controller = new AbortController(); controller.abort();
+  await stageTransfer("image_request:image-test:0", image);
   try {
-    setTestGlobal("browser", {storage:{local:{get:async(key:string)=>{reads++; controller.abort(); return {[key]:image};}}}});
     await expect(restoreImageRequest({...request(),imageTransferCount:2},controller.signal)).rejects.toThrow();
-    expect(reads).toBe(1);
-  } finally {restore();}
+  } finally { await removeTransfers(["image_request:image-test:0"]); }
 });

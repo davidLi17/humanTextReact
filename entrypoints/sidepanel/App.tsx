@@ -1,3 +1,4 @@
+import { StoredImage } from "./components/StoredImage";
 import { getSidePanelTabId, sidepanelPendingKey } from "../shared/sidepanelUtils";
 import { tabStateKey } from "./tabStateStorage";
 import { ElementMarks } from "./components/ElementMarks";
@@ -3320,14 +3321,18 @@ export default function SidePanelApp() {
   };
 
   // 导出 JSON 文件
-  const handleExportSessionJson = () => {
+  const handleExportSessionJson = async () => {
     if (!activeSession || activeSession.messages.length === 0) {
       showToast("当前会话暂无对话内容");
       setShowExportMenu(false);
       return;
     }
-    downloadSessionJsonFile(activeSession);
-    showToast(`已导出《${activeSession.title}》JSON 会话数据`);
+    try {
+      await downloadSessionJsonFile(activeSession);
+      showToast(`已导出《${activeSession.title}》JSON 会话数据`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "导出失败");
+    }
     setShowExportMenu(false);
   };
 
@@ -4247,7 +4252,7 @@ export default function SidePanelApp() {
                               {message.images && message.images.length > 0 && (
                                 <div className="message-images-grid">
                                   {message.images.map((img, imgIdx) => (
-                                    <img
+                                    <StoredImage
                                       key={imgIdx}
                                       src={img.data}
                                       alt="用户上传图片"
@@ -4700,7 +4705,7 @@ export default function SidePanelApp() {
               <div className="input-images-preview">
                 {images.map((img, idx) => (
                   <div key={idx} className="preview-image-item">
-                    <img src={img.data} alt="待发送图片" />
+                    <StoredImage src={img.data} alt="待发送图片" />
                     <button
                       type="button"
                       className="remove-img-btn"

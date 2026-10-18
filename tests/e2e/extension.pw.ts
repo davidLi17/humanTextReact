@@ -1386,7 +1386,7 @@ test('element marks: real cropped screenshot, bidirectional hover, multimodal se
   })).toBe('completed');
   await panel.reload();
   const stored=await panel.evaluate(async()=>((await (globalThis as any).chrome.storage.local.get('sidepanel_chat_sessions')).sidepanel_chat_sessions));
-  expect(stored.flatMap((s:any)=>s.messages).find((m:any)=>m.elementSnapshots)?.images[0].data).toBe(image);
+  expect(stored.flatMap((s:any)=>s.messages).find((m:any)=>m.elementSnapshots)?.images[0].data).toMatch(/^humantext-blob:/);
   const target=panel.getByPlaceholder('输入追问、黑话术语或指令 (Enter 发送/排队，⌘+Enter 打断发送，Shift+Enter 换行)...');
   await target.fill('继续解释');await target.press('Enter');
   await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
@@ -1578,8 +1578,13 @@ test('large screenshot history persists and sends original images beyond Chrome 
       for (const byte of bytes) { crc ^= byte; for (let bit=0;bit<8;bit++) crc = (crc>>>1) ^ (crc&1 ? 0xedb88320 : 0); }
       return (crc ^ 0xffffffff) >>> 0;
     };
+    const database = await new Promise<IDBDatabase>((resolve,reject) => {
+      const request = indexedDB.open('humantext-images',1);
+      request.onupgradeneeded=()=>{request.result.createObjectStore('images');request.result.createObjectStore('transfers');};
+      request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+    });
     const size = 5 * 1024 * 1024;
-    const makeImage = (number: number) => {
+    const makeImage = async (number: number) => {
       const bytes = new Uint8Array(size), start = base.length - 12;
       bytes.set(base.subarray(0,start));
       const length = size - base.length - 12, view = new DataView(bytes.buffer);
@@ -1587,19 +1592,25 @@ test('large screenshot history persists and sends original images beyond Chrome 
       bytes[start+8] = 65 + number; bytes[start+9] = 0; // keyword, then null-separated text
       view.setUint32(start+8+length,crc32(bytes.subarray(start+4,start+8+length)));
       bytes.set(base.subarray(start),size-12);
-      let binary = ''; for (let offset=0;offset<bytes.length;offset+=8192) binary += String.fromCharCode(...bytes.subarray(offset,offset+8192));
-      return {data:`data:image/png;base64,${btoa(binary)}`,mimeType:'image/png'};
+      const id=`capacity-${number}`;
+      await new Promise<void>((resolve,reject)=>{
+        const tx=database.transaction('images','readwrite');tx.objectStore('images').put(new Blob([bytes],{type:'image/png'}),id);
+        tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);
+      });
+      return {data:`humantext-blob:${id}`,mimeType:'image/png'};
     };
     const now = Date.now();
-    const messages = [0,1].flatMap(batch => [
-      {id:`u${batch}`,role:'user',content:`第${batch+1}批截图`,images:Array.from({length:6},(_,i)=>makeImage(batch*6+i)),createdAt:now+batch*2,status:'completed'},
+    const messages = (await Promise.all([0,1].map(async batch => [
+      {id:`u${batch}`,role:'user',content:`第${batch+1}批截图`,images:await Promise.all(Array.from({length:6},(_,i)=>makeImage(batch*6+i))),createdAt:now+batch*2,status:'completed'},
       {id:`a${batch}`,role:'assistant',content:'截图已解释',createdAt:now+batch*2+1,status:'completed'},
-    ]);
+    ]))).flat();
+    database.close();
     await chrome.storage.local.set({sidepanel_chat_sessions:[{id:'large-images',title:'截图容量验证',createdAt:now,updatedAt:now,messages}],sidepanel_active_session_id:'large-images'});
-    return {storedBytes:await chrome.storage.local.getBytesInUse('sidepanel_chat_sessions'), imageBytes:size, batchBytes:size*6};
+    return {storedBytes:await chrome.storage.local.getBytesInUse('sidepanel_chat_sessions'), imageBytes:size, batchBytes:size*6, blobBytes:size*12};
   });
   expect(capacity.batchBytes).toBe(30 * 1024 * 1024);
-  expect(capacity.storedBytes).toBeGreaterThan(64 * 1024 * 1024);
+  expect(capacity.storedBytes).toBeLessThan(10 * 1024);
+  expect(capacity.blobBytes).toBe(60 * 1024 * 1024);
   await setup.close();
   const panel = await harness.context.newPage();
   await panel.goto(`chrome-extension://${harness.extensionId}/sidepanel.html`);

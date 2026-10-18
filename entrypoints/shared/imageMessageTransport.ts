@@ -1,5 +1,6 @@
+import { stageTransfer, readTransfer, removeTransfers, resolveImageData, isImageRef } from "./imageStore";
 /** Chrome runtime messages are limited to 64 MiB. Large image histories travel
- * by short-lived local references; model payloads still receive the original bytes. */
+ * by short-lived IndexedDB Blob references; model payloads still receive the original bytes. */
 const INLINE_IMAGE_CHARS = 40 * 1024 * 1024;
 const keyPrefix = (requestId: string) => `image_request:${requestId}:`;
 
@@ -16,7 +17,7 @@ export async function sendImageRequest(request: any, isActive = () => true) {
   try {
     for (let index = 0; index < keys.length; index++) {
       if (!isActive()) return {success: true, cancelled: true};
-      await browser.storage.local.set({[keys[index]]: unique[index]});
+      await stageTransfer(keys[index], unique[index]);
     }
     if (!isActive()) return {success: true, cancelled: true};
     return await browser.runtime.sendMessage({...request, imageTransferCount: keys.length,
@@ -26,19 +27,22 @@ export async function sendImageRequest(request: any, isActive = () => true) {
             ? {...item, image_url: {url: references.get(item.image_url.url)}} : item) : message.content,
       })),
     });
-  } finally { await browser.storage.local.remove(keys); }
+  } finally { await removeTransfers(keys); }
 }
 
 /** Called only for a verified sidepanel request after its requestId is claimed. */
 export async function restoreImageRequest(request: any, signal?: AbortSignal) {
-  if (!request.imageTransferCount) return;
+  if (!request.imageTransferCount) {
+    await resolveStoredImages(request, signal);
+    return;
+  }
   if (!Number.isInteger(request.imageTransferCount) || request.imageTransferCount < 1 || request.imageTransferCount > 1000)
     throw new Error("无效的截图传输清单");
   const images: string[] = [];
   for (let index = 0; index < request.imageTransferCount; index++) {
     signal?.throwIfAborted();
     const key = keyPrefix(request.requestId) + index;
-    const data = (await browser.storage.local.get(key))[key];
+    const data = await readTransfer(key);
     signal?.throwIfAborted();
     if (typeof data !== "string" || !data.startsWith("data:image/")) throw new Error("截图传输失效，请重试提问");
     images.push(data);
@@ -51,4 +55,24 @@ export async function restoreImageRequest(request: any, signal?: AbortSignal) {
       return {...item, image_url: {url: images[index]}};
     }) : message.content,
   }));
+  await resolveStoredImages(request, signal);
+}
+
+/** Resolve at the model boundary: session references never reach a provider. */
+async function resolveStoredImages(request: any, signal?: AbortSignal) {
+  const resolved = new Map<string, string>();
+  const resolve = async (url: string) => {
+    signal?.throwIfAborted();
+    if (!isImageRef(url)) return url;
+    if (!resolved.has(url)) resolved.set(url, await resolveImageData(url));
+    signal?.throwIfAborted();
+    return resolved.get(url)!;
+  };
+  for (const message of request.messages || []) {
+    if (Array.isArray(message.content)) for (const item of message.content)
+      if (item.type === "image_url" && typeof item.image_url?.url === "string")
+        item.image_url.url = await resolve(item.image_url.url);
+    for (const image of message.images || []) image.data = await resolve(image.data);
+  }
+  for (const image of request.images || []) image.data = await resolve(image.data);
 }

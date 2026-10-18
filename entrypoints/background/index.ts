@@ -1,3 +1,4 @@
+import {migrateLegacyImages} from "../shared/imageStore";
 // 统一导出所有背景脚本模块
 export {
   DEFAULT_SETTINGS,
@@ -27,6 +28,7 @@ import { RequestManager } from "./requestManager";
 import { ShortcutManager } from "./shortcutManager";
 
 export default defineBackground(() => {
+  void migrateLegacyImages().catch(error => backgroundLogger.error("迁移旧截图失败，原会话仍保留", error));
   // 初始化日志系统
   void initializeLogger("background");
 

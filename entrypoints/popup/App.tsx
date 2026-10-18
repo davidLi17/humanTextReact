@@ -1,3 +1,4 @@
+import {persistImages, resolveImageData, collectUnusedImages, withImageStoreLock, migrateLegacyImages} from "../shared/imageStore";
 import {
   MESSAGE_TYPES,
   THEME_MODES,
@@ -55,6 +56,8 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
     resultSource: undefined,
   });
 
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const draftWriteQueue = useRef(Promise.resolve());
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -79,6 +82,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       try {
         if (!browser?.storage?.local) return;
 
+        await migrateLegacyImages();
         const stored = await browser.storage.local.get(DRAFT_STORAGE_KEY);
         const draft = stored?.[DRAFT_STORAGE_KEY] as PopupDraft | undefined;
 
@@ -86,18 +90,19 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
           return;
         }
 
+        const restoredImages = await Promise.all((draft.images || []).map(async image => ({...image, data: await resolveImageData(image.data)})));
         setTranslationState((prev) => {
           if (prev.sourceText || prev.images.length > 0) return prev;
 
           return {
             ...prev,
             sourceText: draft.sourceText || "",
-            images: draft.images || [],
+            images: restoredImages,
           };
         });
       } catch (error) {
         logger.error("恢复草稿失败:", error);
-      }
+      } finally { setDraftHydrated(true); }
     };
 
     loadDraft();
@@ -105,7 +110,7 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
 
   // 自动保存当前输入和图片草稿
   useEffect(() => {
-    if (!browser?.storage?.local) return;
+    if (!browser?.storage?.local || !draftHydrated) return;
 
     const timeoutId = window.setTimeout(() => {
       const draft: PopupDraft = {
@@ -115,15 +120,17 @@ function App({ initialThemeMode = THEME_MODES.SYSTEM }: AppProps) {
       };
 
       const hasDraft = draft.sourceText.trim().length > 0 || draft.images.length > 0;
-      const action = hasDraft
-        ? browser.storage.local.set({ [DRAFT_STORAGE_KEY]: draft })
-        : browser.storage.local.remove(DRAFT_STORAGE_KEY);
-
-      action.catch((error: unknown) => logger.error("保存草稿失败:", error));
+      draftWriteQueue.current = draftWriteQueue.current.then(() => withImageStoreLock(async () => {
+        if (hasDraft) {
+          const images = await persistImages(draft.images);
+          await browser.storage.local.set({[DRAFT_STORAGE_KEY]: {...draft, images}});
+        } else await browser.storage.local.remove(DRAFT_STORAGE_KEY);
+        await collectUnusedImages(await browser.storage.local.get(null), await browser.storage.session?.get(null));
+      })).catch((error: unknown) => logger.error("保存草稿失败:", error));
     }, 300);
 
     return () => window.clearTimeout(timeoutId);
-  }, [translationState.sourceText, translationState.images]);
+  }, [translationState.sourceText, translationState.images, draftHydrated]);
 
   // 监听来自background script的消息
   useEffect(() => {

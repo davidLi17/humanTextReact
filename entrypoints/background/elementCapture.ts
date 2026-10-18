@@ -1,3 +1,4 @@
+import { encodeScreenshot } from "./screenshotEncoding";
 import { cropRect, MAX_ELEMENT_IMAGE_BYTES } from "../shared/elementSnapshot";
 import { formatImageBytes } from "../shared/elementImages";
 /** Never return/store the full viewport: only the selected, redacted crop leaves this function. */
@@ -86,7 +87,7 @@ export async function captureElement(
       );
     }
     const bytes = new Uint8Array(
-      await (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer(),
+      await (await encodeScreenshot(canvas)).arrayBuffer(),
     );
     if (bytes.length > MAX_ELEMENT_IMAGE_BYTES)
       throw new Error(`截图超过5MB：实际 ${formatImageBytes(bytes.length)}（${bytes.length} 字节），请选择更小的区域`);

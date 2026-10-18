@@ -1,3 +1,4 @@
+import { exportSessionImages } from "./imageStore";
 import { normalizeGenUiSessions } from "./genui/profile";
 import { ChatSession, getAssistantReadableContent } from "./chatTypes";
 import { formatDateTime } from "@/entrypoints/popup/utils/helpers";
@@ -149,8 +150,8 @@ export function formatSessionAsJson(session: ChatSession): string {
 /**
  * 触发会话的 JSON 文件下载
  */
-export function downloadSessionJsonFile(session: ChatSession): void {
-  const json = formatSessionAsJson(session);
+export async function downloadSessionJsonFile(session: ChatSession): Promise<void> {
+  const json = formatSessionAsJson((await exportSessionImages([session]))[0]);
   const blob = new Blob([json], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
