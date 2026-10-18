@@ -834,7 +834,6 @@ export default function SidePanelApp() {
         setSessions(hydration.sessions);
         setActiveSessionId(nextActiveSessionId);
         setWebReadingProgressMap(hydration.progressMap);
-        webReadingProgressHydratedRef.current = true;
         if (boundTabId !== undefined) {
           const draftKey = tabStateKey(boundTabId, "drafts");
           const storedDrafts = (await browser.storage.session.get(draftKey))[draftKey];
@@ -846,6 +845,7 @@ export default function SidePanelApp() {
           setPendingSelectionContext(draft.selectionContext);
           await browser.storage.session.set({ [tabStateKey(boundTabId, "active")]: nextActiveSessionId });
         }
+        webReadingProgressHydratedRef.current = true;
         setWebReadingProgressHydrated(true);
 
         if (hydration.sessionsChanged || hydration.progressNeedsRewrite || (boundTabId !== undefined && !snapshot.activeSessionId)) {
@@ -4717,6 +4717,8 @@ export default function SidePanelApp() {
               <textarea
                 ref={inputRef}
                 className="chat-textarea"
+                disabled={!webReadingProgressHydrated}
+                aria-busy={!webReadingProgressHydrated}
                 placeholder="输入追问、黑话术语或指令 (Enter 发送/排队，⌘+Enter 打断发送，Shift+Enter 换行)..."
                 value={inputText}
                 rows={2}
@@ -4765,7 +4767,7 @@ export default function SidePanelApp() {
                     <button
                       type="button"
                       className="send-btn"
-                      disabled={!inputText.trim()}
+                      disabled={!webReadingProgressHydrated || !inputText.trim()}
                       onClick={() => handleSendMessage()}
                     >
                       <Send theme="outline" size="16" />

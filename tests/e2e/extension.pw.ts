@@ -1440,25 +1440,49 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await expect.poll(async () => (await inspect(aid))?.text).toContain('已选0处');
   const setDraft = (text:string) => `(() => { const e=document.querySelector('.chat-input textarea,textarea[placeholder^="输入追问"]'); if(!e) throw Error('composer absent'); Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,${JSON.stringify(text)}); e.dispatchEvent(new Event('input',{bubbles:true})); return e.value; })()`;
   const draft = `document.querySelector('textarea[placeholder^="输入追问"]')?.value`;
-  await inspect(aid, setDraft('A 的未发送草稿'));
+  const composerReady = (id:number) => inspect(id, `document.querySelector('textarea.chat-textarea')?.disabled === false`);
+  const expectDraft = async (id:number, text:string) => {
+    await expect.poll(() => composerReady(id)).toBe(true);
+    await expect.poll(() => inspect(id,draft)).toBe(text);
+  };
+  const enterDraft = async (id:number, text:string) => {
+    await expect.poll(() => composerReady(id)).toBe(true);
+    await inspect(id,setDraft(text));
+    await expectDraft(id,text);
+    // Prove durability before switching, rather than only checking the DOM setter.
+    await expect.poll(() => control.evaluate(async ({id,text}) => {
+      const activeKey = `sidepanel_tab_${id}_active`;
+      const draftKey = `sidepanel_tab_${id}_drafts`;
+      const values = await (globalThis as any).chrome.storage.session.get([activeKey,draftKey]);
+      return values[draftKey]?.find(([sessionId]:any[]) => sessionId === values[activeKey])?.[1]?.inputText === text;
+    }, {id,text})).toBe(true);
+  };
+
+  await enterDraft(aid,'A 的未发送草稿');
   await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
   await b.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
   await c.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
-  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await expectDraft(aid,'A 的未发送草稿');
   await b.bringToFront(); await open(bid);
   await expect.poll(() => visible(bid)).toBe(true);
-  await inspect(bid,setDraft('B 的独立草稿'));
+  await enterDraft(bid,'B 的独立草稿');
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
-  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await expectDraft(aid,'A 的未发送草稿');
   await a.reload(); await expect.poll(() => visible(aid)).toBe(true);
-  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await expectDraft(aid,'A 的未发送草稿');
   await a.goto(`${harness.server.baseUrl}/long-article`); await expect.poll(() => visible(aid)).toBe(true);
   // Real user shortcut closes the native panel and persists disabled state.
   await open(aid);
   await expect.poll(() => visible(aid)).toBe(false);
   await b.bringToFront(); await expect.poll(() => visible(bid)).toBe(true);
-  expect(await inspect(bid,draft)).toBe('B 的独立草稿');
+  await expectDraft(bid,'B 的独立草稿');
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await c.bringToFront(); await expect.poll(() => visible(bid)).toBe(false);
+    await b.bringToFront(); await expectDraft(bid,'B 的独立草稿');
+  }
+  await open(bid); await expect.poll(() => visible(bid)).toBe(false);
+  await open(bid); await expectDraft(bid,'B 的独立草稿');
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(false);
   await open(aid); await expect.poll(() => visible(aid)).toBe(true);
   await expect.poll(() => inspect(aid,draft)).toBe('A 的未发送草稿');
@@ -1471,7 +1495,7 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await workerCdp.send('ServiceWorker.stopWorker', {versionId});
   await control.evaluate(() => (globalThis as any).chrome.runtime.sendMessage({action:'sidepanelTabId'}));
   await expect.poll(() => visible(aid)).toBe(true);
-  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
+  await expectDraft(aid,'A 的未发送草稿');
   await workerCdp.detach();
 
   const otherWindow = await control.evaluate(async url => (globalThis as any).chrome.windows.create({url,focused:true}), `${harness.server.baseUrl}/article?tab=D`);
@@ -1480,12 +1504,12 @@ test('native tab-specific sidepanel hides, restores and isolates composer state'
   await d.waitForLoadState(); await d.bringToFront(); await d.keyboard.press('Alt+s');
   const did = otherWindow.tabs[0].id;
   await expect.poll(() => visible(did)).toBe(true);
-  await inspect(did,setDraft('另一窗口的独立草稿'));
+  await enterDraft(did,'另一窗口的独立草稿');
   const aWindowId = tabs.find((tab:any) => tab.id === aid).windowId;
   await control.evaluate(async windowId => (globalThis as any).chrome.windows.update(windowId,{focused:true}), aWindowId);
   await a.bringToFront(); await expect.poll(() => visible(aid)).toBe(true);
-  expect(await inspect(aid,draft)).toBe('A 的未发送草稿');
-  expect(await inspect(did,draft)).toBe('另一窗口的独立草稿');
+  await expectDraft(aid,'A 的未发送草稿');
+  await expectDraft(did,'另一窗口的独立草稿');
   await d.close();
   // Closing a background configured tab must not discard the foreground panel.
   await b.close(); await expect.poll(() => visible(aid)).toBe(true);

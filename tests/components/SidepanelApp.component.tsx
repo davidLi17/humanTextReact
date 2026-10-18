@@ -368,7 +368,7 @@ function getReadCurrentPageButton() {
   });
 }
 
-const restoreGlobals = preserveGlobals("browser", "chrome");
+const restoreGlobals = preserveGlobals("browser", "chrome", "location", "navigator");
 let documentRootAttributes: {
   dataTheme: string | null;
   dataThemeMode: string | null;
@@ -401,6 +401,49 @@ afterEach(() => {
 });
 
 describe("Sidepanel App 真实 React 交互", () => {
+  test("标签页草稿恢复完成前禁止输入，恢复后输入并重开仍保留", async () => {
+    const session = createOngoingSession();
+    const mock = createBrowserMock({ sessions: [session] });
+    (mock.browser.tabs as any).get = async () => ({id:9,url:"https://example.com/b"});
+    const draftKey = "sidepanel_tab_9_drafts";
+    const activeKey = "sidepanel_tab_9_active";
+    const store: Record<string, any> = {
+      [activeKey]: session.id,
+      [draftKey]: [[session.id, {inputText:"B 的已存草稿", images:[]}]],
+    };
+    let release!: () => void;
+    const delayed = new Promise<void>(resolve => { release = resolve; });
+    let readingDraft = false;
+    (mock.browser.storage as any).session = {
+      async get(keys: string | string[]) {
+        if ((Array.isArray(keys) ? keys : [keys]).includes(draftKey)) {
+          readingDraft = true; await delayed;
+        }
+        return selectStoredValues(store, keys);
+      },
+      async set(items: Record<string, unknown>) { Object.assign(store, structuredClone(items)); },
+    };
+    setTestGlobal("browser", mock.browser);
+    setTestGlobal("location", {pathname:"/sidepanel.html", search:"?tabId=9"});
+    const testNavigator = Object.create(navigator);
+    Object.defineProperty(testNavigator,"locks",{value:{request:async (_name: string, fn: () => unknown) => await fn()}});
+    setTestGlobal("navigator", testNavigator);
+    const view = render(<SidePanelApp />);
+    await waitFor(() => expect(readingDraft).toBe(true));
+    const input = screen.getByPlaceholderText(/输入追问、黑话术语或指令/) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    await act(async () => { release(); await delayed; });
+    await waitFor(() => { expect(input.disabled).toBe(false); expect(input.value).toBe("B 的已存草稿"); });
+    fireEvent.change(input, {target:{value:"B 的独立草稿"}});
+    await waitFor(() => expect(store[draftKey][0][1].inputText).toBe("B 的独立草稿"));
+    view.unmount();
+    render(<SidePanelApp />);
+    await waitFor(() => {
+      const restored = screen.getByPlaceholderText(/输入追问、黑话术语或指令/) as HTMLTextAreaElement;
+      expect(restored.disabled).toBe(false); expect(restored.value).toBe("B 的独立草稿");
+    });
+  });
+
   test("发送输入，只接收当前 requestId 的流式更新，并在 done 后持久化", async () => {
     const mock = createBrowserMock();
     setTestGlobal("browser", mock.browser);
