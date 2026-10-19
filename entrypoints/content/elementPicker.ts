@@ -16,6 +16,8 @@ export class ElementPicker {
   private active = false;
   private locked: Element | null = null;
   private hovered: Element | null = null;
+  private pointer: { x: number; y: number } | undefined;
+  private layoutFrame = 0;
   private ancestors: Element[] = [];
   private marks = new Map<
     string,
@@ -69,8 +71,8 @@ export class ElementPicker {
     document.addEventListener("contextmenu", this.block, true);
     document.addEventListener("click", this.click, true);
     document.addEventListener("keydown", this.key, true);
-    window.addEventListener("scroll", this.refresh, true);
-    window.addEventListener("resize", this.refresh);
+    window.addEventListener("scroll", this.layout, true);
+    window.addEventListener("resize", this.layout);
     browser.runtime.onMessage.addListener(this.message);
     this.observer.observe(document.body, {
       subtree: true,
@@ -102,6 +104,20 @@ export class ElementPicker {
     for (const item of this.marks.values())
       if (!this.valid(item)) item.snapshot.invalid = true;
     this.render();
+  };
+  private layout = () => {
+    if (this.layoutFrame || this.composing || (!this.active && !this.marks.size)) return;
+    this.layoutFrame = requestAnimationFrame(() => {
+      this.layoutFrame = 0;
+      if (this.destroyed) return;
+      // Scrolling changes the hit under a stationary pointer. Geometry updates
+      // need no new text extraction; mutation/send validation keeps ownership.
+      if (this.active && !this.locked && this.pointer) {
+        const hit = document.elementFromPoint(this.pointer.x, this.pointer.y);
+        if (hit !== this.host) this.hovered = hit;
+      }
+      this.render();
+    });
   };
   private message = (req: any, _sender: any, reply: (r: any) => void) => {
     if (!req.action?.startsWith("element")) return false;
@@ -190,6 +206,7 @@ export class ElementPicker {
     }
   };
   private move = (e: PointerEvent) => {
+    this.pointer = { x: e.clientX, y: e.clientY };
     if (!this.active || this.locked || this.busy || this.own(e)) return;
     this.hovered = e.target instanceof Element ? e.target : null;
     this.render();
@@ -233,6 +250,9 @@ export class ElementPicker {
     const cursor = editing
       ? (this.ui.activeElement as HTMLTextAreaElement).selectionStart
       : 0;
+    const selectionEnd = editing
+      ? (this.ui.activeElement as HTMLTextAreaElement).selectionEnd
+      : 0;
     const draft = this.draft;
     this.ui.replaceChildren();
     const style = document.createElement("style");
@@ -240,7 +260,7 @@ export class ElementPicker {
 :host{all:initial;--bg:#fff;--surface:#f8fafc;--ink:#1e293b;--muted:#64748b;--line:#e2e8f0;--accent:#6366f1;font:13px/1.5 system-ui,sans-serif;color:var(--ink);color-scheme:light}
 @media(prefers-color-scheme:dark){:host{--bg:#18181b;--surface:#27272a;--ink:#f4f4f5;--muted:#a1a1aa;--line:#3f3f46;--accent:#a5b4fc;color-scheme:dark}}
 *{box-sizing:border-box}button,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:7px;padding:6px 9px;background:var(--bg);color:var(--ink)}button:hover{background:var(--surface)}button:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button:disabled{opacity:.45;cursor:default}
-.box{position:fixed;border:1px solid #818cf8;border-radius:3px;pointer-events:none;background:#6366f106}.focus{border:2px solid #6366f1;background:#6366f10c;box-shadow:0 0 0 2px #6366f115}.marked{border-color:transparent;background:transparent}.marked.focus{border:1px solid #818cf8;background:transparent;box-shadow:none}.dot{position:fixed;border:2px solid var(--bg);border-radius:50%;background:#6366f1!important;color:white;width:25px;height:25px;pointer-events:auto;padding:0;font-size:11px;font-weight:700;box-shadow:0 2px 6px #0002}
+.box{position:fixed;border:1px solid rgba(59,130,246,.6);border-radius:3px;pointer-events:none;background:rgba(96,165,250,.08)}.box.focus{background:rgba(96,165,250,.1)}.box.locked{border-color:rgba(37,99,235,.75);background:rgba(96,165,250,.16)}.marked{border-color:transparent;background:transparent}.marked.focus{border:1px solid rgba(59,130,246,.6);background:rgba(96,165,250,.1)}.selection-label{position:fixed;pointer-events:none;padding:3px 7px;border:1px solid rgba(59,130,246,.25);border-radius:5px;background:#eff6ff;color:#1d4ed8;font-size:11px;line-height:18px;white-space:nowrap}@media(prefers-color-scheme:dark){.selection-label{background:#172a46;color:#bfdbfe;border-color:#3b82f655}}.dot{position:fixed;border:2px solid var(--bg);border-radius:50%;background:#6366f1!important;color:white;width:25px;height:25px;pointer-events:auto;padding:0;font-size:11px;font-weight:700;box-shadow:0 2px 6px #0002}
 .menu,.bar,.mark-tip{position:fixed;pointer-events:auto;background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px #00000018;color:var(--ink)}.bar{right:12px;top:12px;padding:7px 8px 7px 12px;font-size:12px;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px)}.bar button{padding:4px 8px}.menu{width:320px;max-width:calc(100vw - 16px);max-height:calc(100vh - 70px);overflow:auto;padding:14px}.menu-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:650}.menu textarea{display:block;resize:vertical;width:100%;min-height:88px;max-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;color:var(--ink);background:var(--surface);margin-bottom:10px}.menu-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center}.menu-actions button{font-size:12px}.menu-actions .primary{background:#6366f1;color:#fff;border-color:#6366f1;grid-column:2;grid-row:3}.menu-actions .cancel{grid-column:1;grid-row:3;text-align:left;border-color:transparent;color:var(--muted)}p{margin:8px 0 0;font-size:12px;overflow-wrap:anywhere}[role=alert]{color:#e15b64}.help{position:relative;cursor:help;border:1px solid var(--line);border-radius:50%;width:18px;height:18px;text-align:center;font-size:11px;color:var(--muted)}.help span{display:none;position:absolute;right:0;top:24px;width:240px;padding:10px;background:var(--ink);color:var(--bg);border-radius:8px;font-weight:400;z-index:2}.help:hover span,.help:focus span{display:block}.mark-tip{display:none;width:280px;max-width:calc(100vw - 16px);padding:12px;font-size:12px;pointer-events:none;overflow-wrap:anywhere;white-space:pre-wrap}.mark-tip.visible{display:block}
 `;
     this.ui.append(style);
@@ -259,7 +279,7 @@ export class ElementPicker {
     };
     for (const item of this.marks.values()) {
       if (item.snapshot.invalid) continue;
-      const box = outline(item.element, this.focused === item.snapshot.id);
+      const box = outline(item.element, !this.locked && this.focused === item.snapshot.id);
       box.classList.add("marked");
       const dot = this.button(String(item.snapshot.number), () => {
         if (this.busy || this.submitting) return;
@@ -323,8 +343,26 @@ export class ElementPicker {
       );
       bar.querySelectorAll("button").forEach(b => b.disabled = this.busy || this.submitting);
       this.ui.append(bar);
+    }
+    if (this.active || this.locked) {
       const target = this.locked || this.hovered;
-      if (target?.isConnected) outline(target, true);
+      if (target?.isConnected) {
+        const box = outline(target, true);
+        if (this.locked) {
+          box.classList.add("locked");
+          const label = document.createElement("div");
+          label.className = "selection-label";
+          const kind = target.matches('table,thead,tbody,tfoot,tr,td,th') ? '表格'
+            : target.matches('pre,code') ? '代码'
+            : target.matches('img,svg,canvas') ? '图片'
+            : target.matches('h1,h2,h3,h4,h5,h6') ? '标题' : '区域';
+          label.textContent = `已选 · ${kind}`;
+          const r = this.rect(target);
+          label.style.left = Math.max(8, Math.min(innerWidth - 110, r.x)) + 'px';
+          label.style.top = Math.max(4, Math.min(innerHeight - 28, r.y >= 30 ? r.y - 28 : r.y + 4)) + 'px';
+          this.ui.append(label);
+        }
+      }
     }
     if (!this.locked && this.active && this.marks.size) {
       const pending = [...this.marks.values()].map(item => item.snapshot).filter(item => !item.sent);
@@ -442,7 +480,7 @@ export class ElementPicker {
       menu.style.top = Math.max(58, Math.min(innerHeight - height - 8, top)) + "px";
       if (editing) {
         input.focus();
-        input.setSelectionRange(cursor, cursor);
+        input.setSelectionRange(cursor, selectionEnd);
       }
     }
   }
@@ -621,6 +659,7 @@ export class ElementPicker {
   }
   destroy() {
     this.cancelPendingAsk();
+    cancelAnimationFrame(this.layoutFrame);
     this.destroyed = true;
     this.locked = null;
     this.observer.disconnect();
@@ -636,8 +675,8 @@ export class ElementPicker {
       document.removeEventListener(name, this.block, true);
     document.removeEventListener("click", this.click, true);
     document.removeEventListener("keydown", this.key, true);
-    window.removeEventListener("scroll", this.refresh, true);
-    window.removeEventListener("resize", this.refresh);
+    window.removeEventListener("scroll", this.layout, true);
+    window.removeEventListener("resize", this.layout);
     this.host.remove();
     this.marks.clear();
   }

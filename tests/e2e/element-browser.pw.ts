@@ -78,6 +78,15 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
       const result = (window as any).extractElementText(root); root.remove(); return result;
     });
     expect(bounded.truncated).toBe(true); expect(bounded.text.length).toBeLessThanOrEqual(8000);
+    const normalized = await content.evaluate(() => {
+      const el = document.createElement('article');
+      el.innerHTML = `<div><div><h2> 标题    内容 </h2></div></div>
+        <div><p> 摘要  继续阅读 </p></div><div><div> 赞同   3502 </div></div>
+        <div> 387 条评论 </div><div><div> 分享 </div></div>`;
+      document.body.append(el);
+      const result = (window as any).extractElementText(el); el.remove(); return result;
+    });
+    expect(normalized.text).toBe('标题 内容\n摘要 继续阅读\n赞同 3502\n387 条评论\n分享');
 
     await panel.goto(url + "/sidepanel.html?tabId=7");
     expect((await panel.locator(".element-marks").boundingBox())!.height).toBeLessThan(52);
@@ -89,7 +98,40 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
     await content.keyboard.press("Escape");
     await content.locator("#card h2").hover();
     await expect(content.locator(".box.focus")).toHaveCount(1);
+    await expect(content.locator('.box.focus')).toHaveCSS('background-color','rgba(96, 165, 250, 0.1)');
+    await expect(content.locator('.box.focus')).toHaveCSS('border-top-width','1px');
+    await expect(content.locator('.box.focus')).toHaveCSS('box-shadow','none');
+    await content.screenshot({path:testInfo.outputPath('soft-hover.png')});
+    // The pointer stays still while the page scrolls underneath it.
+    await content.evaluate(() => window.scrollTo(0, 100));
+    await expect.poll(() => content.evaluate(() => {
+      const box = document.querySelector('#humantext-element-picker')!.shadowRoot!.querySelector('.box.focus')!;
+      const target = document.elementFromPoint(230, 60);
+      return target?.tagName !== 'H2' && box.getBoundingClientRect().y !== document.querySelector('#card h2')!.getBoundingClientRect().y;
+    })).toBe(true);
+    await content.evaluate(() => window.scrollTo(0, 0));
+    await content.locator('#card h2').hover();
     await content.locator("#card h2").click();
+    await expect(content.locator('.selection-label')).toHaveText('已选 · 标题');
+    await expect(content.locator('.box.locked')).toHaveCSS('background-color','rgba(96, 165, 250, 0.16)');
+    await content.screenshot({path:testInfo.outputPath('soft-locked.png')});
+    await content.keyboard.press('Escape');
+    await content.locator('#card table').click();
+    await expect(content.locator('.selection-label')).toHaveText('已选 · 表格');
+    const selectedQuestion = content.getByPlaceholder('想问 AI 什么？');
+    await selectedQuestion.fill('保留鼠标选中的文字');
+    await selectedQuestion.evaluate((el:HTMLTextAreaElement)=>el.setSelectionRange(2,6));
+    const lockedDocumentTop = await content.locator('.box.locked').evaluate(el=>el.getBoundingClientRect().y+scrollY);
+    await content.evaluate(()=>window.scrollTo(0,20));
+    await expect.poll(()=>selectedQuestion.evaluate((el:HTMLTextAreaElement)=>[el.selectionStart,el.selectionEnd])).toEqual([2,6]);
+    await expect.poll(()=>content.evaluate((expectedTop)=>{
+      const box=document.querySelector('#humantext-element-picker')!.shadowRoot!.querySelector('.box.locked')!;
+      return Math.abs(box.getBoundingClientRect().y+scrollY-expectedTop)<1;
+    },lockedDocumentTop)).toBe(true);
+    await content.screenshot({path:testInfo.outputPath('soft-locked-table.png')});
+    await content.keyboard.press('Escape');
+    await content.evaluate(()=>window.scrollTo(0,0));
+    await content.locator('#card h2').click();
     await content.getByRole("button", { name: "扩大父级" }).click();
     await content.getByRole("button", { name: "返回上一层" }).click();
     await content.getByRole("button", { name: "扩大父级" }).click();
@@ -128,6 +170,9 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
       "const a = 1;\nconsole.log(a);",
     );
     await expect(panel.locator("pre")).not.toContainText("PRIVATE-FORM-VALUE");
+    const previewText = await panel.locator('pre').textContent();
+    expect(previewText).not.toMatch(/\n[ \t]*\n[ \t]*\n/);
+    expect(previewText).toContain('项目\t金额\n收入\t120');
     const inputRect = await content.locator("#secret").boundingBox();
     const cardRect = await content.locator("#card").boundingBox();
     const pixels = await panel.evaluate(
@@ -185,6 +230,7 @@ test("browser feature modules: selection, privacy crop, marks, send, restore and
       image_url: { url: image },
     });
     expect(JSON.stringify(sent)).toContain("比较收入");
+    expect(sent[0].content.find((part:any)=>part.type==='text').text).toContain(previewText!.replace('用户问题：解释表格和代码','用户问题：比较收入'));
 
     // Page editor saves/cancels without recapturing, and Enter uses the send action.
     const dot = content.locator('.dot').first();
