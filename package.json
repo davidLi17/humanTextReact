@@ -2,7 +2,7 @@
   "name": "human-language-translator",
   "description": "A browser extension that translates text from 行业黑话 to 让人易于理解的话",
   "private": true,
-  "version": "26.10.19.2",
+  "version": "26.10.25",
   "type": "module",
   "scripts": {
     "dev": "wxt",
