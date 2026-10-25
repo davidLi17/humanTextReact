@@ -1286,7 +1286,7 @@ test("GenUI normal request keeps text visible, persists local selection, and reg
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
-test("GenUI finalization renders omitted leaf children, survives reload and keeps text for a rejected chart", async ({harness},testInfo)=>{
+test("GenUI finalization survives reload and retains valid pairs from an incomplete chart", async ({harness},testInfo)=>{
   harness.server.genUiControl.omitLeafChildren=true;
   harness.server.genUiControl.toolOnly=true;
   const previewGate=harness.server.createGenUiPreviewGate();
@@ -1323,26 +1323,31 @@ test("GenUI finalization renders omitted leaf children, survives reload and keep
   await invalidGate.reached;
   await expect(page.getByLabel('交互讲解卡片').last()).toBeVisible();
   invalidGate.release();
-  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
+  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toHaveCount(0);
   await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
-  await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.at(-1)?.genUiWarning).toContain('图表分类数量与数值数量不一致');
+  await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.at(-1)?.status).toBe('completed');
   const after=await readGenUiSessions(page);
   const last=after[0].messages.at(-1)!;
   expect(last.status).toBe('completed');
   expect(last.genUi).toBeDefined();
-  expect(last.genUi!.spec.elements.chart).toBeUndefined();
+  expect(last.genUiWarning).toBeUndefined();
+  expect(last.genUi!.spec.elements.chart.props).toMatchObject({
+    categories: GENUI_FIXTURE.spec.elements.chart.props.categories.slice(0, 1),
+    series: [{ name: GENUI_FIXTURE.spec.elements.chart.props.series[0].name,
+      values: GENUI_FIXTURE.spec.elements.chart.props.series[0].values.slice(0, 1) }],
+  });
   expect(last.genUiPreview).toBeUndefined();
   expect(last.content).toContain('Button.tsx');
   await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toBeVisible();
-  await expect(page.locator(`[data-message-id="${last.id}"]`).locator('.genui-chart-canvas')).toHaveCount(0);
-  await page.screenshot({path:testInfo.outputPath('genui-invalid-chart-text.png'),fullPage:true});
+  await expect(page.locator(`[data-message-id="${last.id}"]`).locator('.genui-chart-canvas svg')).toBeVisible();
+  await page.screenshot({path:testInfo.outputPath('genui-recovered-chart.png'),fullPage:true});
   await page.reload();
-  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toBeVisible();
+  await expect(page.getByText(/图表分类数量与数值数量不一致/)).toHaveCount(0);
   await expect(page.locator(`[data-message-id="${last.id}"]`).getByLabel('交互讲解卡片')).toBeVisible();
   expect(harness.unexpectedExternalRequests).toEqual([]);
 });
 
-test("GenUI cancellation, retry, and truncation retain text while incomplete cards stay hidden",async({harness})=>{
+test("GenUI cancellation hides its preview while retry and truncation retain usable cards",async({harness})=>{
   const previewGate=harness.server.createGenUiPreviewGate();
   const page=await openGenUiSource(harness);
   const input=page.getByPlaceholder("输入追问、黑话术语或指令",{exact:false});
@@ -1360,11 +1365,13 @@ test("GenUI cancellation, retry, and truncation retain text while incomplete car
   harness.server.genUiControl.finish='truncated';
   await page.getByTitle(/重试生成|重新生成/).last().click();
   await expect.poll(()=>harness.server.modelRequests.length).toBe(2);
-  await expect(page.locator('main')).toContainText(/模型输出达到长度上限|生成出现错误/);
-  await expect(page.getByLabel('交互讲解卡片')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'停止生成',exact:false})).toHaveCount(0);
+  await expect(page.getByLabel('交互讲解卡片')).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(/模型输出达到长度上限|生成出现错误/);
   await expect(page.locator('main')).toContainText(GENUI_INTRO);
-  const failed=await readGenUiSessions(page);
-  expect(failed[0].messages.some(message=>message.genUi)).toBe(false);
+  await expect.poll(async()=>(await readGenUiSessions(page))[0]?.messages.at(-1)?.status).toBe('completed');
+  const retained=await readGenUiSessions(page);
+  expect(retained[0].messages.at(-1)?.genUi).toBeDefined();
   harness.server.genUiControl.finish='normal';
   await page.getByTitle(/重试生成|重新生成/).last().click();
   await expect(page.getByLabel('交互讲解卡片')).toBeVisible();
