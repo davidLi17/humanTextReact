@@ -111,7 +111,7 @@ test('automatic GenUI keeps a readable tool fallback when its card is invalid',a
   const argumentsText=JSON.stringify({...envelope,spec:{root:'missing',elements:{}}});
   mockStream(toolFrame({index:0,id:'call-1',type:'function',function:{name:'render_interactive_explanation',arguments:argumentsText}},'tool_calls'));
   expect(await TranslationService.translateText(autoParams,context())).toBe(envelope.fallbackText);
-  expect(updates.at(-1)).toMatchObject({content:envelope.fallbackText,done:true,genUiWarning:expect.stringContaining('交互内容结构未通过校验')});
+  expect(updates.at(-1)).toMatchObject({content:envelope.fallbackText,done:true,genUiWarning:undefined});
   expect(updates.at(-1).genUi).toBeUndefined();
 });
 
@@ -143,7 +143,7 @@ test('automatic chart tool with omitted leaf children survives final validation 
   expect(updates.at(-1).genUiWarning).toBeUndefined();
 });
 
-test('invalid final chart keeps readable preview text and explains the exact failure, never promotes a shortened chart', async () => {
+test('partially populated chart retains supplied data pairs alongside readable text', async () => {
   const value={version:1,spec:{root:'root',elements:{
     root:{type:'Card',props:{title:'季度比较'},children:['text','chart']},
     text:{type:'Text',props:{text:'第一季度收入较低，第二季度收入更高。'},children:[]},
@@ -154,20 +154,20 @@ test('invalid final chart keeps readable preview text and explains the exact fai
   mockStream(toolFrame({index:0,id:'chart-call',function:{name:'render_interactive_explanation',arguments:args}},'tool_calls'));
   const result=await TranslationService.translateText(autoParams,context());
   expect(result).toContain('第一季度收入较低，第二季度收入更高。');
-  expect(result).not.toContain('876543');
-  expect(updates.at(-1)).toMatchObject({done:true,genUiPending:false,genUiWarning:expect.stringContaining('图表分类数量与数值数量不一致')});
+  expect(result).toContain('876543');
+  expect(updates.at(-1)).toMatchObject({done:true,genUiPending:false,genUiWarning:undefined});
   expect(updates.at(-1).genUi?.spec.elements.text).toBeDefined();
-  expect(updates.at(-1).genUi?.spec.elements.chart).toBeUndefined();
+  expect(updates.at(-1).genUi?.spec.elements.chart).toMatchObject({props:{categories:['第一季度'],series:[{name:'收入',values:[876543]}]}});
   expect(updates.at(-1).error).toBeUndefined();
 });
 
-test('chart-only validation failure reports a chart error instead of model compatibility and never fabricates a card', async () => {
+test('chart-only mismatched arrays keep existing pairs without inventing values', async () => {
   const args=JSON.stringify({version:1,spec:{root:'chart',elements:{chart:{type:'Chart',props:{type:'line',categories:['一','二'],series:[{name:'数量',values:[1]}]},children:[]}}}});
   expect(createGenUiPreview(args,meta,'preview')).toBeDefined();
   mockStream(toolFrame({index:0,id:'chart-call',function:{name:'render_interactive_explanation',arguments:args}},'tool_calls'));
-  await expect(TranslationService.translateText(autoParams,context())).rejects.toThrow('图表分类数量与数值数量不一致');
-  expect(updates.at(-1).error).not.toContain('接口兼容性');
-  expect(updates.at(-1).genUi).toBeUndefined();
+  await TranslationService.translateText(autoParams,context());
+  expect(updates.at(-1).error).toBeUndefined();
+  expect(updates.at(-1).genUi.spec.elements.chart.props).toMatchObject({categories:['一'],series:[{name:'数量',values:[1]}]});
 });
 
 test('automatic GenUI stops collecting after tool arguments exceed its byte limit',async()=>{
@@ -349,4 +349,54 @@ test('source IDs, fingerprint and assistant ID use the shared 160-char safe iden
       expect(()=>validateGenUiRequest(candidate)).toThrow('交互解释请求参数无效');
     }
   }
+});
+
+for (const suffix of ['!', ',"fallbackText":"unfinished']) test(`streamed card survives malformed final suffix ${suffix}`, async () => {
+  const value = {version:1,spec:{root:'内容',elements:{'内容':{type:'Text',props:{text:'保留已展示内容'}}}}};
+  const prefix = JSON.stringify(value).slice(0,-1);
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    const chunks = [
+      toolFrame({index:0,id:'call-1',function:{name:'render_interactive_explanation',arguments:prefix}}),
+      toolFrame({index:0,function:{arguments:suffix}},'tool_calls'),
+    ];
+    return new Response(new ReadableStream({pull(controller) {
+      const chunk = chunks.shift();
+      if (chunk) controller.enqueue(new TextEncoder().encode(chunk)); else controller.close();
+    }}));
+  }) as unknown as typeof fetch;
+  expect(await TranslationService.translateText(autoParams,context())).toContain('保留已展示内容');
+  expect(updates.some(update => update.genUiPreview)).toBe(true);
+  const final = updates.at(-1);
+  expect(final).toMatchObject({done:true,genUiPending:false});
+  expect(final.genUi.spec).toEqual(updates.find(update => update.genUiPreview).genUiPreview.spec);
+  expect(normalizeGenUiAttachment(final.genUi)).toBeDefined();
+  expect(final.error).toBeUndefined(); expect(final.genUiWarning).toBeUndefined();
+  expect(calls).toBe(1);
+});
+
+test('regeneration uses only its own preview and never resurrects the preceding card', async () => {
+  const value = {version:1,spec:{root:'text',elements:{text:{type:'Text',props:{text:'第一次卡片'}}}}};
+  mockStream(toolFrame({index:0,id:'first',function:{name:'render_interactive_explanation',arguments:JSON.stringify(value)}},'tool_calls'));
+  await TranslationService.translateText(autoParams,context());
+  expect(updates.at(-1).genUi).toBeDefined();
+  mockStream(frame('重新生成的文字','stop'));
+  expect(await TranslationService.translateText(autoParams,context())).toBe('重新生成的文字');
+  expect(updates.at(-1).genUi).toBeUndefined();
+});
+
+test('manual regeneration recovers incomplete JSON and missing fallback', async () => {
+  const value = {version:1,spec:{root:'text',elements:{text:{type:'Text',props:{text:'可用的重新讲解'}}}}};
+  mockStream(frame(JSON.stringify(value).slice(0,-1),'stop'));
+  expect(await TranslationService.translateText(params,context())).toBe('可用的重新讲解');
+  expect(updates.at(-1).genUi.spec.elements.text.props.text).toBe('可用的重新讲解');
+});
+
+for (const finishReason of ['stop', 'length']) test(`usable tool preview survives provider finish reason ${finishReason}`, async () => {
+  const args = JSON.stringify({version:1,spec:{root:'text',elements:{text:{type:'Text',props:{text:'已有内容'}}}}}).slice(0,-1);
+  mockStream(toolFrame({index:0,id:'call',function:{name:'render_interactive_explanation',arguments:args}},finishReason));
+  expect(await TranslationService.translateText(autoParams,context())).toBe('已有内容');
+  expect(updates.at(-1).genUi.spec.elements.text.props.text).toBe('已有内容');
+  expect(updates.at(-1).error).toBeUndefined();
 });

@@ -2320,6 +2320,31 @@ describe("Sidepanel GenUI request lifecycle", () => {
     expect(followUp.autoGenUi).toBeUndefined();
     expect(followUp.messages.find((message: any) => message.role === "assistant" && message.content.includes("Button.tsx"))?.content).toContain("目录里的 Button.tsx 是按钮组件。");
   });
+  test("promoted preview persists after completion and regeneration ignores the old request", async () => {
+    const pending = createDeferred<any>();
+    const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });
+    setTestGlobal("browser", mock.browser);
+    render(<SidePanelApp />);
+    await askQuestion();
+    const request = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(1); return getTranslateMessages(mock)[0]; });
+    const complete = terminal(request);
+    act(() => mock.emitRuntimeMessage({ ...complete, done: false, genUi: undefined, genUiPreview: complete.genUi, genUiPending: true }));
+    expect(await screen.findByLabelText("交互讲解卡片")).toBeTruthy();
+    act(() => mock.emitRuntimeMessage(complete));
+    await act(async () => { pending.resolve({ success: true }); });
+    await waitFor(() => {
+      const stored = (mock.localStore.sidepanel_chat_sessions as any[])[0].messages.at(-1);
+      expect(stored.genUi.spec).toEqual(complete.genUi.spec);
+      expect(stored.genUiPreview).toBeUndefined();
+    });
+    fireEvent.click(screen.getAllByTitle("重新生成回答").at(-1)!);
+    const replacement = await waitFor(() => { expect(getTranslateMessages(mock)).toHaveLength(2); return getTranslateMessages(mock)[1]; });
+    act(() => mock.emitRuntimeMessage({ ...complete, content: "过期的最终回复" }));
+    expect(screen.queryByText("过期的最终回复")).toBeNull();
+    act(() => mock.emitRuntimeMessage({ ...terminal(replacement), genUi: undefined, content: "新的文字回答" }));
+    expect(await screen.findByText("新的文字回答")).toBeTruthy();
+    expect(screen.queryByLabelText("交互讲解卡片")).toBeNull();
+  });
   test("stopping ignores late cards and retry remains an automatic normal conversation request", async () => {
     const pending = createDeferred<any>();
     const mock = createBrowserMock({ sessions: [createOngoingSession()], activeSessionId: "ongoing-session", runtimeSendMessage: (message) => message.responseMode ? pending.promise : { success: true } });

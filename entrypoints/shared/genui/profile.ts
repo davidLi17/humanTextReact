@@ -1,4 +1,4 @@
-import { componentSchemas, idSchema } from './catalog';
+import { componentSchemas, idSchema, presentationIdSchema } from './catalog';
 import type { ExplanationElement, ExplanationSpec, GenUiAttachment, GenUiRequestIntent } from './types';
 
 export const MAX_GENUI_BYTES = 65_536;
@@ -66,11 +66,62 @@ export function normalizeGeneratedProps(type: string, value: unknown, defaults =
   return props;
 }
 
-/** Finalize complete model JSON component by component, never a shortened preview. */
-export function recoverGeneratedExplanationSpec(value: unknown): { spec: ExplanationSpec; warnings: string[] } {
+/** Keep usable items; presentation mistakes must not invalidate sibling content. */
+function recoverGeneratedProps(type: string, value: unknown, defaults: boolean): unknown {
+  const props = normalizeGeneratedProps(type, value, defaults) as Record<string, any>;
+  if (!props || typeof props !== 'object') return props;
+  const fields = { TreeInspector: 'nodes', ConceptTabs: 'tabs', StepViewer: 'steps', CompareTable: 'columns' } as const;
+  const field = fields[type as keyof typeof fields];
+  if (field && Array.isArray(props[field])) {
+    const schema = (componentSchemas as any)[type].shape[field].element;
+    const seen = new Set<string>();
+    props[field] = props[field].filter((item: unknown) => {
+      const parsed = schema.safeParse(item);
+      if (!parsed.success || seen.has(parsed.data.id)) return false;
+      seen.add(parsed.data.id);
+      return true;
+    });
+  }
+  if (type === 'TreeInspector' && Array.isArray(props.nodes)) {
+    // Keep the first rooted, connected tree, skipping orphaned/cyclic branches.
+    const root = props.nodes.find((node: any) => node.parentId === null);
+    const connected = new Set<string>(root ? [root.id] : []);
+    for (let i = 0; i < props.nodes.length; i++) {
+      for (const node of props.nodes) if (connected.has(node.parentId)) connected.add(node.id);
+    }
+    props.nodes = props.nodes.filter((node: any) => connected.has(node.id));
+  }
+  if (type === 'CompareTable' && Array.isArray(props.columns) && Array.isArray(props.rows)) {
+    const seen = new Set<string>();
+    props.rows = props.rows.flatMap((row: any) => {
+      if (!row || !presentationIdSchema.safeParse(row.id).success || seen.has(row.id)) return [];
+      seen.add(row.id);
+      const cells = Object.fromEntries(props.columns.map((column: any) =>
+        [column.id, typeof row.cells?.[column.id] === 'string' ? row.cells[column.id] : '']));
+      const parsed = componentSchemas.CompareTable.shape.rows.element.safeParse({ id: row.id, cells });
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+  if (type === 'Chart' && Array.isArray(props.categories) && Array.isArray(props.series)) {
+    const series = props.series.filter((entry: any) => entry && typeof entry.name === 'string' && Array.isArray(entry.values) && entry.values.length);
+    const selected = props.type === 'pie' ? series.slice(0, 1) : series;
+    // Preserve supplied category/value pairs only; never pad or invent numeric data.
+    const indices = props.categories.flatMap((category: unknown, index: number) =>
+      componentSchemas.Chart.shape.categories.element.safeParse(category).success && selected.length &&
+      selected.every((entry: any) => componentSchemas.Chart.shape.series.element.shape.values.element.safeParse(entry.values[index]).success &&
+        (props.type !== 'pie' || entry.values[index] >= 0)) ? [index] : []);
+    props.categories = indices.map((index: number) => props.categories[index]);
+    props.series = selected.map((entry: any) => ({ name: entry.name, values: indices.map((index: number) => entry.values[index]) }));
+  }
+  return props;
+}
+
+/** Normalize generated presentation data before applying the data-only boundary. */
+export function recoverGeneratedExplanationSpec(value: unknown, defaults = true): { spec: ExplanationSpec; warnings: string[] } {
   assertSafeJson(value);
   if (jsonByteLength(value) > MAX_GENUI_BYTES) fail();
-  const raw = object(value, ['root', 'elements']);
+  const raw = value as Record<string, any>;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail();
   const source = object(raw.elements, Object.keys(raw.elements || {}));
   const entries = Object.entries(source);
   if (!entries.length || entries.length > 100) fail();
@@ -89,7 +140,7 @@ export function recoverGeneratedExplanationSpec(value: unknown): { spec: Explana
       const element = entry as Record<string, any>;
       const name = names.get(key)!;
       const standalone = validateExplanationSpec({ root: name, elements: { [name]: {
-        type: element.type, props: normalizeGeneratedProps(element.type, element.props), children: [],
+        type: element.type, props: recoverGeneratedProps(element.type, element.props, defaults), children: [],
       } } });
       const children = element.type === 'Card' && Array.isArray(element.children)
         ? element.children.filter((child: unknown): child is string => typeof child === 'string').map((child: string) => names.get(child) || child) : [];
@@ -216,11 +267,11 @@ export function normalizeGenUiAttachment(value: unknown): GenUiAttachment | unde
         const clean: NonNullable<GenUiAttachment['viewState']>[string] = {};
         if (entry.selectedNodeId !== undefined) {
           if (element.type !== 'TreeInspector' || !element.props.nodes.some(node => node.id === entry.selectedNodeId)) fail();
-          clean.selectedNodeId = id(entry.selectedNodeId);
+          clean.selectedNodeId = presentationIdSchema.parse(entry.selectedNodeId);
         }
         if (entry.activeTabId !== undefined) {
           if (element.type !== 'ConceptTabs' || !element.props.tabs.some(tab => tab.id === entry.activeTabId)) fail();
-          clean.activeTabId = id(entry.activeTabId);
+          clean.activeTabId = presentationIdSchema.parse(entry.activeTabId);
         }
         if (entry.step !== undefined) {
           if (element.type !== 'StepViewer' || !Number.isInteger(entry.step) || entry.step < 0 || entry.step >= element.props.steps.length) fail();

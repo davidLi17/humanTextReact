@@ -109,6 +109,7 @@ export class GenUiOutputBuffer {
     try {
       const parsed = parseGeneratedUiEnvelope(this.raw, true);
       const metadata = validateGenUiRequest(request);
+      parsed.fallbackText ||= readableSpecSummary(parsed.spec);
       const candidate: GenUiAttachment = {
         id: attachmentId,
         protocolVersion: 1,

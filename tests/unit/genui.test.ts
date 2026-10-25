@@ -29,10 +29,22 @@ describe('usable final model components', () => {
       orphan:{type:'ConceptTabs',props:{tabs:[{id:'a',label:'概念',content:'独立内容'}]}},
       chart:{type:'Chart',props:{type:'bar',categories:['甲','乙'],series:[{name:'数据',values:[7]}]}},
     }});
-    expect(result.spec.elements.root.children).toEqual(['text','orphan']);
-    expect(result.spec.elements.chart).toBeUndefined();
-    expect(result.warnings.join('；')).toContain('图表分类数量与数值数量不一致');
+    expect(result.spec.elements.root.children).toEqual(['text','chart','orphan']);
+    expect(result.spec.elements.chart).toMatchObject({props:{categories:['甲'],series:[{name:'数据',values:[7]}]}});
+    expect(result.warnings.join('；')).toContain('组件引用已省略');
     expect(normalizeGenUiAttachment({...attachment(),spec:result.spec})?.spec).toEqual(result.spec);
+  });
+  test('skips broken items, tree branches and table cells without losing usable siblings', () => {
+    const result = recoverGeneratedExplanationSpec({root:'卡片 key',elements:{
+      '卡片 key':{type:'Card',children:['steps','tree','table']},
+      steps:{type:'StepViewer',props:{steps:[{id:'步骤 一',title:'可读步骤',description:'保留'},null,{id:'bad'}]}},
+      tree:{type:'TreeInspector',props:{nodes:[{id:'根',label:'根',parentId:null},{id:'子',label:'子',parentId:'根'},{id:'bad',label:'坏引用',parentId:'missing'}]}},
+      table:{type:'CompareTable',props:{columns:[{id:'列 一',label:'列'}],rows:[{id:'行 一',cells:{'列 一':'内容',extra:'忽略'}},{id:'行 二',cells:{}}]}},
+    }});
+    expect(result.spec.elements.steps.props).toEqual({steps:[{id:'步骤 一',title:'可读步骤',description:'保留'}]});
+    expect(result.spec.elements.tree.props).toMatchObject({nodes:[{id:'根'},{id:'子'}]});
+    expect(result.spec.elements.table.props).toMatchObject({rows:[{id:'行 一',cells:{'列 一':'内容'}},{id:'行 二',cells:{'列 一':''}}]});
+    expect(normalizeGenUiAttachment({...attachment(),spec:result.spec})).toBeDefined();
   });
   test('keeps the data-only boundary and rejects unsafe JSON even when a valid sibling exists', () => {
     const result = recoverGeneratedExplanationSpec({root:'root',elements:{
