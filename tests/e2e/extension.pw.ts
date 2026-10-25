@@ -1332,9 +1332,9 @@ test("GenUI finalization survives reload and retains valid pairs from an incompl
   expect(last.genUi).toBeDefined();
   expect(last.genUiWarning).toBeUndefined();
   expect(last.genUi!.spec.elements.chart.props).toMatchObject({
-    categories: GENUI_FIXTURE.spec.elements.chart.props.categories.slice(0, 1),
+    categories: GENUI_FIXTURE.spec.elements.chart.props.categories.slice(0, -1),
     series: [{ name: GENUI_FIXTURE.spec.elements.chart.props.series[0].name,
-      values: GENUI_FIXTURE.spec.elements.chart.props.series[0].values.slice(0, 1) }],
+      values: GENUI_FIXTURE.spec.elements.chart.props.series[0].values.slice(0, -1) }],
   });
   expect(last.genUiPreview).toBeUndefined();
   expect(last.content).toContain('Button.tsx');
